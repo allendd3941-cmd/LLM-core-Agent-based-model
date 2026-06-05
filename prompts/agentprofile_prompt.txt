@@ -1,43 +1,36 @@
-請依照以下 JSON 結構，生成 100 個交通模擬用 agent profile。
+請生成 10 個用於「台南市亞太棒球場球賽進出場尖峰人潮短期交通衝擊評估」的交通模擬 agents。
 
-重要規則：
-1. 最外層必須是一個 JSON object，只能包含一個欄位：agents。
-2. agents 必須是一個 JSON array，array 中必須包含指定數量的 agent object。
-3. 每個 agent object 只能包含三個欄位：identity、traits、memory。
-4. 所有欄位的 value 都必須用自然語言形式儲存，不要只放代碼、數字或縮寫。
-5. identity 裡除了 residential_location 欄位以外，每個欄位都請用一句或一個清楚的、十個字以內的自然語言片語描述。
-6. traits 裡的attitudes、habits、decision_making_tendencies跟economic_preferences_and_tradeoffs欄位都請用一句或一個清楚的、十個字以內的自然語言片語描述。
-7. memory 目前先留空，short_term_memory 與 long_term_memory 都必須是空 array。
-8. 請生成與「台南市亞太棒球場球賽進出場尖峰人潮短期交通衝擊評估」相關的 agent。
-9. 每個 agent 要具有差異性，可以包含球賽觀眾、一般通勤者、附近居民、接送者、場館工作人員、接送親友者、周邊商家員工等，但不要新增欄位標示類型，只能透過 identity 與 traits 的自然語言內容表達。
-10. 請只輸出合法 JSON，不要輸出任何解釋、註解、markdown 或 JSON 以外的文字。
-11. identity 裡的 residential_location 欄位值請生成一個台灣台南市內的鄉鎮市區，格式例如:"安平區"。
-12. identity 裡的 name 欄位值請生成一個中文名稱，格式例如:"黃俊祺"。
-13. 請多次確認是否有生成正確、足夠且符合要求的數量的 agents。
+輸出規則：
+1. 只輸出合法 JSON，不要解釋、註解或 markdown，請輸出具備換行與縮排的巢狀 JSON，不要壓縮成單行。。
+2. 最外層只能是一個 JSON object，且只包含一個欄位 "agents"。
+3. "agents" 必須是 JSON array，內含 10 個 agent object。
+4. 每個 agent object 只能包含 "identity" 與 "traits" 兩個欄位。
+5. 每個 value 都必須是自然語言，不要只放代碼、數字或縮寫。
+6. 除 residential_location 外，identity 各欄位請用十個字以內的中文片語描述。
+7. residential_location 請填台南市實際存在的行政區，例如「安平區」。
+8. name 請填中文姓名，例如「黃俊祺」。
+9. traits 中 attitudes、habits、decision_making_tendencies、economic_preferences_and_tradeoffs 各欄位皆為 array，內容請用十個字以內的中文片語描述。
+10. agents 需具差異性，可包含球賽觀眾、通勤者、附近居民、接送者、場館工作人員、親友接送者、周邊商家員工等，但不得新增類型欄位，只能透過 identity 與 traits 表現差異。
+11. "vehicle_ownership"的值只能為「機車」或「汽車」。
 
-輸出必須完全符合以下結構：
+輸出結構範例如下：
 
 {
   "agents": [
     {
       "identity": {
-        "name": "",
-        "age": "",
-        "occupation": "",
-        "wage": "",
-        "household_income": "",
-        "vehicle_ownership": "",
-        "residential_location": ""
+        "name": "黃俊祺",
+        "age": "二十歲左右",
+        "occupation": "大學生",
+        "wage": "每月打工四萬",
+        "vehicle_ownership": "機車",
+        "residential_location": "安平區"
       },
       "traits": {
-        "attitudes": [],
-        "habits": [],
-        "decision_making_tendencies": [],
-        "economic_preferences_and_tradeoffs": []
-      },
-      "memory": {
-        "short_term_memory": [],
-        "long_term_memory": []
+        "attitudes": ["願意遵守交通規則"],
+        "habits": ["習慣提早到球場"],
+        "decision_making_tendencies": ["常依現場人潮調整"],
+        "economic_preferences_and_tradeoffs": ["偏好省錢停車選擇"]
       }
     }
   ]

@@ -8,7 +8,7 @@ active mode包含五種如下，請依據各個agent不同的性質、旅行記�
 "short_distance"       // 想走短一點
 
 agent name為每個agent的名字，請根據"agent profile資料"的name值去對應生成，不許有漏掉。
-vehicle_type根據"agent profile資料"的"vehicle_ownership"值去對應生成，不許有漏掉。
+vehicle_type根據"agent profile資料"的"vehicle_ownership"值去對應生成，不許有漏掉，且只能有"機車"或"汽車"兩種值。
 decision-making 結果輸出必須完全符合以下結構，除此結構內容外，禁止產生其餘文字內容：
 {
   "agents": [
