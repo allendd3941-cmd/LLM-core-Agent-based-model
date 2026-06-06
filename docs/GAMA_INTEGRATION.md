@@ -16,7 +16,7 @@ Method: POST
 The corresponding FastAPI command is:
 
 ```bash
-uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+PYTHONPATH=src uvicorn llm_server.server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ## Request Lifecycle

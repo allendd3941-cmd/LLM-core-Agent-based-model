@@ -2,16 +2,17 @@ from pathlib import Path
 from fastapi import FastAPI
 from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
-from agent_profile import run_agent_profile
-from perception import run_perception
-from decision_making import run_decision_making
-from od_converter import convert_to_od_csv
+from .agent_profile import run_agent_profile
+from .perception import run_perception
+from .decision_making import run_decision_making
+from .od_converter import convert_to_od_csv
 
 BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_PATH = BASE_DIR / "output" 
+# pipeline 已移入 src/llm_server/；output 仍寫在專案根目錄的 output/（BASE_DIR 上溯三層）。
+OUTPUT_PATH = BASE_DIR.parent.parent / "output"
 AGENT_PROFILE_DIR = OUTPUT_PATH / "agent_profile_output_1.txt"
 
-#uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+#uvicorn llm_server.server:app --host 127.0.0.1 --port 8000 --reload
 #檔名:伺服器名 -> server:app
 app = FastAPI()
 

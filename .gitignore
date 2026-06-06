@@ -20,8 +20,14 @@ __pycache__
 output/
 *.log
 
+#OSMnx HTTP 快取（路網下載時產生；bundle 的 data/tainan_roads.graphml 才需 commit）
+cache/
+
 #編輯器與系統檔
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+#Claude Code 本機個人設定
+.claude/

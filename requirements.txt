@@ -38,3 +38,17 @@ uuid_utils==0.14.1
 uvicorn==0.46.0
 xxhash==3.7.0
 zstandard==0.25.0
+
+# ── Python-native ABM 模擬器（src/llm_abm_simulator）所需 ─────────────
+# GIS 與路網
+geopandas>=0.14
+shapely>=2.0
+pyproj>=3.6
+networkx>=3.2
+# 一次性下載真實 OSM 路網用（執行 python -m llm_abm_simulator.spatial.build_roads）；
+# bundle 的 data/tainan_roads.graphml 已 commit，平時執行 demo 不需要 osmnx。
+osmnx>=1.9
+# web demo（WebSocket）
+websockets>=12.0
+# 測試
+pytest>=8.0

@@ -1,15 +1,15 @@
 from pathlib import Path
-from timer import time_counter
+from .timer import time_counter
 import requests
-from llm_config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_MODE
-from output_engine import output_process
+from .llm_config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_MODE
+from .output_engine import output_process
 
 BASE_DIR = Path(__file__).resolve().parent
 FILE_NAME = Path(__file__).stem
 
 SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system_prompt.txt"
 USER_PROMPT_PATH = BASE_DIR / "prompts" / "perception_prompt.txt"
-OUTPUT_PATH = BASE_DIR / "output" 
+OUTPUT_PATH = BASE_DIR.parent.parent / "output"
 
 with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()

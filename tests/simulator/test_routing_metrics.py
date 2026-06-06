@@ -1,0 +1,61 @@
+"""routing 與 metrics 的單元測試（用 synthetic 小路網，不依賴 OSM/網路）。"""
+
+from __future__ import annotations
+
+import dataclasses
+
+from llm_abm_simulator.config import DEFAULT_CONFIG
+from llm_abm_simulator.domain.agent import VehicleAgent
+from llm_abm_simulator.simulation import metrics
+from llm_abm_simulator.spatial import routing
+from llm_abm_simulator.spatial.road_network import build_synthetic_graph, _wrap
+
+
+def _synthetic_network():
+    cfg = dataclasses.replace(DEFAULT_CONFIG, synthetic_grid_size=5)
+    return _wrap(build_synthetic_graph(cfg))
+
+
+def test_find_path_connected():
+    net = _synthetic_network()
+    nodes = list(net.graph.nodes())
+    path = routing.find_path(net, nodes[0], nodes[-1])
+    assert len(path) >= 2
+    assert path[0] == nodes[0] and path[-1] == nodes[-1]
+
+
+def test_find_path_same_node():
+    net = _synthetic_network()
+    n = list(net.graph.nodes())[0]
+    assert routing.find_path(net, n, n) == [n]
+
+
+def test_find_path_unknown_node():
+    net = _synthetic_network()
+    n = list(net.graph.nodes())[0]
+    assert routing.find_path(net, n, "does_not_exist") == []
+
+
+def test_path_length_positive():
+    net = _synthetic_network()
+    nodes = list(net.graph.nodes())
+    path = routing.find_path(net, nodes[0], nodes[-1])
+    assert routing.path_length_m(net, path) > 0
+
+
+def test_overall_environment_counts():
+    net = _synthetic_network()
+    roads = net.all_roads()
+    roads[0].update_flow(20, 10.0, 2.0)   # 製造一條壅塞道路
+    env = metrics.overall_environment(roads, DEFAULT_CONFIG, agent_count=3)
+    assert env["active_road_count"] >= 1
+    assert env["crowded_road_count"] >= 1
+    assert env["average_congestion_proxy"] > 0
+
+
+def test_distributions():
+    a1 = VehicleAgent.from_config("v1", DEFAULT_CONFIG); a1.active_mode = "fast"
+    a2 = VehicleAgent.from_config("v2", DEFAULT_CONFIG); a2.active_mode = "fast"
+    mode, status = metrics.distributions([a1, a2])
+    assert mode["fast"] == 2
+    assert sum(status.values()) == 2

@@ -1,0 +1,132 @@
+/* ================================================================
+   臺南交通 ABM 模擬器 — 深色設計系統
+   ================================================================ */
+:root {
+  --bg: #0d1117;
+  --bg-soft: #161b22;
+  --card: #1b2230;
+  --card-2: #222b3a;
+  --border: #2d3748;
+  --text: #e6edf3;
+  --text-dim: #93a1b3;
+  --accent: #3fb6ff;
+  --accent-2: #6ee7b7;
+  --danger: #ff6b6b;
+  --green: #00c853;
+  --yellow: #ffd600;
+  --orange: #ff6d00;
+  --red: #d50000;
+  --radius: 12px;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Top bar ─────────────────────────────────────────────── */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.logo { font-size: 28px; }
+.topbar h1 { font-size: 18px; font-weight: 700; }
+.subtitle { font-size: 12px; color: var(--text-dim); }
+.conn { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot-on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.dot-off { background: var(--danger); }
+
+/* ── Layout ─────────────────────────────────────────────── */
+.layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 300px 1fr 340px;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+.panel { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+.card h2 { font-size: 14px; margin-bottom: 12px; color: var(--accent); letter-spacing: .5px; }
+
+/* ── Controls ─────────────────────────────────────────────── */
+.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.btn {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: .15s;
+}
+.btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+.btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+.btn-primary { background: linear-gradient(135deg, #2b6cb0, #3fb6ff); border: none; font-weight: 600; }
+.btn-danger { border-color: var(--danger); color: #ffb4b4; }
+
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-size: 13px; color: var(--text-dim); }
+.field b { color: var(--text); }
+.field input[type=range] { width: 100%; accent-color: var(--accent); }
+.toggle { gap: 8px; }
+.seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg-btn { flex: 1; padding: 8px; background: var(--card-2); color: var(--text-dim); border: none; cursor: pointer; font-size: 13px; }
+.seg-btn.active { background: var(--accent); color: #06121f; font-weight: 700; }
+.hint { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin-top: 6px; }
+
+/* ── Stats ─────────────────────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { background: var(--card-2); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 3px; }
+.stat span { font-size: 11px; color: var(--text-dim); }
+.stat b { font-size: 16px; }
+
+.inspect { font-size: 12px; line-height: 1.7; color: var(--text-dim); }
+.inspect b { color: var(--text); }
+.inspect .row { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border); padding: 2px 0; }
+
+/* ── Map ─────────────────────────────────────────────── */
+.map-wrap { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+#map { width: 100%; height: 100%; background: #0a0e14; }
+.legend {
+  position: absolute; bottom: 12px; left: 12px; z-index: 500;
+  background: rgba(20, 26, 36, .9); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;
+}
+.legend div { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.lg { width: 14px; height: 5px; border-radius: 3px; display: inline-block; }
+.lg-green { background: var(--green); } .lg-yellow { background: var(--yellow); }
+.lg-orange { background: var(--orange); } .lg-red { background: var(--red); }
+.lg-dest { background: #ff3b3b; border-radius: 50%; width: 10px; height: 10px; }
+
+/* ── Toast ─────────────────────────────────────────────── */
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--card-2); border: 1px solid var(--accent); color: var(--text);
+  padding: 10px 18px; border-radius: 10px; font-size: 13px; opacity: 0; transition: .3s; pointer-events: none; z-index: 1000;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Leaflet popup 深色 */
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--card-2); color: var(--text); }

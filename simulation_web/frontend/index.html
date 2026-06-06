@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>臺南交通 ABM 模擬器 · LLM 決策 Demo</title>
+
+  <!-- Leaflet 地圖 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Chart.js 圖表 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="index.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚾</span>
+      <div>
+        <h1>臺南交通 ABM 模擬器</h1>
+        <p class="subtitle">Python-native 交通 Agent-Based Model · LLM / Mock 決策 · 亞太棒球場情境</p>
+      </div>
+    </div>
+    <div class="conn">
+      <span id="conn-dot" class="dot dot-off"></span>
+      <span id="conn-text">連線中…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- 左：控制面板 -->
+    <aside class="panel panel-left">
+      <section class="card">
+        <h2>模擬控制</h2>
+        <div class="btn-row">
+          <button id="btn-start" class="btn btn-primary">▶ 開始</button>
+          <button id="btn-pause" class="btn">⏸ 暫停</button>
+          <button id="btn-step" class="btn">⏭ 單步</button>
+          <button id="btn-reset" class="btn btn-danger">🔄 重設</button>
+        </div>
+
+        <label class="field">
+          <span>速度 <b id="speed-val">1.0×</b></span>
+          <input id="speed" type="range" min="0.5" max="5" step="0.5" value="1" />
+        </label>
+
+        <label class="field">
+          <span>Agent 數量 <b id="agents-val">10</b></span>
+          <input id="agents" type="range" min="5" max="80" step="5" value="10" />
+        </label>
+
+        <div class="field toggle">
+          <span>決策模式</span>
+          <div class="seg">
+            <button id="mode-mock" class="seg-btn active">Mock</button>
+            <button id="mode-llm" class="seg-btn">LLM</button>
+          </div>
+        </div>
+        <p class="hint" id="mode-hint">Mock：確定性規則，即時流暢。LLM：呼叫 /from-gama（需 Ollama）。</p>
+      </section>
+
+      <section class="card">
+        <h2>模擬狀態</h2>
+        <div class="stat-grid">
+          <div class="stat"><span>週期</span><b id="m-cycle">0 / 36</b></div>
+          <div class="stat"><span>已歷時</span><b id="m-elapsed">0 分</b></div>
+          <div class="stat"><span>決策來源</span><b id="m-source">mock</b></div>
+          <div class="stat"><span>已抵達</span><b id="m-arrived">0</b></div>
+          <div class="stat"><span>壅塞路段</span><b id="m-crowded">0</b></div>
+          <div class="stat"><span>平均壅塞</span><b id="m-avgcong">0.00</b></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Agent 檢視</h2>
+        <p class="hint">點地圖上的車輛查看狀態。</p>
+        <div id="agent-inspect" class="inspect">尚未選取。</div>
+      </section>
+    </aside>
+
+    <!-- 中：地圖 -->
+    <section class="map-wrap">
+      <div id="map"></div>
+      <div class="legend">
+        <div><span class="lg lg-green"></span>順暢</div>
+        <div><span class="lg lg-yellow"></span>輕度</div>
+        <div><span class="lg lg-orange"></span>壅塞</div>
+        <div><span class="lg lg-red"></span>嚴重</div>
+        <div><span class="lg lg-dest"></span>目的地（球場）</div>
+      </div>
+    </section>
+
+    <!-- 右：圖表 -->
+    <aside class="panel panel-right">
+      <section class="card">
+        <h2>壅塞趨勢</h2>
+        <canvas id="chart-congestion" height="160"></canvas>
+      </section>
+      <section class="card">
+        <h2>抵達進度</h2>
+        <canvas id="chart-arrived" height="160"></canvas>
+      </section>
+      <section class="card">
+        <h2>行為模式分佈</h2>
+        <canvas id="chart-mode" height="170"></canvas>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="map.js"></script>
+  <script src="charts.js"></script>
+  <script src="simulation.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -87,7 +87,7 @@ Future versions should validate the LLM response against a strict JSON schema be
 ## Local Run Command
 
 ```bash
-uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+PYTHONPATH=src uvicorn llm_server.server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ## Dependencies

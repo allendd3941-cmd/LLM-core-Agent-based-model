@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm_abm_simulator"
+version = "0.1.0"
+description = "Python-native traffic ABM simulator that replaces GAMA, with an interactive web demo, bundled together with the LLM decision server (llm_server) that exposes /from-gama."
+readme = "docs/PYTHON_SIMULATOR_zh-TW.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    # 模擬器（llm_abm_simulator）：GIS / 路網 / web
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "networkx>=3.2",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "websockets>=12.0",
+    "requests>=2.31",
+    # LLM 決策伺服器（llm_server）：RAG / schema / .env
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "scikit-learn>=1.3",
+    "numpy>=1.26",
+    "langchain-text-splitters>=0.2",
+]
+
+[project.optional-dependencies]
+osm = ["osmnx>=1.9"]
+dev = ["pytest>=8.0"]
+
+# 套件原始碼放在 src/ 之下（src layout）。find 會自動探索 llm_abm_simulator 與 llm_server。
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# 把 llm_server 的 prompt 範本一起打包（wheel build 用；從原始碼執行時是用檔案系統路徑找）。
+[tool.setuptools.package-data]
+llm_server = ["prompts/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

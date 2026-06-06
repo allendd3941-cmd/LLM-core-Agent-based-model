@@ -4,7 +4,7 @@ This document explains how data and generated outputs should be handled before p
 
 ## GIS Data
 
-`GIS data/` contains spatial input data used by the GAMA traffic simulation.
+`data/gis/` contains spatial input data used by the traffic simulation.
 
 These files are not automatically covered by the repository MIT License. They should be treated as external data assets and remain subject to their original data source licenses.
 
@@ -19,7 +19,7 @@ Before publishing, confirm and document:
 Recommended README note:
 
 ```text
-The GIS files in `GIS data/` are used as spatial inputs for the GAMA traffic ABM model. Please verify the original data source and license terms before reuse.
+The GIS files in `data/gis/` are used as spatial inputs for the traffic ABM model. Please verify the original data source and license terms before reuse.
 ```
 
 If the GIS files are from Taiwan government open data sources, document the source URL and attribution requirements, and reference the applicable Open Government Data License where appropriate.

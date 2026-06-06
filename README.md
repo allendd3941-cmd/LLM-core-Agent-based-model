@@ -15,6 +15,30 @@ This project is designed as a research prototype and portfolio project that demo
 - Lightweight retrieval-augmented generation using TF-IDF and cosine similarity.
 - OD conversion utilities for turning structured or natural-language trip plans into CSV records.
 
+## Python-Native Simulator (replaces GAMA) + Web Demo
+
+This repository now includes a **pure-Python traffic ABM simulator** that fully replaces
+the simulation responsibilities previously handled by GAMA, plus an interactive localhost
+web demo (Leaflet map + Chart.js + WebSocket). The existing LLM pipeline (`/from-gama`,
+prompts, schemas) is **unchanged** — the new simulator calls it through an adapter and also
+supports a deterministic mock-decision mode.
+
+- Source package: `src/llm_abm_simulator/`
+- Frontend: `simulation_web/frontend/`
+- Bundled real OSM road network: `data/tainan_roads.graphml`
+- Full Chinese guide (install, run, Mock/LLM, **Linux SSH demo**, architecture, GAMA parity):
+  [`docs/PYTHON_SIMULATOR_zh-TW.md`](docs/PYTHON_SIMULATOR_zh-TW.md)
+
+Quick start (mock mode, no LLM needed):
+
+```bash
+python -m pip install -r requirements.txt
+uvicorn llm_abm_simulator.web.app:app --host 127.0.0.1 --port 8080
+# if not installed as a package: set PYTHONPATH=src first
+```
+
+Then open <http://localhost:8080>. Run the tests with `pytest tests/simulator -q`.
+
 ## Motivation
 
 Traditional agent-based models often rely on fixed rules or predefined behavior parameters. This project explores how local LLM reasoning can be introduced into a simulation loop so that agents can make context-aware decisions based on identity, travel memory, environmental perception, congestion signals, and scenario-specific prompts.
@@ -62,27 +86,32 @@ flowchart TD
 
 ```text
 LLM_abm_model/
-├─ server.py                         # FastAPI entrypoint and /from-gama endpoint
-├─ llm_config.py                     # Ollama environment configuration
-├─ agent_profile.py                  # Agent profile generation pipeline
-├─ perception.py                     # GAMA state perception pipeline
-├─ decision_making.py                # Decision-making pipeline
-├─ RAG.py                            # Lightweight TF-IDF RAG utility
-├─ od_converter.py                   # OD CSV conversion utility
-├─ output_engine.py                  # UTF-8 output writer
-├─ timer.py                          # Ollama request timing helper
-├─ schemas/
-│  └─ agentprofile_schema.py         # Agent profile Pydantic schema
-├─ prompts/
-│  ├─ system_prompt.txt
-│  ├─ agentprofile_prompt.txt
-│  ├─ perception_prompt.txt
-│  └─ decision_making_prompt.txt
-├─ gama_moudle/                      # GAMA model and API POST module
-├─ GIS data/                         # GIS input data for the simulation
-├─ docs/                             # Architecture and integration notes
-├─ examples/                         # Example GAMA payloads and sample outputs
-└─ output/                           # Local generated outputs, ignored by Git
+├─ src/
+│  ├─ llm_server/                    # LLM decision server (FastAPI + Ollama pipeline)
+│  │  ├─ server.py                   #   /from-gama endpoint
+│  │  ├─ agent_profile.py            #   agent profile generation
+│  │  ├─ perception.py               #   GAMA/sim state perception
+│  │  ├─ decision_making.py          #   decision-making pipeline
+│  │  ├─ RAG.py                      #   lightweight TF-IDF RAG
+│  │  ├─ od_converter.py             #   OD CSV conversion utility
+│  │  ├─ output_engine.py            #   UTF-8 output writer
+│  │  ├─ timer.py                    #   Ollama request timing helper
+│  │  ├─ llm_config.py               #   Ollama env configuration
+│  │  ├─ prompts/                    #   prompt templates
+│  │  └─ schemas/                    #   Pydantic schemas
+│  └─ llm_abm_simulator/             # Python-native ABM simulator (replaces GAMA)
+│     ├─ domain/  spatial/  decisions/  simulation/  web/
+│     └─ config.py
+├─ simulation_web/frontend/          # Web demo frontend (Leaflet + Chart.js)
+├─ data/
+│  ├─ gis/                           # GIS input shapefiles (towns, stadium, study area)
+│  └─ tainan_roads.graphml           # bundled real OSM road network
+├─ analysis/                         # standalone agent-analysis script + output
+├─ gama_moudle/                      # original GAMA model (reference only)
+├─ docs/                             # architecture, API, simulator guide
+├─ examples/                         # example payloads and sample outputs
+├─ tests/simulator/                  # pytest suite
+└─ output/                           # local generated outputs, ignored by Git
 ```
 
 `gama_moudle/` is intentionally kept with its current name to avoid breaking existing local GAMA paths. A future cleanup can rename it to `gama_module/` in a dedicated migration commit.
@@ -128,10 +157,12 @@ OLLAMA_MODEL=gpt-oss:20b
 
 ## Running the Server
 
-Start the FastAPI server:
+Start the FastAPI server (the LLM pipeline now lives in `src/llm_server/`):
 
 ```bash
-uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+pip install -e .            # makes the llm_server package importable
+uvicorn llm_server.server:app --host 127.0.0.1 --port 8000 --reload
+# without install, set the path instead:  PYTHONPATH=src uvicorn llm_server.server:app ...
 ```
 
 The GAMA model can then post simulation payloads to:
@@ -205,7 +236,7 @@ The full local `output/` directory is ignored by Git because it contains generat
 
 ## Data and Output Policy
 
-- `GIS data/` contains spatial input data used by the GAMA traffic model. Before public reuse, verify the original data source, coordinate system, attribution requirements, and redistribution terms.
+- `data/gis/` contains spatial input data (towns, stadium, study area). Before public reuse, verify the original data source, coordinate system, attribution requirements, and redistribution terms.
 - `output/` contains generated LLM outputs and is ignored by Git to keep the repository focused on source code and curated examples.
 - `examples/sample_outputs/` contains selected representative outputs for review.
 
@@ -218,7 +249,7 @@ python -m compileall -q -x "(\.venv|__pycache__|output)" .
 ```
 
 ```bash
-python -c "from pathlib import Path; from server import GamaRequest; [GamaRequest.model_validate_json(Path(p).read_text(encoding='utf-8')) for p in ['examples/gama_request_init.json','examples/gama_request_step.json']]; print('GamaRequest examples validated')"
+PYTHONPATH=src python -c "from pathlib import Path; from llm_server.server import GamaRequest; [GamaRequest.model_validate_json(Path(p).read_text(encoding='utf-8')) for p in ['examples/gama_request_init.json','examples/gama_request_step.json']]; print('GamaRequest examples validated')"
 ```
 
 Full integration testing requires both GAMA and Ollama to be running.
@@ -242,7 +273,7 @@ Full integration testing requires both GAMA and Ollama to be running.
 
 Unless otherwise noted, the source code, documentation, prompts, and curated examples in this repository are licensed under the MIT License. See `LICENSE` for details.
 
-GIS files under `GIS data/` are provided for simulation context and remain subject to their original data source licenses. Verify the original source, attribution requirements, and redistribution terms before reuse.
+GIS files under `data/gis/` are provided for simulation context and remain subject to their original data source licenses. Verify the original source, attribution requirements, and redistribution terms before reuse.
 
 ## Citation
 

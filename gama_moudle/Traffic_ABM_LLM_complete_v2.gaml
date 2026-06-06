@@ -39,7 +39,7 @@ global {
 
     // [可調整] 固定終點 point 載入失敗時使用的 fallback 終點鄉鎮市區。
     // TODO: fallback 終點鄉鎮市區。請改成任一臺南市 TOWNNAME，例如 "東區"、"安南區"、"歸仁區"。
-    string destination_town_name <- "安平區";
+    string destination_town_name <- "安定區";
 
     // [可調整] Python response 缺少生成地或解析失敗時使用的預設行政區。
     // API 沒回覆或回覆無法解析時的 fallback 生成行政區。
@@ -64,7 +64,7 @@ global {
 
     // [可調整] Python API 連線設定。
     string api_host_value <- "127.0.0.1";
-    int api_port_value <- 8000;
+    int api_port_value <- 8001;
     string api_endpoint_value <- "/from-gama";
     bool api_log_response <- true;
 
