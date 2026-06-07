@@ -1,9 +1,7 @@
-請生成 10 個用於「台南市亞太棒球場球賽進出場尖峰人潮短期交通衝擊評估」的交通模擬 agents。
-
 輸出規則：
 1. 只輸出合法 JSON，不要解釋、註解或 markdown，請輸出具備換行與縮排的巢狀 JSON，不要壓縮成單行。。
 2. 最外層只能是一個 JSON object，且只包含一個欄位 "agents"。
-3. "agents" 必須是 JSON array，內含 10 個 agent object。
+3. "agents" 必須是 JSON array，內含指定數量的 agent object。
 4. 每個 agent object 只能包含 "identity" 與 "traits" 兩個欄位。
 5. 每個 value 都必須是自然語言，不要只放代碼、數字或縮寫。
 6. 除 residential_location 外，identity 各欄位請用十個字以內的中文片語描述。

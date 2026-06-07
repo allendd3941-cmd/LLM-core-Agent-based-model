@@ -175,9 +175,10 @@ class LLMDecisionPolicy:
         try:
             from .. import config
             profile_path = config.OUTPUT_DIR / _AGENT_PROFILE_FILENAME
-            if not profile_path.exists():
-                run_agent_profile(output=True)
-            agent_profile = profile_path.read_text(encoding="utf-8")
+            if payload.get("request_type") == "init_agents" or not profile_path.exists():
+                agent_profile = run_agent_profile(output=True, agent_count=self.cfg.nb_agents)
+            else:
+                agent_profile = profile_path.read_text(encoding="utf-8")
 
             perception = run_perception(payload, output=True)
             return run_decision_making(agent_profile, perception, output=True)

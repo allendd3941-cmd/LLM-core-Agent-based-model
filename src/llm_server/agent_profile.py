@@ -18,17 +18,21 @@ with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
 with open(USER_PROMPT_PATH, "r", encoding="utf-8") as f:
     USER_PROMPT = f.read()
 
-count = 0
 
-def run_agent_profile(output: bool= False):
-    global count
-    count += 1
+def build_user_prompt(agent_count: int) -> str:
+    return (
+        f"請生成 {agent_count} 個用於「台南市亞太棒球場球賽進出場尖峰人潮短期交通衝擊評估」的交通模擬 agents。\n\n"
+        + USER_PROMPT
+    )
+
+
+def run_agent_profile(output: bool = False, agent_count: int = 10):
 
     url = f"{OLLAMA_URL}{OLLAMA_MODE}"
 
     payload = {
         "model": OLLAMA_MODEL,
-        "prompt": USER_PROMPT,
+        "prompt": build_user_prompt(agent_count),
         "system": SYSTEM_PROMPT,
         #"format": AgentProfileSchema.model_json_schema(),
         #"think": "low",
@@ -49,7 +53,7 @@ def run_agent_profile(output: bool= False):
     final_response = response_data["response"]
 
     if output:
-        output_path = OUTPUT_PATH / f"{FILE_NAME}_output_{count}.txt"
+        output_path = OUTPUT_PATH / f"{FILE_NAME}_output_1.txt"
         output_process(final_response, output_path, FILE_NAME)
 
     return final_response

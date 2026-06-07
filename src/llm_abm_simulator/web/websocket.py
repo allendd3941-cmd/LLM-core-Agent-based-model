@@ -14,10 +14,12 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from .. import config
 from ..config import DEFAULT_CONFIG, UI_CONFIG, SimulationConfig
 from ..simulation.engine import SimulationEngine
 
 logger = logging.getLogger(__name__)
+_AGENT_PROFILE_FILENAME = "agent_profile_output_1.txt"
 
 
 class SimulationSession:
@@ -123,6 +125,7 @@ class SimulationSession:
 
     async def _reset(self) -> None:
         await self._stop_run_task()
+        self._clear_agent_profile_output()
         await asyncio.to_thread(self.engine.reset)
         await self.send(self.engine.init_payload())
         await self.status("模擬已重設")
@@ -132,12 +135,20 @@ class SimulationSession:
             await self.status("模擬進行中無法變更 agent 數，請先重設。")
             return
         n = max(UI_CONFIG.agents_min, min(n, UI_CONFIG.agents_max))
+        self._clear_agent_profile_output()
         self.cfg = dataclasses.replace(self.cfg, nb_agents=n)
         await self._stop_run_task()
         self.engine = SimulationEngine(self.cfg)
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
         await self.status(f"agent 數設為 {n}")
+
+    def _clear_agent_profile_output(self) -> None:
+        profile_path = config.OUTPUT_DIR / _AGENT_PROFILE_FILENAME
+        try:
+            profile_path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("無法刪除 agent profile output: %s", e)
 
     def _set_mode(self, mode: str) -> None:
         # 動態切換 mock/llm；engine 內部 cfg 與本 session cfg 同步
