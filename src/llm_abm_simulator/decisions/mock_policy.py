@@ -62,12 +62,15 @@ class MockDecisionPolicy:
             congestion = agent.congestion_proxy
             distance = agent.distance_to_destination
             if congestion > 0.7:
-                mode = "avoid_congestion"
+                mode, reason = "avoid_congestion", "目前壅塞嚴重，改走較順的路"
             elif congestion > 0.4:
-                mode = "comfortable"
+                mode, reason = "comfortable", "路況中等，求穩定舒適"
             elif distance < 2000:
-                mode = "short_distance"
+                mode, reason = "short_distance", "已接近目的地，走最短路"
+            elif agent.vehicle_type == "汽車":
+                mode, reason = "fast", "路況順暢，想快點抵達"
             else:
-                mode = "fast" if agent.vehicle_type == "汽車" else "tolerate_congestion"
-            decisions[agent.agent_id] = StepDecision(agent_id=agent.agent_id, active_mode=mode)
+                mode, reason = "tolerate_congestion", "機車順順走，不繞路"
+            decisions[agent.agent_id] = StepDecision(
+                agent_id=agent.agent_id, active_mode=mode, reason=reason)
         return decisions

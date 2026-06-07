@@ -77,6 +77,16 @@
         <p class="hint">點地圖上的車輛查看狀態。</p>
         <div id="agent-inspect" class="inspect">尚未選取。</div>
       </section>
+
+      <section class="card">
+        <h2>Decision 輸出</h2>
+        <div class="decision-bar">
+          <select id="decision-step" title="選擇要檢視的 step"></select>
+          <button id="decision-refresh" class="seg-btn" title="重新讀取 output 資料夾">重新整理</button>
+        </div>
+        <p class="hint">每個 step 的 decision-making 原始輸出（含 reason）。LLM 模式跑過才有。</p>
+        <pre id="decision-output" class="decision-output">尚未載入。</pre>
+      </section>
     </aside>
 
     <!-- 中：地圖 -->

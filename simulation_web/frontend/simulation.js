@@ -4,6 +4,7 @@
    ================================================================ */
 const TrafficUI = (() => {
   let send = null; // 由 app.js 注入：send(action, value)
+  let profiles = {}; // name → {identity, traits}（讀自 agent_profile_output_1.txt）
 
   const $ = (id) => document.getElementById(id);
 
@@ -27,6 +28,11 @@ const TrafficUI = (() => {
 
     $("mode-mock").onclick = () => setMode("mock");
     $("mode-llm").onclick = () => setMode("llm");
+
+    const dsel = $("decision-step");
+    if (dsel) dsel.onchange = () => showDecisionOutput(dsel.value);
+    const dref = $("decision-refresh");
+    if (dref) dref.onclick = () => refreshDecisionSteps();
   }
 
   function setMode(mode) {
@@ -84,12 +90,76 @@ const TrafficUI = (() => {
       ["鄰近車輛", a.nearby_agent_count],
     ];
     const rowsHtml = rows
-      .map(([k, v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`)
+      .map(([k, v]) => `<div class="row"><span>${k}</span><b>${escapeHtml(String(v))}</b></div>`)
       .join("");
+
+    // 決策理由
+    const reason = a.decision_reason
+      ? `<div class="inspect-block"><span>決策理由（選此行為模式的原因）</span><p>${escapeHtml(a.decision_reason)}</p></div>`
+      : "";
+
+    // 長期記憶摘要 + 來源標籤
+    const srcLabel = a.summary_source === "llm" ? "LLM 摘要" : "模板";
     const summary = a.trip_summary
-      ? `<div class="trip-summary"><span>長期記憶 · 旅次摘要</span><p>${escapeHtml(a.trip_summary)}</p></div>`
-      : `<div class="trip-summary"><span>長期記憶 · 旅次摘要</span><p class="muted">尚無旅次記憶。</p></div>`;
-    $("agent-inspect").innerHTML = rowsHtml + summary;
+      ? `<div class="inspect-block"><span>長期記憶 · 旅次摘要 <em>（${srcLabel}）</em></span><p>${escapeHtml(a.trip_summary)}</p></div>`
+      : `<div class="inspect-block"><span>長期記憶 · 旅次摘要</span><p class="muted">尚無旅次記憶。</p></div>`;
+
+    // 人物背景（讀自 agent_profile_output_1.txt，以姓名對應）
+    const persona = renderPersona(a.profile_name);
+
+    $("agent-inspect").innerHTML = rowsHtml + reason + summary + persona;
+  }
+
+  function renderPersona(name) {
+    const p = profiles[name];
+    if (!p) return "";
+    const id = p.identity || {};
+    const tr = p.traits || {};
+    const idRows = [
+      ["年齡", id.age], ["職業", id.occupation], ["個人收入", id.wage],
+      ["家戶收入", id.household_income], ["交通工具", id.vehicle_ownership],
+      ["居住地", id.residential_location],
+    ].filter(([, v]) => v);
+    const first = (x) => Array.isArray(x) ? (x[0] || "") : (x || "");
+    const trRows = [
+      ["態度", first(tr.attitudes)], ["習慣", first(tr.habits)],
+      ["決策傾向", first(tr.decision_making_tendencies)],
+      ["經濟取捨", first(tr.economic_preferences_and_tradeoffs)],
+    ].filter(([, v]) => v);
+    const idHtml = idRows.map(([k, v]) => `<div class="row"><span>${k}</span><b>${escapeHtml(String(v))}</b></div>`).join("");
+    const trHtml = trRows.map(([k, v]) => `<div class="persona-trait"><span>${k}</span><p>${escapeHtml(String(v))}</p></div>`).join("");
+    return `<div class="inspect-block"><span>人物背景</span>${idHtml}${trHtml}</div>`;
+  }
+
+  function setProfiles(p) { profiles = p || {}; }
+
+  // ---- decision making 每步輸出檢視 ----
+  async function refreshDecisionSteps() {
+    const sel = $("decision-step");
+    if (!sel) return;
+    try {
+      const res = await fetch("/api/decision-outputs");
+      const data = await res.json();
+      const steps = data.steps || [];
+      sel.innerHTML = steps.map((n) => `<option value="${n}">#${n}</option>`).join("");
+      if (steps.length) showDecisionOutput(steps[steps.length - 1]);
+      else $("decision-output").textContent = "尚無 decision 輸出（LLM 模式跑過才有）。";
+    } catch (e) {
+      $("decision-output").textContent = "讀取失敗：" + e;
+    }
+  }
+
+  async function showDecisionOutput(n) {
+    try {
+      const res = await fetch("/api/decision-outputs/" + n);
+      if (!res.ok) { $("decision-output").textContent = "找不到 #" + n; return; }
+      const data = await res.json();
+      let text = data.text || "";
+      try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {} // 能 parse 就美化
+      $("decision-output").textContent = text;
+    } catch (e) {
+      $("decision-output").textContent = "讀取失敗：" + e;
+    }
   }
 
   function escapeHtml(s) {
@@ -110,5 +180,6 @@ const TrafficUI = (() => {
     $("conn-text").textContent = ok ? "已連線" : "連線中斷";
   }
 
-  return { bind, applyInitConfig, updateStats, inspectAgent, toast, setConnected };
+  return { bind, applyInitConfig, updateStats, inspectAgent, setProfiles,
+           refreshDecisionSteps, toast, setConnected };
 })();

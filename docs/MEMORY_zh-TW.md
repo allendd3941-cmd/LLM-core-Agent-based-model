@@ -95,10 +95,30 @@ LTM 不重看全部歷史，而是每步把「剛走完的那一步」摺疊進�
 `trip_summary` 那一段話由這些累積器**用模板確定性拼出**（`_compose_summary`），
 依序組合：出發/目的地 → 整趟順暢度 → 塞過的地點 → 換策略次數 → 接近/抵達 → 已行進時間。
 
-**為什麼選模板而非每步呼叫 LLM 摘要？**
-- 零額外 token 成本。
-- **可重現**：全程無隨機、不呼叫 LLM，維持「同 seed → 同軌跡」。
-- 之後若要更自然的語句，只需把 `trip_summary` 這一句升級成 LLM 生成，其他結構化欄位不動。
+**為什麼預設用模板？**
+- 零額外 token 成本、**可重現**（全程無隨機、不呼叫 LLM，維持「同 seed → 同軌跡」）。
+
+### 方式 B：LLM 摘要（gemma 等小模型，可選開啟）
+
+開啟 `[summary].use_llm_summary` 後，改由小模型把 `trip_summary` 寫得更自然。設計重點：
+
+- **只有 `trip_summary` 改用 LLM**；其餘 LTM 結構化欄位（`elapsed` / `congested_spots` /
+  `mode_switches` / `overall_smoothness`）仍是確定性計算，並當成「事實素材」餵給模型，避免它亂編。
+- **批次一次呼叫**：engine 把所有 agent 的 `memory_facts()` 包成一個 prompt，呼叫一次
+  `llm_server/memory_summary.run_memory_summary(facts, model)`，回 `{agent_id: 一句摘要}`。
+- **頻率**：每 `summary_every_n_steps` 步、或有 agent 抵達時才重算（`engine._maybe_llm_summaries`）。
+- **fallback**：匯入/呼叫/解析任一失敗 → 保留各 agent 既有的模板摘要，不中斷。
+- **來源標示**：`agent.summary_source`（`"template"` / `"llm"`）會隨 snapshot 送前端，
+  inspect 面板的摘要旁顯示「（模板）」或「（LLM 摘要）」。
+- **不影響模擬物理**：mock 決策不讀記憶文字，故同 seed 同軌跡仍成立；只有摘要文字非確定。
+
+```toml
+[summary]
+use_llm_summary = false        # 開關（關＝方式 A 模板）
+summary_model = "gemma4:e2b"   # 摘要模型 tag（請對齊 `ollama list`，可能是 gemma3n:e2b）
+summary_every_n_steps = 5      # 每幾步重算；抵達時也補算
+```
+相關檔案：`llm_server/memory_summary.py` + `llm_server/prompts/memory_prompt.txt`。
 
 ---
 

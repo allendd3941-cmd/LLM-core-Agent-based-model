@@ -151,6 +151,7 @@ class LLMDecisionPolicy:
                 agent_id=aid,
                 active_mode=row["active_mode"],
                 vehicle_type=row["vehicle_type"],
+                reason=row.get("reason", ""),
             )
         return result
 

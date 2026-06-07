@@ -110,6 +110,20 @@ body {
 .inspect .trip-summary p { margin: 6px 0 0; color: var(--text); line-height: 1.7; }
 .inspect .trip-summary p.muted { color: var(--text-dim); }
 
+.inspect .inspect-block { margin-top: 10px; padding: 8px 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; }
+.inspect .inspect-block > span { font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: 0.3px; }
+.inspect .inspect-block > span em { color: var(--text-dim); font-weight: 400; font-style: normal; }
+.inspect .inspect-block p { margin: 6px 0 0; color: var(--text); line-height: 1.7; }
+.inspect .inspect-block p.muted { color: var(--text-dim); }
+.inspect .persona-trait { margin-top: 6px; }
+.inspect .persona-trait > span { font-size: 11px; color: var(--text-dim); }
+.inspect .persona-trait p { margin: 2px 0 0; color: var(--text); line-height: 1.6; }
+
+/* Decision 輸出檢視 */
+.decision-bar { display: flex; gap: 6px; margin: 4px 0; }
+.decision-bar select { flex: 1; background: var(--card-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+.decision-output { max-height: 240px; overflow: auto; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 11px; line-height: 1.5; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; }
+
 /* ── Map ─────────────────────────────────────────────── */
 .map-wrap { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 #map { width: 100%; height: 100%; background: #0a0e14; }

@@ -7,6 +7,7 @@ const TrafficMap = (() => {
   let townLayer = null;
   let roadLayer = null;
   let roadById = {};          // road_id → Leaflet polyline（用於即時上色）
+  let flowOverlay = {};       // road_id → 動態疊畫的 polyline（底圖沒有的非主要道路）
   let agentMarkers = {};      // agent_id → marker
   let stadiumMarker = null;
   let onAgentSelect = null;
@@ -27,7 +28,9 @@ const TrafficMap = (() => {
     if (townLayer) map.removeLayer(townLayer);
     if (roadLayer) map.removeLayer(roadLayer);
     Object.values(agentMarkers).forEach((m) => map.removeLayer(m));
+    Object.values(flowOverlay).forEach((l) => map.removeLayer(l));
     agentMarkers = {};
+    flowOverlay = {};
     roadById = {};
 
     // 行政區界
@@ -61,22 +64,47 @@ const TrafficMap = (() => {
     return "#3fb6ff";
   }
 
+  // 把座標相同的 agent 在畫面上散開成一個小圈（spiderfy），避免疊成一點看不到。
+  // 只動「顯示座標」，agent 的真實資料不變（inspect 仍顯示原值）。
+  function spreadPositions(agents) {
+    const groups = {};
+    agents.forEach((a) => {
+      const key = a.lat.toFixed(5) + "," + a.lng.toFixed(5);
+      (groups[key] = groups[key] || []).push(a);
+    });
+    const R = 0.00013; // 約 14 公尺
+    const pos = {};
+    Object.values(groups).forEach((list) => {
+      if (list.length === 1) {
+        pos[list[0].agent_id] = [list[0].lat, list[0].lng];
+        return;
+      }
+      list.forEach((a, i) => {
+        const ang = (2 * Math.PI * i) / list.length;
+        pos[a.agent_id] = [a.lat + R * Math.sin(ang), a.lng + R * Math.cos(ang)];
+      });
+    });
+    return pos;
+  }
+
   function updateAgents(agents) {
     const seen = new Set();
+    const pos = spreadPositions(agents);
     agents.forEach((a) => {
       seen.add(a.agent_id);
       const color = colorFor(a.route_status, a.congestion_proxy);
       const radius = a.vehicle_type === "機車" ? 4 : 6;
+      const ll = pos[a.agent_id] || [a.lat, a.lng];
       let m = agentMarkers[a.agent_id];
       if (!m) {
-        m = L.circleMarker([a.lat, a.lng], {
+        m = L.circleMarker(ll, {
           radius, color: "#0b0f16", weight: 1, fillColor: color, fillOpacity: 0.95,
         }).addTo(map);
         // 用 m._agentData（每步更新）而非閉包捕捉的初始 a，確保點擊看到最新一步資料（含 trip_summary）
         m.on("click", () => onAgentSelect && onAgentSelect(m._agentData));
         agentMarkers[a.agent_id] = m;
       } else {
-        m.setLatLng([a.lat, a.lng]);
+        m.setLatLng(ll);
         m.setStyle({ fillColor: color, radius });
       }
       m._agentData = a;
@@ -88,11 +116,31 @@ const TrafficMap = (() => {
   }
 
   function updateRoads(roads) {
-    // 先把所有主要道路還原底色，再對有流量的道路上色
+    // 先把所有主要道路還原底色
     Object.values(roadById).forEach((l) => l.setStyle(BASE_ROAD));
+    const seen = new Set();
     roads.forEach((r) => {
       const layer = roadById[r.road_id];
-      if (layer) layer.setStyle({ color: r.color, weight: 4, opacity: 0.95 });
+      if (layer) {
+        // 底圖已有（主要道路）→ 直接上色
+        layer.setStyle({ color: r.color, weight: 4, opacity: 0.95 });
+      } else if (r.coords && r.coords.length > 1) {
+        // 底圖沒有（非主要道路）→ 用 snapshot 帶來的幾何疊畫一條，讓壅塞也看得到
+        seen.add(r.road_id);
+        const latlngs = r.coords.map((c) => [c[1], c[0]]); // [lng,lat] → [lat,lng]
+        let ov = flowOverlay[r.road_id];
+        if (!ov) {
+          ov = L.polyline(latlngs, { color: r.color, weight: 4, opacity: 0.95 }).addTo(map);
+          flowOverlay[r.road_id] = ov;
+        } else {
+          ov.setLatLngs(latlngs);
+          ov.setStyle({ color: r.color, weight: 4, opacity: 0.95 });
+        }
+      }
+    });
+    // 移除這步已無流量的疊畫
+    Object.keys(flowOverlay).forEach((id) => {
+      if (!seen.has(id)) { map.removeLayer(flowOverlay[id]); delete flowOverlay[id]; }
     });
   }
 

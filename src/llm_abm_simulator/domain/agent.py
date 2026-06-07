@@ -168,6 +168,7 @@ class VehicleAgent:
     nearby_agent_count: int = 0
     congestion_proxy: float = 0.0
     selected_action: str = "none"
+    decision_reason: str = ""            # LLM/mock 選擇此 active_mode 的原因（前端顯示）
 
     # === 送 LLM 的環境感知質性標籤（由 engine 每步算好填入；詳見 docs/ENVIRONMENT_zh-TW.md）===
     traffic_here: str = ""               # 腳下壅塞感（順暢/普通/壅塞）
@@ -180,6 +181,7 @@ class VehicleAgent:
     # 兩者都固定大小，取代舊的無上限成長 travel_memory list。詳見 docs/MEMORY_zh-TW.md。
     short_term_memory: dict[str, Any] = field(default_factory=dict)
     long_term_memory: dict[str, Any] = field(default_factory=dict)
+    summary_source: str = "template"     # trip_summary 來源："template"（模板）或 "llm"（gemma 摘要）
     api_status: str = "not_sent"
     warning_message: str = ""
 
@@ -418,6 +420,24 @@ class VehicleAgent:
             "congested_spots": list(self._congested_spots),
             "mode_switches": self._mode_switch_count,
             "overall_smoothness": _smoothness_label(avg_proxy, cfg),
+        }
+        self.summary_source = "template"   # 預設模板；engine 開啟 LLM 摘要時會覆寫此句與來源
+
+    def memory_facts(self) -> dict[str, Any]:
+        """給 LLM 摘要器的結構化事實（只給事實，不含模板那句）。"""
+        ltm = self.long_term_memory
+        return {
+            "agent_id": self.agent_id,
+            "origin_town": self.origin_town,
+            "destination_town": self.destination_town,
+            "active_mode": self.active_mode,
+            "route_status": str(self.route_status),
+            "overall_smoothness": ltm.get("overall_smoothness", ""),
+            "congested_spots": ltm.get("congested_spots", []),
+            "mode_switches": ltm.get("mode_switches", 0),
+            "elapsed": ltm.get("elapsed", ""),
+            "traffic_here": self.traffic_here,
+            "road_ahead": self.road_ahead,
         }
 
     def _compose_summary(

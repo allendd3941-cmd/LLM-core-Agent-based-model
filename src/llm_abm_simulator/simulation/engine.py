@@ -190,10 +190,37 @@ class SimulationEngine:
         # 7. memory + CSV
         for agent in self.agents:
             agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
+        self._maybe_llm_summaries(cycle)
         self.recorder.append_agent_rows(cycle, self.agents)
         self.recorder.append_road_rows(cycle, self.network.all_roads())
 
         return self._snapshot(cycle, env, mode_dist, status_dist)
+
+    def _maybe_llm_summaries(self, cycle: int) -> None:
+        """開啟 [summary] 時，每 N 步或有人抵達就用小模型批次重算 trip_summary。
+
+        失敗（匯入/呼叫/解析）一律保留各 agent 既有的模板摘要，不中斷模擬。
+        """
+        sc = config.SUMMARY_CONFIG
+        if not sc.use_llm_summary or not self.agents:
+            return
+        just_arrived = any(a.route_status == RouteStatus.ARRIVED for a in self.agents)
+        if cycle % sc.summary_every_n_steps != 0 and not just_arrived:
+            return
+        try:
+            from llm_server.memory_summary import run_memory_summary
+        except ImportError as e:
+            logger.warning("memory_summary 匯入失敗，改用模板摘要：%s", e)
+            return
+        facts = [a.memory_facts() for a in self.agents if a.long_term_memory]
+        summaries = run_memory_summary(facts, sc.summary_model)
+        if not summaries:
+            return
+        for a in self.agents:
+            s = summaries.get(a.agent_id)
+            if s:
+                a.long_term_memory["trip_summary"] = s
+                a.summary_source = "llm"
 
     def _llm_environment(self, env: dict[str, Any]) -> dict[str, Any]:
         """給 LLM 決策用的精簡質性全域環境。
@@ -231,6 +258,8 @@ class SimulationEngine:
                 agent.apply_active_mode(d.active_mode)
             if d.vehicle_type:
                 agent.apply_vehicle_type(d.vehicle_type)
+            if d.reason:
+                agent.decision_reason = d.reason
 
     # ==================================================================
     # 感知 / 移動
@@ -509,14 +538,22 @@ class SimulationEngine:
                 origin_town=a.origin_town, destination_town=a.destination_town,
                 current_town=a.current_town, current_road_id=a.current_road_id,
                 trip_summary=a.long_term_memory.get("trip_summary", ""),
+                summary_source=a.summary_source,
+                decision_reason=a.decision_reason,
             ))
-        # 只送有流量的道路（前端據此即時上色），避免每步送數萬條
-        roads_snap = [
-            RoadSnapshot(road_id=r.road_id, flow=r.current_flow, capacity=r.capacity,
-                         congestion_proxy=round(r.congestion_proxy, 4),
-                         color=congestion_color(r.congestion_proxy))
-            for r in self.network.all_roads() if r.current_flow > 0
-        ]
+        # 只送有流量的道路（前端據此即時上色），避免每步送數萬條。
+        # 附幾何座標：前端對「非主要道路底圖沒有的路」也能疊畫出壅塞。
+        roads_snap = []
+        for r in self.network.all_roads():
+            if r.current_flow <= 0:
+                continue
+            coords = []
+            if r.geometry_wgs84 is not None:
+                coords = [[round(x, 6), round(y, 6)] for x, y in r.geometry_wgs84.coords]
+            roads_snap.append(RoadSnapshot(
+                road_id=r.road_id, flow=r.current_flow, capacity=r.capacity,
+                congestion_proxy=round(r.congestion_proxy, 4),
+                color=congestion_color(r.congestion_proxy), coords=coords))
         return SimulationState(
             cycle=cycle, elapsed_minutes=env["elapsed_minutes"], max_steps=self.cfg.max_steps,
             running=self.running, finished=self.scheduler.finished,
@@ -575,6 +612,7 @@ class SimulationEngine:
             "towns_geojson": gis_loader.load_towns_geojson(),
             "roads_geojson": geojson.roads_to_geojson(self.network, only_major=True),
             "stadium": {"lat": self._stadium_latlng[0], "lng": self._stadium_latlng[1]},
+            "agent_profiles": self._load_agent_profiles(),
             "config": {
                 "max_steps": self.cfg.max_steps,
                 "step_minutes": self.cfg.step_minutes,
@@ -583,3 +621,26 @@ class SimulationEngine:
                 "ui": config.UI_CONFIG.to_payload(),
             },
         }
+
+    def _load_agent_profiles(self) -> dict[str, Any]:
+        """讀 output/agent_profile_output_1.txt，回傳 {name: {identity, traits}} 供前端 inspect。
+
+        檔案不存在或解析失敗回 {}（前端 inspect 就只顯示即時狀態，不顯示人物背景）。
+        以 identity.name 對應 agent.profile_name。
+        """
+        import json
+        path = config.OUTPUT_DIR / "agent_profile_output_1.txt"
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("讀取 agent_profile 失敗：%s", e)
+            return {}
+        profiles: dict[str, Any] = {}
+        for a in (data.get("agents") or []):
+            ident = a.get("identity") or {}
+            name = str(ident.get("name") or "").strip()
+            if name:
+                profiles[name] = {"identity": ident, "traits": a.get("traits") or {}}
+        return profiles

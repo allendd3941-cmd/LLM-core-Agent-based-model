@@ -29,10 +29,10 @@ def run_decision_making(agent_profile_data, perception_data, output: bool= False
 
     url = f"{OLLAMA_URL}{OLLAMA_MODE}"
 
-    retrieved_texts =RAG(agent_profile_data, perception_data)
+    #retrieved_texts =RAG(agent_profile_data, perception_data)
 
     user_prompt = f'''{USER_PROMPT} \n 
-    {retrieved_texts}\n
+    {perception_data}\n
     "agent profile資料"如下:\n
     {agent_profile_data}
     '''

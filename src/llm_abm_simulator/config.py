@@ -173,6 +173,19 @@ class PerceptionContextConfig:
     speed_slow_ratio: float = 0.5        # ≥ 此值 →「略慢」；否則「壅塞緩行」
 
 
+@dataclass(frozen=True)
+class SummaryConfig:
+    """長期記憶 trip_summary 的 LLM 摘要設定（對應 TOML ``[summary]``）。
+
+    關閉時用 domain/agent.py 的模板生成（確定性）；開啟時由 llm_server/memory_summary.py
+    呼叫 Ollama 上的 summary_model 批次生成。失敗一律 fallback 回模板。詳見 docs/MEMORY_zh-TW.md。
+    """
+
+    use_llm_summary: bool = False        # 開關：關 → 模板（現狀）；開 → gemma 摘要
+    summary_model: str = "gemma4:e2b"    # 摘要模型 tag（請對齊 `ollama list`）
+    summary_every_n_steps: int = 5       # 每幾步重算一次；抵達時也會補算
+
+
 # road_network 的 highway 速限 fallback（TOML [highway_specs] 缺省時用這組）。
 _DEFAULT_HIGHWAY_SPECS: dict[str, dict[str, float]] = {
     "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity": 60},
@@ -276,7 +289,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -305,6 +318,15 @@ def _build_perception_context(raw: dict[str, Any]) -> PerceptionContextConfig:
     if not (pc.speed_slow_ratio <= pc.speed_free_ratio):
         raise ValueError("設定檔 [perception_context].speed_slow_ratio 不可大於 speed_free_ratio")
     return pc
+
+
+def _build_summary_config(raw: dict[str, Any]) -> SummaryConfig:
+    overrides = {k: v for k, v in raw.get("summary", {}).items()
+                 if k in {f.name for f in fields(SummaryConfig)}}
+    sc = dataclasses.replace(SummaryConfig(), **overrides)
+    if sc.summary_every_n_steps < 1:
+        raise ValueError("設定檔 [summary].summary_every_n_steps 必須 ≥ 1")
+    return sc
 
 
 def _build_ui_config(raw: dict[str, Any]) -> UIConfig:
@@ -352,5 +374,6 @@ DEFAULT_CONFIG = _build_simulation_config(_RAW)
 UI_CONFIG = _build_ui_config(_RAW)
 MEMORY_CONFIG = _build_memory_config(_RAW)
 PERCEPTION_CONTEXT = _build_perception_context(_RAW)
+SUMMARY_CONFIG = _build_summary_config(_RAW)
 HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)
 ACTIVE_MODE_PROFILES = _build_active_mode_profiles(_RAW)

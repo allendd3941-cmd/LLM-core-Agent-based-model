@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _ORIGIN_KEYS = ("origin", "residential_location", "origin_town", "origin_taz", "出發點", "起點")
 _MODE_KEYS = ("active_mode", "active mode", "mode", "type")
 _VEHICLE_KEYS = ("vehicle_type", "vehicle type", "車種", "vehicle_ownership")
+_REASON_KEYS = ("reason", "理由", "原因", "why")
 _NAME_KEYS = ("agent name", "agent_name", "name", "profile_name")
 _ID_KEYS = ("agent_id", "agent name", "agent_name", "name")
 _ROW_LIST_KEYS = ("agents", "decisions", "initial_vehicles", "requested_agents")
@@ -146,12 +147,16 @@ def parse_row(row: dict, available_towns: list[str], default_origin: str) -> dic
     vt_raw = _first_key(row, _VEHICLE_KEYS)
     vehicle_type = normalize_vehicle_type(vt_raw) if vt_raw is not None else ""
 
+    reason_raw = _first_key(row, _REASON_KEYS)
+    reason = str(reason_raw).strip() if reason_raw is not None else ""
+
     return {
         "agent_id": str(agent_id) if agent_id is not None else "",
         "profile_name": str(name) if name is not None else "",
         "origin_town": origin,
         "active_mode": active_mode,
         "vehicle_type": vehicle_type,
+        "reason": reason,
     }
 
 

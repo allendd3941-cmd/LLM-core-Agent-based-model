@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
@@ -44,6 +45,30 @@ def create_app() -> FastAPI:
     async def ws_endpoint(websocket: WebSocket) -> None:
         session = SimulationSession(websocket, config.DEFAULT_CONFIG)
         await session.handle()
+
+    @app.get("/api/decision-outputs")
+    async def list_decision_outputs() -> JSONResponse:
+        """列出 output/ 內所有 decision_making_output_N.txt 的 N（升冪）。"""
+        out = config.OUTPUT_DIR
+        steps: list[int] = []
+        if out.exists():
+            for p in out.glob("decision_making_output_*.txt"):
+                m = re.search(r"_(\d+)\.txt$", p.name)
+                if m:
+                    steps.append(int(m.group(1)))
+        return JSONResponse({"steps": sorted(steps)})
+
+    @app.get("/api/decision-outputs/{n}")
+    async def get_decision_output(n: int) -> JSONResponse:
+        """回傳第 N 份 decision_making 原始輸出文字。"""
+        p = config.OUTPUT_DIR / f"decision_making_output_{n}.txt"
+        if not p.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"step": n, "text": text})
 
     # 靜態前端檔（CSS / JS）。掛在 /static 與根層級各檔。
     if frontend.exists():

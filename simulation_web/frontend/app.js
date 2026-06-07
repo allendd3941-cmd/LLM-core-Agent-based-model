@@ -38,6 +38,8 @@
         case "init":
           TrafficMap.setInit(msg);
           TrafficUI.applyInitConfig(msg.config);
+          TrafficUI.setProfiles(msg.agent_profiles || {});
+          TrafficUI.refreshDecisionSteps();
           TrafficCharts.reset();
           break;
         case "state_update":

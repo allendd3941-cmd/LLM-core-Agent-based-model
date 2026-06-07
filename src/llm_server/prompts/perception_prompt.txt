@@ -49,13 +49,6 @@
           "congestion_hotspots": "<environment.congestion_hotspots>"
         }
       },
-      "keywords": [
-        "GAMA",
-        "ABM",
-        "compact environment",
-        "cycle <cycle>",
-        "<destination_town>"
-      ]
     },
     {
       "document_id": "agent::<agent_id>::cycle::<cycle>",
@@ -111,17 +104,6 @@
           "overall_smoothness": "<agent.long_term_memory.overall_smoothness>"
         }
       },
-      "keywords": [
-        "GAMA",
-        "ABM",
-        "agent memory",
-        "<agent_id>",
-        "<origin_town>",
-        "<current_town>",
-        "<destination_town>",
-        "<active_mode>",
-        "<route_status>"
-      ]
     }
   ],
   "coverage_check": {

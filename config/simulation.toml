@@ -134,6 +134,14 @@ lookahead_distance_m = 2000  # 每車 road_ahead 沿路徑往前看的距離（�
 speed_free_ratio = 0.8       # speed/速限 ≥ 此值 →「自由流」
 speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩行」
 
+# ----- 長期記憶 trip_summary 的 LLM 摘要 -----
+# 關閉 → 用確定性模板（現狀）；開啟 → 由 gemma 等小模型批次摘要。詳見 docs/MEMORY_zh-TW.md。
+# 失敗一律 fallback 回模板，不中斷。摘要不影響模擬物理（同 seed 同軌跡仍成立）。
+[summary]
+use_llm_summary = false         # 開關
+summary_model = "gemma4:e2b"    # 摘要模型 tag（請對齊 `ollama list`，可能是 gemma3n:e2b）
+summary_every_n_steps = 5       # 每幾步重算；抵達時也會補算
+
 # ----- 可重現性 -----
 [reproducibility]
 seed = 42                    # 同 seed → 同軌跡

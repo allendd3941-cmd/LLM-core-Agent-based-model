@@ -6,6 +6,8 @@ const TrafficCharts = (() => {
   let congestionChart = null;
   let arrivedChart = null;
   let modeChart = null;
+  let modeTotals = {};        // 行為模式「累積」次數（跨所有 step 累加）
+  let lastModeCycle = -1;     // 避免同一 cycle 重複累加
 
   const GRID = "rgba(255,255,255,0.06)";
   const TICK = "#93a1b3";
@@ -43,7 +45,7 @@ const TrafficCharts = (() => {
 
     modeChart = new Chart(document.getElementById("chart-mode"), {
       type: "bar",
-      data: { labels: [], datasets: [{ label: "agent 數", data: [], backgroundColor: "#3fb6ff" }] },
+      data: { labels: [], datasets: [{ label: "累積選擇次數", data: [], backgroundColor: "#3fb6ff" }] },
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true, ticks: { stepSize: 1 } } } },
     });
@@ -62,13 +64,22 @@ const TrafficCharts = (() => {
     arrivedChart.data.datasets[1].data = hist.map((h) => h.moving || 0);
     arrivedChart.update();
 
+    // 行為模式：累積柱狀圖（把每步的當前分佈累加，而非只看當步）
     const md = state.mode_distribution || {};
-    modeChart.data.labels = Object.keys(md);
-    modeChart.data.datasets[0].data = Object.values(md);
+    if (state.cycle !== lastModeCycle) {
+      Object.entries(md).forEach(([mode, n]) => {
+        modeTotals[mode] = (modeTotals[mode] || 0) + n;
+      });
+      lastModeCycle = state.cycle;
+    }
+    modeChart.data.labels = Object.keys(modeTotals);
+    modeChart.data.datasets[0].data = Object.values(modeTotals);
     modeChart.update();
   }
 
   function reset() {
+    modeTotals = {};
+    lastModeCycle = -1;
     [congestionChart, arrivedChart, modeChart].forEach((c) => {
       if (!c) return;
       c.data.labels = [];

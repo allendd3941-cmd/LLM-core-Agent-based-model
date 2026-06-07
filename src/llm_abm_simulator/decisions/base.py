@@ -33,6 +33,7 @@ class StepDecision:
     agent_id: str
     active_mode: str = ""
     vehicle_type: str = ""
+    reason: str = ""        # 選擇此 active_mode 的原因（10~20 字）
 
 
 @runtime_checkable

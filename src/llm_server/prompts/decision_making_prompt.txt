@@ -15,6 +15,7 @@ active mode包含五種如下，請依據各個agent不同的性質、旅行記�
 
 agent name為每個agent的名字，請根據"agent profile資料"的name值去對應生成，不許有漏掉。
 vehicle_type根據"agent profile資料"的"vehicle_ownership"值去對應生成，不許有漏掉，且只能有"機車"或"汽車"兩種值。
+reason為該agent選擇此active mode的原因，請用繁體中文10~20字精簡說明（結合其性格、旅行記憶與環境資訊，例如「前方壅塞且趕時間，改走避塞路線」）。
 decision-making 結果輸出必須完全符合以下結構，除此結構內容外，禁止產生其餘文字內容：
 {
   "agents": [
@@ -22,7 +23,8 @@ decision-making 結果輸出必須完全符合以下結構，除此結構內容�
       "agent name": "王大偉",
       "active mode": "fast",
       "residential_location": "東區",
-      "vehicle_type":"機車"
+      "vehicle_type":"機車",
+      "reason": "路況順暢且趕時間，想快點抵達"
     }
   ]
 }
