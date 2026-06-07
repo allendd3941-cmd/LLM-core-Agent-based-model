@@ -26,8 +26,8 @@ county_name = "臺南市"
 perception_radius_m = 300.0             # 感知半徑（公尺）
 arrival_distance_threshold_m = 0     # 抵達判定容差（公尺）
 crowded_speed_factor = 0.55             # 壅塞時速度乘數（越小降越多）
-missing_road_speed_cap_kmh = 40.0       # 無速限資料路段的速度上限
-crowded_road_threshold = 0.5            # congestion_proxy ≥ 此值視為壅塞 / 觸發重算路徑
+missing_road_speed_cap_kmh = 60.0       # 無速限資料路段的速度上限
+crowded_road_threshold = 0.3            # congestion_proxy ≥ 此值視為壅塞 / 觸發重算路徑
 
 # ----- 預設移動偏好（每個 agent 的初始 active_mode 權重）-----
 # 註：time/distance/comfort/capacity 為路徑規劃權重，數值相對大小決定取向。
@@ -138,9 +138,9 @@ speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩�
 # 關閉 → 用確定性模板（現狀）；開啟 → 由 gemma 等小模型批次摘要。詳見 docs/MEMORY_zh-TW.md。
 # 失敗一律 fallback 回模板，不中斷。摘要不影響模擬物理（同 seed 同軌跡仍成立）。
 [summary]
-use_llm_summary = false         # 開關
-summary_model = "gemma4:e2b"    # 摘要模型 tag（請對齊 `ollama list`，可能是 gemma3n:e2b）
-summary_every_n_steps = 5       # 每幾步重算；抵達時也會補算
+use_llm_summary = true         # 開關
+summary_model = "llama3.1:8b"    # 摘要模型 tag（請對齊 `ollama list`，可能是 gemma3n:e2b）
+summary_every_n_steps = 2       # 每幾步重算；抵達時也會補算
 
 # ----- 可重現性 -----
 [reproducibility]
