@@ -1,14 +1,24 @@
-"""config.py — 集中管理模擬器所有可調整參數。
+"""config.py — 模擬器參數的型別化 schema 與載入器。
 
-這裡的數值與語意刻意對齊 ``gama_moudle/Traffic_ABM_LLM_complete_v2.gaml`` 的
-``global`` [可調整參數區]，讓 Python 模擬器與原 GAMA 模型行為一致、便於對照。
-之後要調整模擬行為，原則上只改這一個檔。
+**可調整參數的唯一真實來源是 ``config/simulation.toml``**（人類可編輯、可寫註解）。
+本檔負責：(1) 用 dataclass 定義型別化 schema 與「程式碼預設值」（TOML 缺值時的 fallback）；
+(2) 用 Python 內建 ``tomllib`` 載入 TOML 並覆寫成 ``DEFAULT_CONFIG`` / ``UI_CONFIG`` /
+``HIGHWAY_SPECS``。TOML 的 key 名稱與此處 dataclass 欄位名一一對應。
+
+數值與語意刻意對齊 ``gama_moudle/Traffic_ABM_LLM_complete_v2.gaml`` 的 ``global``
+[可調整參數區]，讓 Python 模擬器與原 GAMA 模型行為一致、便於對照。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import dataclasses
+import logging
+import tomllib
+from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 專案路徑（src/llm_abm_simulator/config.py → 專案根目錄上溯三層）
@@ -20,6 +30,7 @@ DATA_DIR = PROJECT_ROOT / "data"        # 所有資料集中於此（GIS 原始�
 GIS_DIR = DATA_DIR / "gis"              # 原 "GIS data/"，整理後移至 data/gis/
 OUTPUT_DIR = PROJECT_ROOT / "output"    # runtime artifact（CSV），已被 .gitignore 忽略
 FRONTEND_DIR = PROJECT_ROOT / "simulation_web" / "frontend"
+CONFIG_TOML = PROJECT_ROOT / "config" / "simulation.toml"   # 使用者可編輯的參數檔
 
 # GIS 來源檔（對齊 GAML shape_file_* 設定；ROADLINK 在本專案不存在，改由 OSM/synthetic 取代）
 TOWN_SHP = GIS_DIR / "TOWN_MOI_1140318_3826.shp"
@@ -91,14 +102,8 @@ class SimulationConfig:
     road_flow_high_threshold: int = 8            # 視覺化：紅色門檻
     road_flow_medium_threshold: int = 3          # 視覺化：橘色門檻
 
-    # === LLM API（既有 server.py /from-gama）===
-    # 註：GAML 內 api_port 為 8001，但 server.py / README 實際在 8000。預設對齊 server.py。
-    api_host: str = "127.0.0.1"
-    api_port: int = 8000
-    api_endpoint: str = "/from-gama"
-    api_timeout_s: float = 120.0
-
     # === 決策模式 ===
+    # LLM 決策一律在本進程直呼 llm_server pipeline（run_perception / run_decision_making）。
     use_llm: bool = False                        # 預設 mock；前端可切換
 
     # === 可重現性 ===
@@ -108,10 +113,244 @@ class SimulationConfig:
     allow_osm_download: bool = True              # bundle 不存在時是否嘗試即時下載
     synthetic_grid_size: int = 12                # synthetic fallback 網格邊長節點數
 
-    @property
-    def api_url(self) -> str:
-        return f"http://{self.api_host}:{self.api_port}{self.api_endpoint}"
 
+@dataclass(frozen=True)
+class UIConfig:
+    """前端控制範圍（對應 TOML ``[ui]``）。同時驅動後端 clamp 與前端 slider。"""
+
+    speed_min: float = 0.5
+    speed_max: float = 5.0
+    speed_step: float = 0.5
+    speed_default: float = 1.0
+    agents_min: int = 5
+    agents_max: int = 80        # 同時是後端 set_agents 的 clamp 上限
+    agents_step: int = 5
+
+    def to_payload(self) -> dict[str, Any]:
+        """給 engine.init_payload 下發前端（key 與前端 slider 屬性對應）。"""
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class MemoryConfig:
+    """agent 旅次記憶（STM/LTM）的可調門檻（對應 TOML ``[memory]``）。
+
+    把每步的量化感知（congestion_proxy、移動距離、距離目的地）轉成「人類印象」的
+    質性標籤時所用的門檻；以及 LTM 壓縮時記幾個壅塞點。詳見 docs/MEMORY_zh-TW.md。
+    這裡只放「數值門檻」；質性標籤文字（順暢/普通/壅塞…）是設計常數，定義在
+    domain/agent.py，與 prompt 語意綁定、不從 TOML 調整。
+    """
+
+    # --- traffic_feel：當步壅塞感（congestion_proxy 介於 0..1）---
+    feel_congested_proxy: float = 0.6    # proxy ≥ 此值（或 is_crowded）→「壅塞」
+    feel_normal_proxy: float = 0.3       # proxy ≥ 此值 →「普通」；否則「順暢」
+
+    # --- moved：當步移動感（每步前進公尺）---
+    moved_stalled_m: float = 50.0        # 每步移動 < 此值 →「停滯」
+    moved_slow_m: float = 200.0          # < 此值 →「緩慢」；否則「前進中」
+
+    # --- overall_smoothness：整趟順暢度（整趟平均 congestion_proxy）---
+    smoothness_rough_proxy: float = 0.6  # 平均 ≥ 此值 →「不順」
+    smoothness_mid_proxy: float = 0.3    # 平均 ≥ 此值 →「中等」；否則「順暢」
+
+    # --- LTM 壓縮 ---
+    congested_spots_max: int = 5         # 記憶中最多保留幾個塞過的地點
+    distance_decimals: int = 1           # remaining 距離顯示的小數位數
+
+
+@dataclass(frozen=True)
+class PerceptionContextConfig:
+    """送給 LLM 的「環境感知」可調參數（對應 TOML ``[perception_context]``）。
+
+    控制全域壅塞熱點與每車前方路況的取樣範圍，兼顧 LLM 可理解度與 max context。
+    質性門檻（順暢/普通/壅塞）沿用 MemoryConfig 的 feel_*，保持同一套詞彙。
+    詳見 docs/ENVIRONMENT_zh-TW.md。
+    """
+
+    hotspots_top_k: int = 5              # 全域 congestion_hotspots 取前幾個行政區
+    lookahead_distance_m: float = 2000.0 # 每車 road_ahead 沿路徑往前看的距離（公尺）
+    speed_free_ratio: float = 0.8        # speed/速限 ≥ 此值 →「自由流」
+    speed_slow_ratio: float = 0.5        # ≥ 此值 →「略慢」；否則「壅塞緩行」
+
+
+# road_network 的 highway 速限 fallback（TOML [highway_specs] 缺省時用這組）。
+_DEFAULT_HIGHWAY_SPECS: dict[str, dict[str, float]] = {
+    "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity": 60},
+    "trunk": {"speed_car": 80, "speed_moto": 65, "lanes": 2, "capacity": 50},
+    "primary": {"speed_car": 60, "speed_moto": 50, "lanes": 2, "capacity": 40},
+    "secondary": {"speed_car": 50, "speed_moto": 40, "lanes": 2, "capacity": 30},
+    "tertiary": {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity": 20},
+    "residential": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity": 12},
+    "unclassified": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity": 10},
+    "service": {"speed_car": 25, "speed_moto": 25, "lanes": 1, "capacity": 8},
+}
+_DEFAULT_HIGHWAY_SPEC = {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity": 15}
+
+
+@dataclass(frozen=True)
+class ActiveModeProfile:
+    """單一 active_mode 的「數值 + 路徑策略」（對應 TOML ``[active_modes.<name>]``）。
+
+    前四個 weight 驅動 routing 基礎成本（time/distance/comfort/capacity 的相對大小決定取向）；
+    後面的策略旗標讓每個 mode 走出「不同的路徑選擇方式」，預設值皆為「關閉」→
+    不啟用任何旗標時行為等同原本的最短路徑。詳見 docs/ACTIVE_MODES_zh-TW.md。
+    """
+
+    desired_speed_kmh: float = 40.0
+    time_weight: float = 0.45
+    distance_weight: float = 0.25
+    comfort_weight: float = 0.20
+    capacity_weight: float = 0.10
+    # --- 路徑策略旗標 ---
+    congestion_penalty: float = 0.0      # 額外壅塞懲罰倍率：成本 ×(1 + penalty×congestion)；0=不額外懲罰
+    avoid_threshold: float = 1.0         # congestion_proxy > 此值的邊近乎封路（重罰）；≥1=停用（proxy 上限 1）
+    road_class_bias: float = 0.0         # >0：幹道打折、小路加罰（偏好大路）；0=不分路型
+    recompute_on_crowded: bool = True    # 壅塞時是否重算路徑；False=路徑定了走到底（tolerate）
+    route_randomness: float = 0.0        # 每邊成本隨機微擾 ±randomness（seeded，可重現）；用來分散車流
+
+
+# 五種 active_mode 的內建預設（TOML [active_modes] 缺省/缺值時的 fallback）。
+# 設計取向：fast/tolerate 拚時間、avoid 拚避塞、comfortable 拚路況好、short 拚距離。
+_DEFAULT_ACTIVE_MODE_PROFILES: dict[str, ActiveModeProfile] = {
+    # 最短時間：時間權重高、無視壅塞、塞了會重算找更快的
+    "fast": ActiveModeProfile(
+        desired_speed_kmh=55.0, time_weight=0.70, distance_weight=0.20,
+        comfort_weight=0.05, capacity_weight=0.05, route_randomness=0.05),
+    # 時間優先但「不繞路」：成本同 fast，但塞車不重算（走到底）
+    "tolerate_congestion": ActiveModeProfile(
+        desired_speed_kmh=45.0, time_weight=0.55, distance_weight=0.30,
+        comfort_weight=0.10, capacity_weight=0.05,
+        recompute_on_crowded=False, route_randomness=0.05),
+    # 避塞：壅塞重罰 + 對高壅塞邊硬避開、積極重算、高隨機分散車流
+    "avoid_congestion": ActiveModeProfile(
+        desired_speed_kmh=38.0, time_weight=0.20, distance_weight=0.10,
+        comfort_weight=0.25, capacity_weight=0.45,
+        congestion_penalty=3.0, avoid_threshold=0.6, route_randomness=0.20),
+    # 舒適：偏好大路（road_class_bias），中度避塞
+    "comfortable": ActiveModeProfile(
+        desired_speed_kmh=42.0, time_weight=0.20, distance_weight=0.10,
+        comfort_weight=0.45, capacity_weight=0.25,
+        congestion_penalty=1.0, road_class_bias=0.4, route_randomness=0.10),
+    # 最短距離：純距離、無視速度與路型，願意鑽小路抄近
+    "short_distance": ActiveModeProfile(
+        desired_speed_kmh=35.0, time_weight=0.10, distance_weight=0.70,
+        comfort_weight=0.10, capacity_weight=0.10, route_randomness=0.10),
+}
+
+
+# ---------------------------------------------------------------------------
+# TOML 載入（唯一真實來源 = config/simulation.toml；缺值/缺檔皆回退到上面的預設）
+# ---------------------------------------------------------------------------
+def _load_toml(path: Path) -> dict[str, Any]:
+    """讀取 TOML；檔案不存在回 {}（純用程式碼預設），解析錯誤則拋出含路徑的清楚訊息。"""
+    if not path.exists():
+        logger.info("找不到 %s，改用程式碼內建預設值。", path)
+        return {}
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"設定檔解析失敗 {path}：{e}") from e
+
+
+def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> dict[str, Any]:
+    """把所有區段（skip_sections 除外）的 key 攤平，過濾出 cls 的已知欄位。
+
+    TOML key 名稱與 dataclass 欄位名一致；tuple 型欄位的 list 值會轉成 tuple。
+    """
+    field_types = {f.name: f.type for f in fields(cls)}
+    defaults = {f.name: f.default for f in fields(cls)}
+    overrides: dict[str, Any] = {}
+    for section, body in raw.items():
+        if section in skip_sections or not isinstance(body, dict):
+            continue
+        for key, value in body.items():
+            if key not in field_types:
+                logger.warning("設定檔出現未知參數 [%s].%s，已忽略。", section, key)
+                continue
+            # 預設值是 tuple 的欄位（如 default_road_type_preference）：list → tuple
+            if isinstance(defaults.get(key), tuple) and isinstance(value, list):
+                value = tuple(value)
+            overrides[key] = value
+    return overrides
+
+
+def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context"})
+    cfg = dataclasses.replace(SimulationConfig(), **overrides)
+    if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
+        raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
+    return cfg
+
+
+def _build_memory_config(raw: dict[str, Any]) -> MemoryConfig:
+    overrides = {k: v for k, v in raw.get("memory", {}).items()
+                 if k in {f.name for f in fields(MemoryConfig)}}
+    mem = dataclasses.replace(MemoryConfig(), **overrides)
+    if not (mem.feel_normal_proxy <= mem.feel_congested_proxy):
+        raise ValueError("設定檔 [memory].feel_normal_proxy 不可大於 feel_congested_proxy")
+    if not (mem.moved_stalled_m <= mem.moved_slow_m):
+        raise ValueError("設定檔 [memory].moved_stalled_m 不可大於 moved_slow_m")
+    if mem.congested_spots_max < 0 or mem.distance_decimals < 0:
+        raise ValueError("設定檔 [memory].congested_spots_max / distance_decimals 不可為負")
+    return mem
+
+
+def _build_perception_context(raw: dict[str, Any]) -> PerceptionContextConfig:
+    overrides = {k: v for k, v in raw.get("perception_context", {}).items()
+                 if k in {f.name for f in fields(PerceptionContextConfig)}}
+    pc = dataclasses.replace(PerceptionContextConfig(), **overrides)
+    if pc.hotspots_top_k < 0 or pc.lookahead_distance_m < 0:
+        raise ValueError("設定檔 [perception_context].hotspots_top_k / lookahead_distance_m 不可為負")
+    if not (pc.speed_slow_ratio <= pc.speed_free_ratio):
+        raise ValueError("設定檔 [perception_context].speed_slow_ratio 不可大於 speed_free_ratio")
+    return pc
+
+
+def _build_ui_config(raw: dict[str, Any]) -> UIConfig:
+    overrides = {k: v for k, v in raw.get("ui", {}).items()
+                 if k in {f.name for f in fields(UIConfig)}}
+    ui = dataclasses.replace(UIConfig(), **overrides)
+    if ui.agents_min > ui.agents_max:
+        raise ValueError("設定檔 [ui].agents_min 不可大於 agents_max")
+    if ui.speed_min > ui.speed_max:
+        raise ValueError("設定檔 [ui].speed_min 不可大於 speed_max")
+    return ui
+
+
+def _build_highway_specs(raw: dict[str, Any]) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
+    specs = raw.get("highway_specs")
+    if not isinstance(specs, dict) or not specs:
+        return dict(_DEFAULT_HIGHWAY_SPECS), dict(_DEFAULT_HIGHWAY_SPEC)
+    table = {k: dict(v) for k, v in specs.items() if isinstance(v, dict) and k != "default"}
+    default_spec = dict(specs.get("default", _DEFAULT_HIGHWAY_SPEC))
+    return (table or dict(_DEFAULT_HIGHWAY_SPECS)), default_spec
+
+
+def _build_active_mode_profiles(raw: dict[str, Any]) -> dict[str, ActiveModeProfile]:
+    """以內建預設為底，用 TOML [active_modes.<name>] 覆寫各 mode；缺的 mode 補回預設。"""
+    section = raw.get("active_modes")
+    profiles = dict(_DEFAULT_ACTIVE_MODE_PROFILES)
+    if isinstance(section, dict):
+        valid = {f.name for f in fields(ActiveModeProfile)}
+        for name, body in section.items():
+            if not isinstance(body, dict):
+                continue
+            overrides = {k: v for k, v in body.items() if k in valid}
+            base = profiles.get(name, ActiveModeProfile())
+            profiles[name] = dataclasses.replace(base, **overrides)
+    return profiles
+
+
+# ---------------------------------------------------------------------------
+# 模組層匯出（載入一次；下游沿用 DEFAULT_CONFIG / UI_CONFIG / HIGHWAY_SPECS）
+# ---------------------------------------------------------------------------
+_RAW = _load_toml(CONFIG_TOML)
 
 # 預設情境（web 層與測試可直接引用，再以 dataclasses.replace 覆寫）
-DEFAULT_CONFIG = SimulationConfig()
+DEFAULT_CONFIG = _build_simulation_config(_RAW)
+UI_CONFIG = _build_ui_config(_RAW)
+MEMORY_CONFIG = _build_memory_config(_RAW)
+PERCEPTION_CONTEXT = _build_perception_context(_RAW)
+HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)
+ACTIVE_MODE_PROFILES = _build_active_mode_profiles(_RAW)

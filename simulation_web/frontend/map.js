@@ -72,7 +72,8 @@ const TrafficMap = (() => {
         m = L.circleMarker([a.lat, a.lng], {
           radius, color: "#0b0f16", weight: 1, fillColor: color, fillOpacity: 0.95,
         }).addTo(map);
-        m.on("click", () => onAgentSelect && onAgentSelect(a));
+        // 用 m._agentData（每步更新）而非閉包捕捉的初始 a，確保點擊看到最新一步資料（含 trip_summary）
+        m.on("click", () => onAgentSelect && onAgentSelect(m._agentData));
         agentMarkers[a.agent_id] = m;
       } else {
         m.setLatLng([a.lat, a.lng]);

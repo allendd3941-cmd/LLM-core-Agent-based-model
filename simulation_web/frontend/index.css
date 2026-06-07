@@ -105,6 +105,10 @@ body {
 .inspect { font-size: 12px; line-height: 1.7; color: var(--text-dim); }
 .inspect b { color: var(--text); }
 .inspect .row { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border); padding: 2px 0; }
+.inspect .trip-summary { margin-top: 10px; padding: 8px 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; }
+.inspect .trip-summary > span { font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: 0.3px; }
+.inspect .trip-summary p { margin: 6px 0 0; color: var(--text); line-height: 1.7; }
+.inspect .trip-summary p.muted { color: var(--text-dim); }
 
 /* ── Map ─────────────────────────────────────────────── */
 .map-wrap { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }

@@ -1,19 +1,18 @@
-"""llm_adapter.py — 呼叫既有 FastAPI ``/from-gama`` 的決策來源。
+"""llm_adapter.py — 呼叫既有 LLM pipeline 的決策來源（in-process 直呼）。
 
-保留原 LLM pipeline 相容：本 adapter 組出與 GAML 等價的 init_agents / step_update
-payload（對齊 Traffic_ABM_LLM_complete_v2.gaml 的 send_initial_request / send_step_request），
-POST 到既有 server.py，再用 ``response_parser`` 解析回應（伺服器回傳的是 LLM 原始文字）。
+本 adapter 組出與 GAML 等價的 init_agents / step_update payload（對齊
+Traffic_ABM_LLM_complete_v2.gaml 的 send_initial_request / send_step_request），
+直接在本進程呼叫 ``llm_server`` 的 pipeline 函式（run_agent_profile /
+run_perception / run_decision_making），取得 LLM 原始文字後用 ``response_parser`` 解析。
 
-設計為同步（requests）；web 層會以 executor 在背景執行緒呼叫，避免阻塞事件迴圈。
-伺服器不可用或解析不到時，回傳空 dict 並設 ``last_call_ok=False``，由引擎 fallback 到 mock。
+設計為同步（直呼）；web 層會以 executor 在背景執行緒呼叫，避免阻塞事件迴圈。
+pipeline 不可用或解析不到時，回傳空 dict 並設 ``last_call_ok=False``，由引擎 fallback 到 mock。
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any
-
-import requests
 
 from ..config import SimulationConfig
 from ..domain.agent import VehicleAgent
@@ -24,9 +23,12 @@ logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "TrafficABM_Tainan_LLM"
 
+# 與 server.py 一致的 agent profile 快取檔（兩者算出的 output/ 路徑相同）。
+_AGENT_PROFILE_FILENAME = "agent_profile_output_1.txt"
+
 
 class LLMDecisionPolicy:
-    """透過 HTTP 呼叫既有 /from-gama 的決策來源。"""
+    """在本進程直呼 llm_server pipeline 的決策來源。"""
 
     name = "llm"
 
@@ -37,11 +39,11 @@ class LLMDecisionPolicy:
 
     # ------------------------------------------------------------------
     def is_available(self) -> bool:
-        """健康檢查：能連到 server.py（/docs 200）即視為可用。"""
+        """健康檢查：能否匯入 llm_server pipeline。"""
+        import importlib.util
         try:
-            url = f"http://{self.cfg.api_host}:{self.cfg.api_port}/docs"
-            return requests.get(url, timeout=5).status_code == 200
-        except requests.RequestException:
+            return importlib.util.find_spec("llm_server") is not None
+        except (ImportError, ValueError):
             return False
 
     # ------------------------------------------------------------------
@@ -50,7 +52,7 @@ class LLMDecisionPolicy:
     ) -> dict[str, InitAssignment]:
         self.available_towns = available_towns
         payload = self._build_init_payload(agents, available_towns)
-        body = self._post(payload)
+        body = self._call_inproc(payload)
         if body is None:
             self.last_call_ok = False
             return {}
@@ -63,7 +65,7 @@ class LLMDecisionPolicy:
         self, agents: list[VehicleAgent], environment: dict[str, Any], cycle: int
     ) -> dict[str, StepDecision]:
         payload = self._build_step_payload(agents, environment, cycle)
-        body = self._post(payload)
+        body = self._call_inproc(payload)
         if body is None:
             self.last_call_ok = False
             return {}
@@ -153,15 +155,31 @@ class LLMDecisionPolicy:
         return result
 
     # ------------------------------------------------------------------
-    def _post(self, payload: dict[str, Any]) -> Any | None:
+    # 傳輸層：在本進程直呼 llm_server pipeline
+    # ------------------------------------------------------------------
+    def _call_inproc(self, payload: dict[str, Any]) -> Any | None:
+        """直接在本進程跑 llm_server pipeline（等同 server.py /from-gama 的流程）。
+
+        回傳 run_decision_making 的 LLM 原始文字，供下游 response_parser 解析。
+        匯入或執行失敗時回 None，由上層 fallback 到 mock。
+        """
         try:
-            resp = requests.post(self.cfg.api_url, json=payload, timeout=self.cfg.api_timeout_s)
-            resp.raise_for_status()
-            # server.py 回傳的是 LLM 原始文字（可能是 JSON 字串或被包成 JSON 字串）
-            try:
-                return resp.json()
-            except ValueError:
-                return resp.text
-        except requests.RequestException as e:
-            logger.warning("呼叫 /from-gama 失敗：%s", e)
+            from llm_server.agent_profile import run_agent_profile
+            from llm_server.decision_making import run_decision_making
+            from llm_server.perception import run_perception
+        except ImportError as e:
+            logger.warning("in-process LLM pipeline 匯入失敗（檢查 llm_server 是否可匯入）：%s", e)
+            return None
+
+        try:
+            from .. import config
+            profile_path = config.OUTPUT_DIR / _AGENT_PROFILE_FILENAME
+            if not profile_path.exists():
+                run_agent_profile(output=True)
+            agent_profile = profile_path.read_text(encoding="utf-8")
+
+            perception = run_perception(payload, output=True)
+            return run_decision_making(agent_profile, perception, output=True)
+        except Exception as e:  # noqa: BLE001  pipeline 內可能丟各種錯，一律降級
+            logger.warning("in-process LLM pipeline 執行失敗：%s", e)
             return None

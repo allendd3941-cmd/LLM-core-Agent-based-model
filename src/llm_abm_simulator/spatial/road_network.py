@@ -34,24 +34,12 @@ from ..domain.town import Town
 logger = logging.getLogger(__name__)
 
 # 依 OSM highway type 推估速度（km/h）/ 車道 / 容量代理值。
+# 來源為 config/simulation.toml 的 [highway_specs]（缺檔/缺值時回退到 config 內建預設）。
 # capacity 為 congestion_proxy = flow/capacity 的分母，刻意取較小值讓壅塞在 demo 中可見。
-_HIGHWAY_SPECS: dict[str, dict[str, float]] = {
-    "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity": 60},
-    "trunk": {"speed_car": 80, "speed_moto": 65, "lanes": 2, "capacity": 50},
-    "primary": {"speed_car": 60, "speed_moto": 50, "lanes": 2, "capacity": 40},
-    "secondary": {"speed_car": 50, "speed_moto": 40, "lanes": 2, "capacity": 30},
-    "tertiary": {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity": 20},
-    "residential": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity": 12},
-    "unclassified": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity": 10},
-    "service": {"speed_car": 25, "speed_moto": 25, "lanes": 1, "capacity": 8},
-}
-_DEFAULT_SPEC = {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity": 15}
-
-
 def _spec_for(highway: str) -> dict[str, float]:
     # OSM highway 可能是 list 的字串表示，取第一個關鍵字
     key = highway.split(",")[0].strip().strip("[]'\" ") if highway else ""
-    return _HIGHWAY_SPECS.get(key, _DEFAULT_SPEC)
+    return config.HIGHWAY_SPECS.get(key, config.DEFAULT_HIGHWAY_SPEC)
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +239,7 @@ def build_synthetic_graph(cfg: config.SimulationConfig) -> nx.DiGraph:
             x_m, y_m = to_m.transform(lng, lat)
             g.add_node(ids[i][j], lat=lat, lng=lng, x_m=x_m, y_m=y_m)
 
-    spec = _HIGHWAY_SPECS["secondary"]
+    spec = config.HIGHWAY_SPECS.get("secondary", config.DEFAULT_HIGHWAY_SPEC)
 
     def _link(a: str, b: str) -> None:
         length = _node_dist(g, a, b)

@@ -38,6 +38,23 @@ const TrafficUI = (() => {
   function applyInitConfig(cfg) {
     if (!cfg) return;
     $("m-cycle").textContent = `0 / ${cfg.max_steps}`;
+
+    // slider 範圍由後端 [ui] 設定下發（單一真實來源），HTML 的值只是 init 前的 fallback
+    const ui = cfg.ui;
+    if (ui) {
+      const speed = $("speed");
+      speed.min = ui.speed_min;
+      speed.max = ui.speed_max;
+      speed.step = ui.speed_step;
+      speed.value = ui.speed_default;
+      $("speed-val").textContent = parseFloat(ui.speed_default).toFixed(1) + "×";
+
+      const agents = $("agents");
+      agents.min = ui.agents_min;
+      agents.max = ui.agents_max;
+      agents.step = ui.agents_step;
+    }
+
     $("agents").value = cfg.nb_agents;
     $("agents-val").textContent = cfg.nb_agents;
     if (cfg.decision_source) $("m-source").textContent = cfg.decision_source;
@@ -66,9 +83,18 @@ const TrafficUI = (() => {
       ["距終點", `${(a.distance_to_destination / 1000).toFixed(2)} km`],
       ["鄰近車輛", a.nearby_agent_count],
     ];
-    $("agent-inspect").innerHTML = rows
+    const rowsHtml = rows
       .map(([k, v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`)
       .join("");
+    const summary = a.trip_summary
+      ? `<div class="trip-summary"><span>長期記憶 · 旅次摘要</span><p>${escapeHtml(a.trip_summary)}</p></div>`
+      : `<div class="trip-summary"><span>長期記憶 · 旅次摘要</span><p class="muted">尚無旅次記憶。</p></div>`;
+    $("agent-inspect").innerHTML = rowsHtml + summary;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
   function toast(msg) {

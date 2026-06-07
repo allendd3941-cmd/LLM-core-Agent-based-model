@@ -19,14 +19,23 @@ This project is designed as a research prototype and portfolio project that demo
 
 This repository now includes a **pure-Python traffic ABM simulator** that fully replaces
 the simulation responsibilities previously handled by GAMA, plus an interactive localhost
-web demo (Leaflet map + Chart.js + WebSocket). The existing LLM pipeline (`/from-gama`,
-prompts, schemas) is **unchanged** — the new simulator calls it through an adapter and also
+web demo (Leaflet map + Chart.js + WebSocket). The simulator reuses the existing LLM
+pipeline (prompts, schemas, `agent_profile` / `perception` / `decision_making`) and also
 supports a deterministic mock-decision mode.
+
+The simulator reaches the LLM pipeline **in-process**: `decisions/llm_adapter.py` calls the
+`llm_server` pipeline functions (`agent_profile` / `perception` / `decision_making`) directly,
+with no separate `server.py` and no HTTP hop. The raw LLM text is parsed by `response_parser`;
+an unavailable LLM falls back to mock without crashing. (`server.py` `/from-gama` is kept as the
+standalone GAMA-era LLM server but is no longer used by the simulator.)
 
 - Source package: `src/llm_abm_simulator/`
 - Frontend: `simulation_web/frontend/`
+- Tunable parameters (single source of truth): `config/simulation.toml` — edit there to change
+  simulation time, agent count/speed, congestion, frontend slider ranges, and road
+  speed limits; no Python edits needed (defaults in `config.py` act as fallback).
 - Bundled real OSM road network: `data/tainan_roads.graphml`
-- Full Chinese guide (install, run, Mock/LLM, **Linux SSH demo**, architecture, GAMA parity):
+- Full Chinese guide (install, run, Mock/LLM transports, **Linux SSH demo**, architecture, GAMA parity):
   [`docs/PYTHON_SIMULATOR_zh-TW.md`](docs/PYTHON_SIMULATOR_zh-TW.md)
 
 Quick start (mock mode, no LLM needed):

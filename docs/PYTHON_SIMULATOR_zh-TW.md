@@ -12,6 +12,35 @@
 
 ---
 
+## 0. 參數設定（唯一真實來源：`config/simulation.toml`）
+
+所有「你會想自行調」的參數都集中在 **`config/simulation.toml`**，改完存檔、重啟伺服器即生效。
+不需要改任何 `.py`。整個檔缺失或某個 key 缺值時，會自動回退到 `config.py` 內的程式碼預設值。
+
+| TOML 區段 | 內容 |
+|---|---|
+| `[time]` | `max_steps` / `step_minutes`（模擬時長）|
+| `[agents]` | `nb_agents`（預設 agent 數）/ 起訖行政區 |
+| `[perception]` | 感知半徑、抵達容差、`crowded_speed_factor`（壅塞降速）、壅塞門檻 |
+| `[movement]` | agent 速度（`default_desired_speed_kmh` / `default_speed_car_kmh` / `default_speed_moto_kmh`）與預設路徑權重 |
+| `[active_modes.*]` | 五種 active_mode 各自的數值權重與路徑策略（詳見 [`ACTIVE_MODES_zh-TW.md`](ACTIVE_MODES_zh-TW.md)）|
+| `[roads]` | 車流→壅塞估計與權重、視覺化門檻 |
+| `[llm]` | `use_llm`（LLM 決策一律在進程內直呼 pipeline） |
+| `[memory]` | 旅次記憶 STM/LTM 質性門檻（見 `docs/MEMORY_zh-TW.md`） |
+| `[perception_context]` | 送 LLM 的環境感知：熱點/前方路況取樣（見 `docs/ENVIRONMENT_zh-TW.md`） |
+| `[reproducibility]` | `seed`（同 seed → 同軌跡）|
+| `[network]` | OSM 下載開關、合成路網大小 |
+| `[ui]` | 前端 slider 範圍（速度 / agent 數）；**同時驅動後端 clamp 與前端 slider**，是兩者的單一來源 |
+| `[highway_specs.*]` | 各 OSM 路型的速限/車道/容量 |
+
+> **TOML key 名稱與 `config.py` 的 dataclass 欄位一一對應**；要新增參數＝在 dataclass 加欄位、TOML 加同名一行即可。
+>
+> ⚠ **`[highway_specs]` 例外**：改值只在「重建路網」時生效，因為 bundle 的 `data/tainan_roads.graphml`
+> 已把速度/容量烤進每條邊。改完需重建：`python -m llm_abm_simulator.spatial.build_roads`
+> （或 `--synthetic`）。`[movement]` 的 agent 速度則是即時生效（重設模擬即可）。
+
+---
+
 ## 1. 環境需求
 
 - Python 3.12+
@@ -76,24 +105,33 @@ $env:PYTHONPATH = "src"; uvicorn llm_abm_simulator.web.app:app --port 8080
 
 ## 4. 啟用 LLM 決策模式（可選，需 Ollama）
 
-LLM 模式會呼叫**既有的** FastAPI `/from-gama`（`server.py`）取得每個 agent 的
-起點 / active_mode / 車種，因此要先啟動原伺服器與 Ollama。
+LLM 模式會跑既有的 LLM pipeline（`run_agent_profile` → `run_perception` →
+`run_decision_making`）取得每個 agent 的起點 / active_mode / 車種。**需要 Ollama 在跑**
+（模型見 `.env`）。
+
+LLM 決策**一律在模擬器進程內直接呼叫** `llm_server` 的 pipeline 函式（in-process），
+省掉 HTTP round-trip 與一層 JSON 序列化，單機 demo 最乾淨、延遲最低、好除錯。
+`decisions/llm_adapter.py` 取得 LLM 原始文字後由 `response_parser` 解析；失敗時自動 fallback 到 Mock。
+
+> 不需另開 `server.py`、也不需額外連接埠。`server.py`（`/from-gama`）仍保留為 GAMA 時代的
+> standalone LLM 伺服器，但模擬器不再透過它連線。
+
+### 啟動方式
+
+只需啟動模擬器，毋須另開 LLM 伺服器：
 
 ```powershell
-# 視窗 A：啟動既有 LLM 伺服器（需 Ollama 已在跑，模型見 .env）
-# LLM pipeline 已整理進 src/llm_server/
-$env:PYTHONPATH = "src"; uvicorn llm_server.server:app --host 127.0.0.1 --port 8000 --reload
-
-# 視窗 B：啟動模擬器
+# 確保 Ollama 已在跑（模型見 .env），然後：
 uvicorn llm_abm_simulator.web.app:app --port 8080
 ```
 
+### 共通行為
+
 在網頁右上把決策模式切到 **LLM**。
 
-- 連線設定預設 `127.0.0.1:8000`（對齊 `server.py`）。可在 `src/llm_abm_simulator/config.py`
-  的 `api_host` / `api_port` 調整。
-  > 註：GAML 檔內寫的是 8001，但 `server.py` 與 README 實際在 8000，故預設用 8000。
 - **LLM 不可用時會自動 fallback 到 Mock，不會 crash**（介面決策來源欄會顯示實際使用的來源）。
+  in-process 模式下「不可用」包含 `llm_server` 無法匯入或 pipeline 執行丟錯；HTTP 模式下包含
+  連不到 `server.py`。
 - LLM 每步需呼叫一次推論，可能數秒~數十秒；現場 demo 建議用 Mock，需要展示 LLM 推理時再切換。
 
 ---
@@ -153,8 +191,8 @@ PYTHONPATH=src uvicorn llm_abm_simulator.web.app:app --host 0.0.0.0 --port 8080
 
 ### LLM 模式於遠端
 
-同一台 server 上另開 `PYTHONPATH=src uvicorn llm_server.server:app --port 8000` 並確保該機可連到 Ollama；
-模擬器預設連 `127.0.0.1:8000` 即可，毋須額外轉送。
+模擬器進程內直接跑 pipeline（in-process），遠端只要確保該機可連到 Ollama 即可，
+毋須另開 `server.py`、也毋須額外連接埠轉送。
 
 ---
 
@@ -172,8 +210,9 @@ pytest tests/simulator -q
 ## 8. 架構
 
 ```text
+config/simulation.toml     使用者可編輯的參數檔（唯一真實來源；見第 0 節）
 src/llm_abm_simulator/
-  config.py            集中所有可調整參數（對齊 GAML global [可調整參數區]）
+  config.py            參數的型別化 schema + tomllib 載入器（程式碼預設值＝fallback）
   domain/              純資料模型：agent / road / town / state / events
   spatial/             gis_loader / road_network / routing / geojson（geopandas+networkx）
   decisions/           base / mock_policy / llm_adapter / response_parser
@@ -191,8 +230,11 @@ tests/simulator/           pytest
                                           │
                                           ├─ spatial：GIS / 路網 / 路徑
                                           └─ decisions：Mock 規則
-                                                         └─或─ LLMAdapter ──HTTP──► /from-gama（既有 LLM pipeline）
+                                                         └─或─ LLMAdapter ──► 直接呼叫 llm_server pipeline ──► Ollama
 ```
+
+> `LLMAdapter` 在模擬器進程內直接呼叫 `llm_server` pipeline（in-process），
+> 回傳的 LLM 原始文字由 `response_parser` 解析、失敗時 fallback 到 Mock。
 
 ---
 
@@ -207,10 +249,10 @@ tests/simulator/           pytest
 | ROADLINK 路網（本專案無此檔）| `spatial/road_network.py`：OSM bundle / 合成 fallback |
 | `as_edge_graph` / `path_between` / `with_weights` 動態權重 / crowded recompute | `spatial/routing.py` + 引擎 |
 | road 欄位（speed_car/moto, lanes, capacity, flow, congestion_proxy, weight…）| `domain/road.py` |
-| vehicle 欄位與 active_mode 偏好、memory、route_status… | `domain/agent.py` |
+| vehicle 欄位與 active_mode 偏好、旅次記憶（STM/LTM，見 `docs/MEMORY_zh-TW.md`）、route_status… | `domain/agent.py` |
 | perceive（速限/missing cap/crowded factor/感知半徑/鄰近數/距離/抵達/重算）| `simulation/engine.py` |
 | congestion 指標、mode/status 分佈、per-cycle | `simulation/metrics.py` |
-| init/step payload 與 `/from-gama` 契約、LLM fallback | `decisions/llm_adapter.py` + `response_parser.py` |
+| init/step payload 契約（in-process 直呼 llm_server pipeline）、LLM fallback | `decisions/llm_adapter.py` + `response_parser.py` |
 | 輸出 `agent_memory.csv` / `road_flow.csv`（欄位對齊）| `simulation/metrics.py` → `output/` |
 | GUI display（地圖/道路/車輛/球場/控制/圖表/檢視）| `simulation_web/frontend/` |
 

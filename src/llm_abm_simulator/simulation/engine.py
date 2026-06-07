@@ -21,6 +21,7 @@ from typing import Any
 
 from .. import config
 from ..config import SimulationConfig
+from ..domain import agent as agent_mod
 from ..domain.agent import VehicleAgent
 from ..domain.events import RouteStatus
 from ..domain.state import AgentSnapshot, RoadSnapshot, SimulationState
@@ -62,6 +63,7 @@ class SimulationEngine:
         self._stadium_latlng: tuple[float, float] = (0.0, 0.0)
         self._dest_node: str | None = None
         self._available_towns: list[str] = []
+        self._prev_avg_congestion: float | None = None   # 上一步全市平均壅塞（算 trend 用）
 
         # 決策來源
         self._mock = MockDecisionPolicy(self.cfg, self.rng)
@@ -122,7 +124,7 @@ class SimulationEngine:
             agent.origin_town = a.origin_town or self.cfg.default_origin_town
             agent.apply_vehicle_type(a.vehicle_type)
             if a.active_mode:
-                agent.active_mode = a.active_mode
+                agent.apply_active_mode(a.active_mode)   # 套用 mode 的數值 + 路徑策略
             agent.api_status = "init_response_applied" if self.last_decision_source == "llm" else "mock"
 
     def _place_agent(self, agent: VehicleAgent) -> None:
@@ -138,7 +140,8 @@ class SimulationEngine:
         agent.destination_node = self._dest_node
         agent.x, agent.y = self.network.node_xy(origin_node)
         agent.destination_town = self.cfg.destination_town_name
-        path = routing.find_path(self.network, origin_node, self._dest_node, agent.routing_weights())
+        path = routing.find_path(self.network, origin_node, self._dest_node,
+                                 agent.routing_strategy(), seed=self.cfg.seed)
         agent.current_path = path
         agent.path_index = 0
         agent.edge_progress = 0.0
@@ -181,19 +184,37 @@ class SimulationEngine:
         env = self._environment_summary(cycle)
         mode_dist, status_dist = metrics.distributions(self.agents)
         self.recorder.record_cycle(cycle, env, mode_dist, status_dist)
+        # 記下本步全市平均壅塞，供「下一步」算 congestion_trend
+        self._prev_avg_congestion = env["average_congestion_proxy"]
 
         # 7. memory + CSV
         for agent in self.agents:
-            agent.travel_memory.append(agent.build_memory_entry(cycle))
+            agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
         self.recorder.append_agent_rows(cycle, self.agents)
         self.recorder.append_road_rows(cycle, self.network.all_roads())
 
         return self._snapshot(cycle, env, mode_dist, status_dist)
 
+    def _llm_environment(self, env: dict[str, Any]) -> dict[str, Any]:
+        """給 LLM 決策用的精簡質性全域環境。
+
+        只留決策相關欄位；展示用統計（agent_count / active_road_count / crowded_road_count /
+        average_congestion_proxy 等裸值）繼續給 recorder/前端/CSV，不進 LLM。
+        詳見 docs/ENVIRONMENT_zh-TW.md。
+        """
+        return {
+            "cycle": env["cycle"],
+            "destination_town": env["destination_town"],
+            "overall_traffic": agent_mod._traffic_feel(
+                env["average_congestion_proxy"], False, config.MEMORY_CONFIG),
+            "congestion_trend": env["congestion_trend"],
+            "congestion_hotspots": env["congestion_hotspots"],
+        }
+
     def _apply_step_decisions(self, env: dict[str, Any], cycle: int) -> None:
         decisions = {}
         if self.cfg.use_llm:
-            decisions = self._llm.decide_step(self.agents, env, cycle)
+            decisions = self._llm.decide_step(self.agents, self._llm_environment(env), cycle)
             if decisions and self._llm.last_call_ok:
                 self.last_decision_source = "llm"
             else:
@@ -238,10 +259,11 @@ class SimulationEngine:
             agent.selected_action = "arrived" if agent.route_status == RouteStatus.ARRIVED else "error"
             return
 
-        # 壅塞 → 重算路徑（避開壅塞）
-        if agent.is_crowded and agent.current_node and agent.destination_node:
+        # 壅塞 → 重算路徑（避開壅塞）；tolerate_congestion 的 recompute_on_crowded=False 不重算
+        if agent.is_crowded and agent.recompute_on_crowded and agent.current_node and agent.destination_node:
             new_path = routing.find_path(
-                self.network, agent.current_node, agent.destination_node, agent.routing_weights()
+                self.network, agent.current_node, agent.destination_node,
+                agent.routing_strategy(), seed=self.cfg.seed,
             )
             if len(new_path) > 1:
                 agent.current_path = new_path
@@ -332,6 +354,8 @@ class SimulationEngine:
         assert self.network is not None
         road = self._current_road(agent)
         agent.current_road_id = road.road_id if road else ""
+        agent.current_road_name = road.road_name if road else ""
+        agent.current_road_class = agent_mod.clean_highway(road.highway) if road else ""
         agent.congestion_proxy = road.congestion_proxy if road else 0.0
         agent.next_road_id = road.road_id if road else "unknown"
         agent.current_town = self._town_of_point(agent.x, agent.y)
@@ -339,6 +363,46 @@ class SimulationEngine:
             agent.x - self._stadium_xy[0], agent.y - self._stadium_xy[1]
         )
         agent.nearby_agent_count = self._count_nearby(agent)
+        # 送 LLM 的環境感知質性標籤（腳下壅塞 / 速度感 / 前方路況）
+        self._refresh_env_labels(agent, road)
+
+    def _refresh_env_labels(self, agent: VehicleAgent, road) -> None:
+        """算好 agent 當下環境的質性標籤（traffic_here / speed_status / road_ahead）。"""
+        mem = config.MEMORY_CONFIG
+        pc = config.PERCEPTION_CONTEXT
+        crowded = agent.congestion_proxy >= self.cfg.crowded_road_threshold
+        agent.traffic_here = agent_mod._traffic_feel(agent.congestion_proxy, crowded, mem)
+        if agent.route_status == RouteStatus.ARRIVED:
+            agent.speed_status = agent_mod.SPEED_ARRIVED
+        else:
+            limit = road.speed_limit_for(agent.vehicle_type) if road else agent.desired_speed
+            agent.speed_status = agent_mod.speed_status_label(agent.speed_kmh, limit, pc)
+        agent.road_ahead = self._road_ahead(agent, mem.feel_congested_proxy, pc.lookahead_distance_m)
+
+    def _road_ahead(self, agent: VehicleAgent, congested_proxy: float, lookahead_m: float) -> str:
+        """沿 current_path 從下一段起往前看 lookahead_m，回傳第一個壅塞段的描述。
+
+        只看「前方」（不含腳下這條，腳下已由 traffic_here 表示）。無壅塞或已抵達→順暢/空。
+        """
+        if agent.route_status in (RouteStatus.ARRIVED, RouteStatus.ERROR):
+            return ""
+        path = agent.current_path
+        i = agent.path_index
+        if not path or i >= len(path) - 1:
+            return agent_mod.AHEAD_CLEAR
+        # 先把目前這條邊的剩餘距離算進「到前方的距離」
+        cur = self.network.road_between(path[i], path[i + 1]) if self.network else None
+        acc = max((cur.length if cur else 0.0) - agent.edge_progress, 0.0)
+        for k in range(i + 1, len(path) - 1):
+            seg = self.network.road_between(path[k], path[k + 1])
+            if seg is None:
+                continue
+            if seg.congestion_proxy >= congested_proxy:
+                return agent_mod.road_ahead_label(acc, seg.road_name)
+            acc += seg.length
+            if acc >= lookahead_m:
+                break
+        return agent_mod.AHEAD_CLEAR
 
     def _count_nearby(self, agent: VehicleAgent) -> int:
         r2 = agent.perception_radius ** 2
@@ -381,7 +445,53 @@ class SimulationEngine:
         env = metrics.overall_environment(self.network.all_roads(), self.cfg, len(self.agents))
         env["cycle"] = cycle
         env["elapsed_minutes"] = cycle * self.cfg.step_minutes
+        # 讓 LLM 看懂「塞在哪、變好還變壞」：壅塞趨勢 + 行政區級熱點（全域只送一份）
+        env["congestion_trend"] = self._congestion_trend(env["average_congestion_proxy"])
+        env["congestion_hotspots"] = self._congestion_hotspots()
         return env
+
+    def _congestion_trend(self, current_avg: float) -> str:
+        """全市平均壅塞 vs 上一步 → 改善中 / 持平 / 惡化中。"""
+        prev = self._prev_avg_congestion
+        if prev is None:
+            return "持平"
+        delta = current_avg - prev
+        if delta > 0.02:
+            return "惡化中"
+        if delta < -0.02:
+            return "改善中"
+        return "持平"
+
+    def _congestion_hotspots(self) -> list[dict[str, Any]]:
+        """行政區級壅塞熱點（top-K）。
+
+        壅塞只存在於有 agent 的路段（flow 來自 agent），故由 agent 的所在區 + 路況聚合即可，
+        成本為 O(agent 數)、不掃全路網、不乘 context。只列出「有壅塞」的行政區。
+        """
+        from collections import defaultdict
+        thr = self.cfg.crowded_road_threshold
+        crowded_roads: dict[str, set] = defaultdict(set)
+        cong_by_town: dict[str, list] = defaultdict(list)
+        for a in self.agents:
+            if not a.current_town or a.route_status == RouteStatus.ARRIVED:
+                continue
+            cong_by_town[a.current_town].append(a.congestion_proxy)
+            if a.congestion_proxy >= thr and a.current_road_id:
+                crowded_roads[a.current_town].add(a.current_road_id)
+        mem = config.MEMORY_CONFIG
+        rows: list[dict[str, Any]] = []
+        for town, congs in cong_by_town.items():
+            crowded = len(crowded_roads.get(town, ()))
+            if crowded == 0:
+                continue
+            avg = sum(congs) / len(congs)
+            rows.append({
+                "town": town,
+                "level": agent_mod._traffic_feel(avg, False, mem),
+                "crowded_roads": crowded,
+            })
+        rows.sort(key=lambda r: r["crowded_roads"], reverse=True)
+        return rows[:config.PERCEPTION_CONTEXT.hotspots_top_k]
 
     def _snapshot(self, cycle: int, env: dict[str, Any],
                   mode_dist: dict[str, int], status_dist: dict[str, int]) -> SimulationState:
@@ -398,6 +508,7 @@ class SimulationEngine:
                 nearby_agent_count=a.nearby_agent_count,
                 origin_town=a.origin_town, destination_town=a.destination_town,
                 current_town=a.current_town, current_road_id=a.current_road_id,
+                trip_summary=a.long_term_memory.get("trip_summary", ""),
             ))
         # 只送有流量的道路（前端據此即時上色），避免每步送數萬條
         roads_snap = [
@@ -443,6 +554,7 @@ class SimulationEngine:
         self._mock = MockDecisionPolicy(self.cfg, self.rng)
         self.recorder.reset()
         self.agents = []
+        self._prev_avg_congestion = None
         self.is_initialized = False
         self.initialize()
 
@@ -468,5 +580,6 @@ class SimulationEngine:
                 "step_minutes": self.cfg.step_minutes,
                 "nb_agents": self.cfg.nb_agents,
                 "decision_source": self.last_decision_source,
+                "ui": config.UI_CONFIG.to_payload(),
             },
         }

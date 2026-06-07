@@ -29,6 +29,7 @@ class AgentSnapshot:
     destination_town: str
     current_town: str
     current_road_id: str
+    trip_summary: str = ""          # long_term_memory 的整趟旅次摘要（前端點擊 agent 顯示）
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()

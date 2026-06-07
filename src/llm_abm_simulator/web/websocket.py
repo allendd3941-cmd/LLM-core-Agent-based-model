@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from ..config import DEFAULT_CONFIG, SimulationConfig
+from ..config import DEFAULT_CONFIG, UI_CONFIG, SimulationConfig
 from ..simulation.engine import SimulationEngine
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,9 @@ class SimulationSession:
         elif action == "reset":
             await self._reset()
         elif action == "set_speed":
-            self.speed_multiplier = max(0.5, min(float(value or 1.0), 5.0))
+            default = UI_CONFIG.speed_default
+            self.speed_multiplier = max(UI_CONFIG.speed_min,
+                                        min(float(value or default), UI_CONFIG.speed_max))
             await self.status(f"速度設為 {self.speed_multiplier:.1f} 倍")
         elif action == "set_agents":
             await self._set_agents(int(value or self.cfg.nb_agents))
@@ -129,7 +131,7 @@ class SimulationSession:
         if self.engine.running or self.engine.scheduler.cycle > 0:
             await self.status("模擬進行中無法變更 agent 數，請先重設。")
             return
-        n = max(1, min(n, 200))
+        n = max(UI_CONFIG.agents_min, min(n, UI_CONFIG.agents_max))
         self.cfg = dataclasses.replace(self.cfg, nb_agents=n)
         await self._stop_run_task()
         self.engine = SimulationEngine(self.cfg)

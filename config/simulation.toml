@@ -1,0 +1,216 @@
+# ============================================================================
+# simulation.toml — 模擬器的「唯一真實來源」設定檔
+#
+# 這是你要自行修改參數的地方。所有 key 名稱與 config.py 的 SimulationConfig /
+# UIConfig 欄位完全對應；分區只是為了好讀。改完存檔、重啟伺服器即生效
+# （前端 slider 範圍也由本檔的 [ui] 區下發，不必另改 HTML/JS）。
+#
+# 缺少的 key 會自動回退到 config.py 內的程式碼預設值；整個檔不存在也能正常跑。
+# 數值/語意對齊 gama_moudle/Traffic_ABM_LLM_complete_v2.gaml 的 global [可調整參數區]。
+# ============================================================================
+
+# ----- 模擬時間 -----
+[time]
+max_steps = 36          # 總週期數（GAML max_steps）
+step_minutes = 1        # 每週期代表幾分鐘（GAML step_minutes）
+
+# ----- agent 規模與起訖 -----
+[agents]
+nb_agents = 10                      # 預設 agent 數（前端可在 [ui] 範圍內覆寫）
+destination_town_name = "安定區"     # 球場 point 載入失敗時的 fallback 終點
+default_origin_town = "東區"         # 解析失敗時的 fallback 生成行政區
+county_name = "臺南市"
+
+# ----- 感知 / 移動 / 抵達 -----
+[perception]
+perception_radius_m = 300.0             # 感知半徑（公尺）
+arrival_distance_threshold_m = 0     # 抵達判定容差（公尺）
+crowded_speed_factor = 0.55             # 壅塞時速度乘數（越小降越多）
+missing_road_speed_cap_kmh = 40.0       # 無速限資料路段的速度上限
+crowded_road_threshold = 0.5            # congestion_proxy ≥ 此值視為壅塞 / 觸發重算路徑
+
+# ----- 預設移動偏好（每個 agent 的初始 active_mode 權重）-----
+# 註：time/distance/comfort/capacity 為路徑規劃權重，數值相對大小決定取向。
+[movement]
+default_vehicle_type = "汽車"            # "汽車" 或 "機車"
+default_desired_speed_kmh = 40.0        # agent 期望速度
+default_speed_car_kmh = 45.0            # 汽車偏好速度
+default_speed_moto_kmh = 35.0           # 機車偏好速度
+default_route_randomness = 0.15
+default_comfort_weight = 0.20
+default_time_weight = 0.45
+default_distance_weight = 0.25
+default_capacity_weight = 0.10
+default_road_type_preference = ["primary", "secondary", "tertiary", "residential"]
+
+# ----- 五種 active_mode 的數值 + 路徑策略 -----
+# 每個 mode 一組權重（time/distance/comfort/capacity，相對大小決定路徑取向）+ 策略旗標。
+# 策略旗標讓每個 mode 走出不同的路徑選擇方式（詳見 docs/ACTIVE_MODES_zh-TW.md）：
+#   congestion_penalty   額外壅塞懲罰倍率，成本 ×(1 + penalty×congestion)；0=不額外懲罰
+#   avoid_threshold      congestion_proxy > 此值的邊近乎封路（硬避開）；≥1=停用（proxy 上限 1）
+#   road_class_bias      >0：幹道打折、小路加罰（偏好大路）；0=不分路型
+#   recompute_on_crowded 壅塞時是否重算路徑；false=路徑定了走到底
+#   route_randomness     每邊成本隨機微擾 ±值（seeded、可重現），用來分散車流
+# mock/LLM 只需回 mode 名字，套用時會自動帶入下列數值與策略。
+
+[active_modes.fast]              # 最短時間：無視壅塞，走自由流最快路線
+desired_speed_kmh = 55.0
+time_weight = 0.70
+distance_weight = 0.20
+comfort_weight = 0.05
+capacity_weight = 0.05
+route_randomness = 0.05
+
+[active_modes.tolerate_congestion]   # 時間優先但不繞路：塞了也走到底
+desired_speed_kmh = 45.0
+time_weight = 0.55
+distance_weight = 0.30
+comfort_weight = 0.10
+capacity_weight = 0.05
+recompute_on_crowded = false
+route_randomness = 0.05
+
+[active_modes.avoid_congestion]  # 避塞：壅塞重罰 + 硬避開高壅塞邊 + 積極重算 + 高隨機分散
+desired_speed_kmh = 38.0
+time_weight = 0.20
+distance_weight = 0.10
+comfort_weight = 0.25
+capacity_weight = 0.45
+congestion_penalty = 3.0
+avoid_threshold = 0.6
+route_randomness = 0.20
+
+[active_modes.comfortable]       # 舒適：偏好大路，中度避塞
+desired_speed_kmh = 42.0
+time_weight = 0.20
+distance_weight = 0.10
+comfort_weight = 0.45
+capacity_weight = 0.25
+congestion_penalty = 1.0
+road_class_bias = 0.4
+route_randomness = 0.10
+
+[active_modes.short_distance]    # 最短距離：純距離，願意鑽小路抄近
+desired_speed_kmh = 35.0
+time_weight = 0.10
+distance_weight = 0.70
+comfort_weight = 0.10
+capacity_weight = 0.10
+route_randomness = 0.10
+
+# ----- 道路壅塞估計與權重 -----
+[roads]
+active_road_min_flow = 1                 # flow ≥ 此值算「使用中道路」
+capacity_fallback_vehicle_count = 10.0   # 道路無容量資料時的分母 fallback
+flow_weight_multiplier = 2.0             # flow 對動態權重的放大係數
+road_flow_high_threshold = 8             # 視覺化：紅色門檻
+road_flow_medium_threshold = 3           # 視覺化：橘色門檻
+
+# ----- LLM 決策來源 -----
+# LLM 決策一律在本進程直呼 llm_server pipeline（run_perception / run_decision_making）；
+# 不經 server.py，不需另開 port。仍需 Ollama 服務（perception/decision 內部會連）。
+[llm]
+use_llm = false              # 預設 mock；前端可切換
+
+# ----- 旅次記憶（STM 上一步 / LTM 壓縮印象）-----
+# 把每步的量化感知轉成「人類印象」質性標籤時用的門檻。詳見 docs/MEMORY_zh-TW.md。
+# 標籤文字（順暢/普通/壅塞…）是設計常數、與 prompt 語意綁定，定義在 domain/agent.py。
+[memory]
+feel_congested_proxy = 0.6   # 當步 congestion_proxy ≥ 此值（或被判定壅塞）→「壅塞」
+feel_normal_proxy = 0.3      # ≥ 此值 →「普通」；否則「順暢」
+moved_stalled_m = 50.0       # 每步移動 < 此值 →「停滯」
+moved_slow_m = 200.0         # 每步移動 < 此值 →「緩慢」；否則「前進中」
+smoothness_rough_proxy = 0.6 # 整趟平均 congestion_proxy ≥ 此值 →「不順」
+smoothness_mid_proxy = 0.3   # ≥ 此值 →「中等」；否則「順暢」
+congested_spots_max = 5      # LTM 中最多保留幾個塞過的地點
+distance_decimals = 1        # remaining 距離顯示小數位數
+
+# ----- 送 LLM 的環境感知（全域熱點 / 每車前方路況）-----
+# 讓 LLM 真正看懂環境，同時控制 max context。詳見 docs/ENVIRONMENT_zh-TW.md。
+# 質性門檻（順暢/普通/壅塞）沿用上面 [memory] 的 feel_*，保持同一套詞彙。
+[perception_context]
+hotspots_top_k = 5            # 全域 congestion_hotspots 取前幾個最塞的行政區（不乘 agent 數）
+lookahead_distance_m = 2000  # 每車 road_ahead 沿路徑往前看的距離（公尺）
+speed_free_ratio = 0.8       # speed/速限 ≥ 此值 →「自由流」
+speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩行」
+
+# ----- 可重現性 -----
+[reproducibility]
+seed = 42                    # 同 seed → 同軌跡
+
+# ----- 路網來源 -----
+[network]
+allow_osm_download = true    # bundle 路網不存在時是否嘗試用 OSMnx 即時下載
+synthetic_grid_size = 12     # synthetic fallback 網格邊長節點數
+
+# ----- 前端控制範圍（同時驅動後端 clamp 與前端 slider）-----
+[ui]
+speed_min = 0.5              # 播放速度倍率下限
+speed_max = 5.0             # 播放速度倍率上限
+speed_step = 0.5
+speed_default = 1.0
+agents_min = 5              # agent 數下限
+agents_max = 1000           # agent 數上限（同時是後端 clamp 上限）
+agents_step = 5
+
+# ----- 各 OSM highway 型別的速限 / 車道 / 容量 -----
+# ⚠ 註：改這區只在「重建路網」時生效。bundle 的 data/tainan_roads.graphml
+#    已把速度/容量烤進每條邊；改值後需執行：
+#        python -m llm_abm_simulator.spatial.build_roads            （OSM）
+#        python -m llm_abm_simulator.spatial.build_roads --synthetic（合成）
+#    重建 graphml 才會反映新值。
+# capacity 為 congestion_proxy = flow/capacity 的分母，刻意取較小值讓壅塞在 demo 可見。
+[highway_specs.motorway]
+speed_car = 90
+speed_moto = 70
+lanes = 3
+capacity = 60
+
+[highway_specs.trunk]
+speed_car = 80
+speed_moto = 65
+lanes = 2
+capacity = 50
+
+[highway_specs.primary]
+speed_car = 60
+speed_moto = 50
+lanes = 2
+capacity = 40
+
+[highway_specs.secondary]
+speed_car = 50
+speed_moto = 40
+lanes = 2
+capacity = 30
+
+[highway_specs.tertiary]
+speed_car = 40
+speed_moto = 35
+lanes = 1
+capacity = 20
+
+[highway_specs.residential]
+speed_car = 30
+speed_moto = 30
+lanes = 1
+capacity = 12
+
+[highway_specs.unclassified]
+speed_car = 30
+speed_moto = 30
+lanes = 1
+capacity = 10
+
+[highway_specs.service]
+speed_car = 25
+speed_moto = 25
+lanes = 1
+capacity = 8
+
+# 未列出的 highway 型別套用此預設
+[highway_specs.default]
+speed_car = 40
+speed_moto = 35
+lanes = 1
+capacity = 15
