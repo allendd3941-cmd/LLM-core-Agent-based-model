@@ -373,11 +373,17 @@ class VehicleAgent:
     # ------------------------------------------------------------------
     # 旅次記憶更新（取代 GAML build_memory_entry + append）
     # ------------------------------------------------------------------
-    def update_memory(self, cycle: int, step_minutes: int, cfg: MemoryConfig) -> None:
+    def update_memory(self, cycle: int, step_minutes: int, cfg: MemoryConfig,
+                      llm_summary_mode: bool = False) -> None:
         """以「上一步」覆蓋 STM、以累積器確定性重算 LTM（每步呼叫一次）。
 
         模擬人類旅次記憶：上一刻記得清楚（STM），整趟只留一段模糊印象（LTM）。
-        全程確定性（不呼叫 LLM、不含隨機），維持同 seed 同軌跡。
+        STM 與 LTM 的結構化欄位全程確定性（不呼叫 LLM、不含隨機），維持同 seed 同軌跡。
+
+        ``llm_summary_mode``：
+        - False（預設）：`trip_summary` 用確定性模板生成（方式 A），來源標 "template"。
+        - True：`trip_summary` **只由 LLM 摘要填**（engine `_maybe_llm_summaries`）；本方法不套模板，
+          保留上一次的 LLM 摘要，若尚未生成過則**留空**（來源標 "pending"），等門檻觸發才填。
         """
         feel = _traffic_feel(self.congestion_proxy, self.is_crowded, cfg)
         where = _where_label(self.current_town, self.current_road_name, self.current_road_id)
@@ -414,14 +420,21 @@ class VehicleAgent:
         # --- LTM：把整趟壓縮成一段印象 + 少量聚合量（固定大小）---
         elapsed_steps = cycle - self._start_cycle + 1
         avg_proxy = self._smoothness_sum / max(self._smoothness_n, 1)
+        if llm_summary_mode:
+            # 只給 LLM 摘要：保留上一次 LLM 結果，沒生成過就留空（等門檻觸發）
+            summary = self.long_term_memory.get("trip_summary", "")
+            if self.summary_source != "llm":
+                self.summary_source = "pending"
+        else:
+            summary = self._compose_summary(elapsed_steps, step_minutes, avg_proxy, closer, arrived, cfg)
+            self.summary_source = "template"
         self.long_term_memory = {
-            "trip_summary": self._compose_summary(elapsed_steps, step_minutes, avg_proxy, closer, arrived, cfg),
+            "trip_summary": summary,
             "elapsed": f"約 {elapsed_steps * step_minutes} 分鐘（{elapsed_steps} 步）",
             "congested_spots": list(self._congested_spots),
             "mode_switches": self._mode_switch_count,
             "overall_smoothness": _smoothness_label(avg_proxy, cfg),
         }
-        self.summary_source = "template"   # 預設模板；engine 開啟 LLM 摘要時會覆寫此句與來源
 
     def memory_facts(self) -> dict[str, Any]:
         """給 LLM 摘要器的結構化事實（只給事實，不含模板那句）。"""

@@ -101,11 +101,15 @@ const TrafficUI = (() => {
       ? `<div class="inspect-block"><span>決策理由（選此行為模式的原因）</span><p>${escapeHtml(a.decision_reason)}</p></div>`
       : "";
 
-    // 長期記憶摘要 + 來源標籤
-    const srcLabel = a.summary_source === "llm" ? "LLM 摘要" : "模板";
-    const summary = a.trip_summary
-      ? `<div class="inspect-block"><span>長期記憶 · 旅次摘要 <em>（${srcLabel}）</em></span><p>${escapeHtml(a.trip_summary)}</p></div>`
-      : `<div class="inspect-block"><span>長期記憶 · 旅次摘要</span><p class="muted">尚無旅次記憶。</p></div>`;
+    // 長期記憶摘要：有內容才顯示來源標籤；LLM 模式尚未生成（pending）就留空提示
+    let summary;
+    if (a.trip_summary) {
+      const srcLabel = a.summary_source === "llm" ? "LLM 摘要" : "模板";
+      summary = `<div class="inspect-block"><span>長期記憶 · 旅次摘要 <em>（${srcLabel}）</em></span><p>${escapeHtml(a.trip_summary)}</p></div>`;
+    } else {
+      const placeholder = a.summary_source === "pending" ? "等待 LLM 摘要…" : "尚無旅次記憶。";
+      summary = `<div class="inspect-block"><span>長期記憶 · 旅次摘要</span><p class="muted">${placeholder}</p></div>`;
+    }
 
     // 人物背景（讀自 agent_profile_output_1.txt，以姓名對應）
     const persona = renderPersona(a.profile_name);

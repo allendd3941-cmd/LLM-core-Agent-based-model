@@ -188,8 +188,10 @@ class SimulationEngine:
         self._prev_avg_congestion = env["average_congestion_proxy"]
 
         # 7. memory + CSV
+        llm_summary = config.SUMMARY_CONFIG.use_llm_summary
         for agent in self.agents:
-            agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
+            agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG,
+                                llm_summary_mode=llm_summary)
         self._maybe_llm_summaries(cycle)
         self.recorder.append_agent_rows(cycle, self.agents)
         self.recorder.append_road_rows(cycle, self.network.all_roads())
