@@ -2,8 +2,8 @@
 
 本模組以純 Python 完整取代原專案中由 **GAMA** 承擔的交通 Agent-Based Model 模擬責任，
 並提供一個 localhost 互動式 web demo（Leaflet 地圖 + Chart.js 圖表 + WebSocket 即時更新），
-用於 **ACM SIGSPATIAL Demo** 展示。既有的 LLM pipeline（`server.py` 的 `/from-gama`）
-與所有 prompt/schema **完全不變**，新模擬器以 adapter 方式呼叫它。
+用於 **ACM SIGSPATIAL Demo** 展示。LLM pipeline（`llm_server` 的 agent_profile / perception /
+decision_making + prompt/schema）由模擬器以 adapter **在本進程直接呼叫**（不經 HTTP）。
 
 - 套件原始碼：`src/llm_abm_simulator/`
 - 前端：`simulation_web/frontend/`
@@ -115,8 +115,8 @@ LLM 決策**一律在模擬器進程內直接呼叫** `llm_server` 的 pipeline 
 省掉 HTTP round-trip 與一層 JSON 序列化，單機 demo 最乾淨、延遲最低、好除錯。
 `decisions/llm_adapter.py` 取得 LLM 原始文字後由 `response_parser` 解析；失敗時自動 fallback 到 Mock。
 
-> 不需另開 `server.py`、也不需額外連接埠。`server.py`（`/from-gama`）仍保留為 GAMA 時代的
-> standalone LLM 伺服器，但模擬器不再透過它連線。
+> 不需另開任何 LLM 伺服器、也不需額外連接埠（只需 Ollama 在跑）。原 GAMA 時代的 standalone
+> `/from-gama` 伺服器已移除，改為本進程直呼。
 
 ### 啟動方式
 
@@ -213,7 +213,7 @@ PYTHONPATH=src uvicorn llm_abm_simulator.web.app:app --host 0.0.0.0 --port 8080
 ### LLM 模式於遠端
 
 模擬器進程內直接跑 pipeline（in-process），遠端只要確保該機可連到 Ollama 即可，
-毋須另開 `server.py`、也毋須額外連接埠轉送。
+毋須另開任何 LLM 伺服器、也毋須額外連接埠轉送。
 
 ---
 

@@ -1,60 +1,102 @@
 # Architecture
 
-This document describes the high-level architecture of `LLM_abm_model`.
+High-level architecture of `LLM_abm_model` — a Python-native, LLM-driven microscopic traffic ABM
+on a real OSM road network, with an interactive web demo.
 
-## System Role
+> For the parameter reference and run instructions see
+> [`PYTHON_SIMULATOR_zh-TW.md`](PYTHON_SIMULATOR_zh-TW.md); for the demo overview see the top-level
+> [`README.md`](../README.md).
 
-`LLM_abm_model` acts as a local LLM decision server for a GAMA traffic ABM simulation. GAMA owns the simulation state and sends HTTP payloads to FastAPI. Python modules transform the simulation state into LLM prompts, retrieve relevant context, call Ollama, and return the decision result.
+## System role
 
-## Module Responsibilities
+The **`llm_abm_simulator`** package owns the entire simulation: GIS/road network, vehicle agents,
+movement, congestion, perception, memory, metrics, and the web layer. Behavioural decisions come
+from a pluggable **`DecisionPolicy`** — either a deterministic **Mock** policy or an **LLM** policy
+that calls the **`llm_server`** pipeline **in-process** (which in turn calls a local Ollama model).
+
+There is **no GAMA and no HTTP hop** in the simulation loop. The project originated as a GAMA +
+FastAPI (`/from-gama`) prototype; that standalone HTTP server has since been removed in favour of
+the in-process pipeline described here.
+
+## Module responsibilities
+
+### `llm_abm_simulator` (the simulator)
+
+| Layer / module | Responsibility |
+| --- | --- |
+| `domain/` | Pure data models + state transitions: `agent` (state, active-mode, STM/LTM memory, payloads), `road` (flow → congestion → dynamic weight), `town`, `state` (output snapshots), `events`. No I/O, unit-testable. |
+| `spatial/` | `road_network` (OSM `graphml` → directed graph + `Road` objects), `routing` (weighted shortest path / Dijkstra + dynamic congestion weight), `gis_loader`, `geojson`, `build_roads`. |
+| `decisions/` | `base` (the `DecisionPolicy` protocol), `mock_policy` (deterministic rules), `llm_adapter` (in-process call into `llm_server`), `response_parser` (robust LLM-JSON → rows), `profile_pool` (stable persona pool + slicing). |
+| `simulation/` | `engine` (owns state, the per-step loop, perception features, hotspots/trend, LLM-summary hook, snapshots), `scheduler`, `metrics`, `random_seed`. |
+| `web/` | `app` (FastAPI: serves the frontend, `/ws`, decision-output routes), `websocket` (one `SimulationSession` per connection, driving `engine.step` off-thread). |
+| `config.py` | Typed config schema + `config/simulation.toml` loader (single source of truth for all tunables). |
+
+### `llm_server` (the LLM pipeline, called in-process)
 
 | Module | Responsibility |
 | --- | --- |
-| `server.py` | FastAPI app, request schema, `/from-gama` endpoint |
-| `llm_config.py` | Loads Ollama connection settings from `.env` |
-| `agent_profile.py` | Generates or loads agent profile information |
-| `perception.py` | Converts GAMA state into LLM-readable perception context |
-| `decision_making.py` | Builds the decision prompt and calls the LLM |
-| `RAG.py` | Selects relevant perception chunks with TF-IDF cosine similarity |
-| `od_converter.py` | Converts JSON or natural-language itinerary data into OD CSV rows |
-| `output_engine.py` | Writes generated outputs as UTF-8 text files |
-| `timer.py` | Logs long-running Ollama request timing |
+| `agent_profile.py` | Generate agent personas (identity / traits) via the LLM. |
+| `perception.py` | Reformat the simulator's structured, qualitative state into a compact per-agent + global summary for decision-making. |
+| `decision_making.py` | Build the decision prompt and call the LLM; returns each agent's active mode + `reason`. |
+| `memory_summary.py` | Optional small-model summariser for the long-term `trip_summary`. |
+| `json_utils.py` | Robust LLM-JSON salvage (handles trailing commas, fences, truncated arrays). |
+| `llm_config.py` | Ollama connection settings from `.env` (with localhost defaults). |
+| `prompts/`, `schemas/` | Prompt templates and Pydantic schemas. |
+| `RAG.py` | Lightweight TF-IDF retrieval — **currently disabled**; decision-making consumes the (already compact) perception output directly. |
 
-## Data Flow
+## Per-step data flow
 
 ```mermaid
 sequenceDiagram
-    participant G as GAMA
-    participant API as FastAPI /from-gama
-    participant P as Perception
-    participant R as RAG
-    participant D as Decision Making
-    participant L as Ollama
+    participant UI as Web demo
+    participant WS as web/ session
+    participant ENG as SimulationEngine
+    participant DEC as DecisionPolicy (Mock | LLM)
+    participant PIPE as llm_server pipeline
+    participant LLM as Ollama
 
-    G->>API: POST simulation state
-    API->>API: Validate request payload
-    API->>P: Build perception context
-    P->>D: Pass perception output
-    D->>R: Retrieve relevant context chunks
-    D->>L: Send decision prompt
-    L-->>D: LLM response
-    D-->>API: Decision result
-    API-->>G: Response body
+    UI->>WS: control (start / step / set_agents …) via WebSocket
+    loop each simulation step
+        ENG->>ENG: perceive (speed limit, congestion, neighbours)
+        ENG->>DEC: decide active mode (+ vehicle type, reason)
+        alt LLM policy
+            DEC->>PIPE: in-process call (persona → perception → decision)
+            PIPE->>LLM: prompt
+            LLM-->>PIPE: raw text
+            PIPE-->>DEC: decision text → response_parser
+        else Mock policy / LLM unavailable
+            DEC-->>ENG: deterministic rule-based decision
+        end
+        ENG->>ENG: move along weighted path (reroute if stuck in congestion)
+        ENG->>ENG: recompute road flow / congestion / weights
+        ENG->>ENG: update metrics, STM/LTM memory, snapshot
+        ENG-->>WS: state_update
+        WS-->>UI: render (map, agents, roads, charts)
+    end
 ```
 
-## Runtime Assumptions
+## Decision path: Mock vs. LLM
 
-- FastAPI runs locally at `127.0.0.1:8000`.
-- Ollama exposes an API such as `http://127.0.0.1:11434/api/generate`.
-- GAMA sends initialization and step-update payloads through HTTP POST.
-- Generated outputs are local runtime artifacts and should not be committed except curated samples.
+- **Mock** (default): `mock_policy` picks an active mode per agent from deterministic rules
+  (congestion / distance / vehicle type) and supplies a short `reason`. Fully reproducible.
+- **LLM**: `llm_adapter` builds the init/step payload, calls `llm_server` **in-process**
+  (`profile_pool.ensure_and_slice` → `perception` → `decision_making`), and parses the result with
+  `response_parser`. On any failure (import error, Ollama down, unparseable output) it **falls back
+  to Mock** without crashing; the active source is reported to the UI.
 
-## Portfolio Presentation Notes
+## Cross-cutting properties
 
-For GitHub review, the repository should highlight:
+- **Determinism.** Seeded RNG throughout; the same seed yields identical trajectories. LLM decision
+  text and (optionally) the LLM trip-summary are the only non-deterministic elements, and they do
+  not feed back into the deterministic physics.
+- **Robustness.** Malformed LLM JSON is salvaged object-by-object (`json_utils`); persona generation
+  is cached into a stable pool and reused rather than regenerated on every change.
+- **Configuration.** All tunables flow from `config/simulation.toml` through typed dataclasses in
+  `config.py`; `config.py` defaults are the fallback.
 
-- The integration boundary between GAMA and Python.
-- The LLM pipeline stages.
-- The prompt files as explicit reasoning templates.
-- The GIS and GAMA assets as simulation context.
-- Sample requests and outputs without uploading large or repetitive runtime logs.
+## Runtime assumptions
+
+- Web demo served by FastAPI/uvicorn (default `127.0.0.1:8080`).
+- For LLM mode: a local Ollama API (default `http://127.0.0.1:11434/api/generate`) with the
+  configured model pulled.
+- The bundled `data/tainan_roads.graphml` lets the demo run fully offline in Mock mode.

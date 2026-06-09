@@ -14,7 +14,7 @@ Before publishing, confirm and document:
 - License or open-data terms.
 - Coordinate reference system.
 - Preprocessing steps, if any.
-- How each layer is used by the GAMA model.
+- How each layer is used by the simulator.
 
 Recommended README note:
 
@@ -32,20 +32,7 @@ Recommended policy:
 
 - Keep `output/` locally for debugging and analysis.
 - Ignore `output/` in Git.
-- Copy only selected representative files into `examples/sample_outputs/`.
 - Do not commit sensitive prompts, API responses, or local-only runtime logs.
-
-## Portfolio Samples
-
-For portfolio review, curated examples should be small, readable, and representative:
-
-- One agent profile output.
-- One perception output.
-- One decision-making output.
-- One initialization request.
-- One step-update request.
-
-This keeps the GitHub repository focused on system design rather than raw experiment logs.
 
 ## Repository License Boundary
 

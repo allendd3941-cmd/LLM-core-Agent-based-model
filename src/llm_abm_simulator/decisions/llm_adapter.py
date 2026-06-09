@@ -156,7 +156,7 @@ class LLMDecisionPolicy:
     # 傳輸層：在本進程直呼 llm_server pipeline
     # ------------------------------------------------------------------
     def _call_inproc(self, payload: dict[str, Any]) -> Any | None:
-        """直接在本進程跑 llm_server pipeline（等同 server.py /from-gama 的流程）。
+        """直接在本進程跑 llm_server pipeline（persona 池 → perception → decision_making）。
 
         回傳 run_decision_making 的 LLM 原始文字，供下游 response_parser 解析。
         匯入或執行失敗時回 None，由上層 fallback 到 mock。

@@ -1,160 +1,83 @@
-# LLM ABM Model Server
+# LLM-Driven Microscopic Traffic ABM on a Real Road Network
 
-FastAPI-based LLM decision server for GAMA agent-based traffic simulation.
+**An interactive demo of large-language-model agents making geographically-grounded
+travel decisions on the real OSM road network of Tainan, Taiwan.**
 
-## Overview
+Vehicle agents converge on the Asia-Pacific Baseball Stadium during an event-peak scenario.
+Each agent perceives its spatial surroundings (congestion ahead on its route, district-level
+hotspots, distance to goal), carries a human-like trip memory, and is assigned a behavioural
+strategy by an LLM — all visualised live on an interactive map.
 
-`LLM_abm_model` is a local backend service that connects a GAMA agent-based traffic simulation with an LLM reasoning pipeline. GAMA sends simulation states to a FastAPI endpoint, and the Python server transforms those states into agent profiles, perception context, retrieved evidence, and decision-making prompts before returning an LLM-generated decision response.
+> Submission target: **ACM SIGSPATIAL 2026 — Demonstration Track.**
+> Companion deep-dive docs (Traditional Chinese): see [Documentation](#documentation).
 
-This project is designed as a research prototype and portfolio project that demonstrates the integration of:
+---
 
-- Agent-based traffic simulation with GAMA.
-- A FastAPI HTTP bridge for simulation-to-LLM communication.
-- Local LLM inference through an Ollama-compatible API.
-- Prompt engineering for agent profile, perception, and decision-making tasks.
-- Lightweight retrieval-augmented generation using TF-IDF and cosine similarity.
-- OD conversion utilities for turning structured or natural-language trip plans into CSV records.
+## Highlights
 
-## Python-Native Simulator (replaces GAMA) + Web Demo
+- **Real geography.** Routing and congestion run on a bundled real **OSM road network of Tainan**
+  (~10k nodes / ~28k edges, `data/tainan_roads.graphml`) — not a synthetic grid.
+- **Spatial perception for LLMs.** Agents are given *anticipatory* spatial context: congestion
+  **ahead along their planned route** (`road_ahead`), **district-level congestion hotspots**, a
+  city-wide trend, and qualitative local traffic — encoded in compact natural-language labels so
+  an LLM can reason without blowing up its context window.
+- **Human-like trip memory.** Each agent keeps a two-tier memory: **short-term** (a vivid snapshot
+  of the previous step) and **long-term** (the whole trip compressed into one impression),
+  mirroring how a real driver remembers a journey.
+- **LLM-in-the-loop, with a deterministic fallback.** An LLM assigns each agent a behavioural mode
+  (e.g. *avoid congestion*, *fastest*, *tolerate*); if the LLM is unavailable the system degrades
+  gracefully to a deterministic rule-based policy — the demo never crashes on the show floor.
+- **Reproducible.** Same seed → same trajectory. The core simulation, routing, perception and
+  memory are fully deterministic.
+- **Interactive, single-command web demo.** Leaflet map + live congestion colouring + Chart.js
+  analytics + WebSocket streaming; click any vehicle to inspect its persona, memory, and the
+  LLM's stated reason for its decision.
 
-This repository now includes a **pure-Python traffic ABM simulator** that fully replaces
-the simulation responsibilities previously handled by GAMA, plus an interactive localhost
-web demo (Leaflet map + Chart.js + WebSocket). The simulator reuses the existing LLM
-pipeline (prompts, schemas, `agent_profile` / `perception` / `decision_making`) and also
-supports a deterministic mock-decision mode.
+---
 
-The simulator reaches the LLM pipeline **in-process**: `decisions/llm_adapter.py` calls the
-`llm_server` pipeline functions (`agent_profile` / `perception` / `decision_making`) directly,
-with no separate `server.py` and no HTTP hop. The raw LLM text is parsed by `response_parser`;
-an unavailable LLM falls back to mock without crashing. (`server.py` `/from-gama` is kept as the
-standalone GAMA-era LLM server but is no longer used by the simulator.)
+## Quick start (with `uv`)
 
-- Source package: `src/llm_abm_simulator/`
-- Frontend: `simulation_web/frontend/`
-- Tunable parameters (single source of truth): `config/simulation.toml` — edit there to change
-  simulation time, agent count/speed, congestion, frontend slider ranges, and road
-  speed limits; no Python edits needed (defaults in `config.py` act as fallback).
-- Bundled real OSM road network: `data/tainan_roads.graphml`
-- Full Chinese guide (install, run, Mock/LLM transports, **Linux SSH demo**, architecture, GAMA parity):
-  [`docs/PYTHON_SIMULATOR_zh-TW.md`](docs/PYTHON_SIMULATOR_zh-TW.md)
-
-Quick start (mock mode, no LLM needed):
-
-```bash
-python -m pip install -r requirements.txt
-uvicorn llm_abm_simulator.web.app:app --host 127.0.0.1 --port 8080
-# if not installed as a package: set PYTHONPATH=src first
-```
-
-Then open <http://localhost:8080>. Run the tests with `pytest tests/simulator -q`.
-
-## Motivation
-
-Traditional agent-based models often rely on fixed rules or predefined behavior parameters. This project explores how local LLM reasoning can be introduced into a simulation loop so that agents can make context-aware decisions based on identity, travel memory, environmental perception, congestion signals, and scenario-specific prompts.
-
-The main goal is not to build a production traffic system, but to demonstrate a working architecture for combining GAMA, FastAPI, local LLM inference, and modular ABM decision logic.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    A["GAMA Traffic ABM Simulation"] --> B["POST /from-gama"]
-    B --> C["FastAPI Server"]
-    C --> D["Pydantic Request Validation"]
-    D --> E["Agent Profile Module"]
-    E --> F["Perception Module"]
-    F --> G["Lightweight RAG"]
-    G --> H["Decision Making Module"]
-    H --> I["Ollama Local LLM"]
-    I --> J["Decision Response"]
-    J --> A
-```
-
-## Request Flow
-
-1. GAMA sends an initialization or step-update payload to `POST /from-gama`.
-2. FastAPI validates the request with Pydantic models.
-3. The server loads or generates agent profile data.
-4. The perception module combines prompt templates with the current GAMA state.
-5. The decision-making module retrieves relevant perception context through lightweight RAG.
-6. The Ollama-compatible LLM endpoint generates a decision response.
-7. The server returns the decision result to GAMA.
-
-## Features
-
-- `POST /from-gama` endpoint for GAMA integration.
-- Request schema compatibility for `requested_agents`, `agents_status`, and legacy `agents` payloads.
-- Modular LLM pipeline with separate agent profile, perception, and decision-making stages.
-- Prompt files stored separately under `prompts/` for easier iteration.
-- Lightweight TF-IDF retrieval for selecting relevant perception context.
-- OD CSV conversion utility for downstream traffic analysis workflows.
-- Curated example payloads and sample outputs for GitHub portfolio review.
-- GitHub Actions syntax check for basic repository hygiene.
-
-## Project Structure
-
-```text
-LLM_abm_model/
-├─ src/
-│  ├─ llm_server/                    # LLM decision server (FastAPI + Ollama pipeline)
-│  │  ├─ server.py                   #   /from-gama endpoint
-│  │  ├─ agent_profile.py            #   agent profile generation
-│  │  ├─ perception.py               #   GAMA/sim state perception
-│  │  ├─ decision_making.py          #   decision-making pipeline
-│  │  ├─ RAG.py                      #   lightweight TF-IDF RAG
-│  │  ├─ od_converter.py             #   OD CSV conversion utility
-│  │  ├─ output_engine.py            #   UTF-8 output writer
-│  │  ├─ timer.py                    #   Ollama request timing helper
-│  │  ├─ llm_config.py               #   Ollama env configuration
-│  │  ├─ prompts/                    #   prompt templates
-│  │  └─ schemas/                    #   Pydantic schemas
-│  └─ llm_abm_simulator/             # Python-native ABM simulator (replaces GAMA)
-│     ├─ domain/  spatial/  decisions/  simulation/  web/
-│     └─ config.py
-├─ simulation_web/frontend/          # Web demo frontend (Leaflet + Chart.js)
-├─ data/
-│  ├─ gis/                           # GIS input shapefiles (towns, stadium, study area)
-│  └─ tainan_roads.graphml           # bundled real OSM road network
-├─ analysis/                         # standalone agent-analysis script + output
-├─ gama_moudle/                      # original GAMA model (reference only)
-├─ docs/                             # architecture, API, simulator guide
-├─ examples/                         # example payloads and sample outputs
-├─ tests/simulator/                  # pytest suite
-└─ output/                           # local generated outputs, ignored by Git
-```
-
-`gama_moudle/` is intentionally kept with its current name to avoid breaking existing local GAMA paths. A future cleanup can rename it to `gama_module/` in a dedicated migration commit.
-
-## Requirements
-
-- Python 3.12 or later is recommended.
-- Ollama or an Ollama-compatible local LLM API.
-- GAMA Platform for running the ABM simulation.
-- Python dependencies listed in `requirements.txt`.
-
-## Installation
-
-Create and activate a virtual environment:
+This project uses [`uv`](https://docs.astral.sh/uv/). One command installs everything; the demo
+runs in **Mock mode by default and needs no LLM/GPU**.
 
 ```bash
-python -m venv .venv
+# 1. install dependencies (creates .venv from pyproject.toml)
+uv sync
+
+# 2. launch the local web demo
+uv run uvicorn llm_abm_simulator.web.app:app --host 127.0.0.1 --port 8080
 ```
 
-On Windows PowerShell:
+Then open the local site:
 
-```powershell
-.\.venv\Scripts\Activate.ps1
+```
+http://localhost:8080
 ```
 
-Install dependencies:
+Press **▶ 開始 (Start)** and watch vehicles route across Tainan toward the stadium, with roads
+colouring by congestion in real time.
+
+> If `llm_abm_simulator` is not importable in your environment, prefix with the source path:
+> `PYTHONPATH=src uv run uvicorn llm_abm_simulator.web.app:app --host 127.0.0.1 --port 8080`
+
+Run the test suite (the `dev` extra provides `pytest`):
 
 ```bash
-python -m pip install -r requirements.txt
+uv run --extra dev pytest tests/simulator
 ```
 
-## Environment Variables
+### Enabling LLM decisions (optional)
 
-Create a local `.env` file based on `.env.example`:
+LLM mode calls a local [Ollama](https://ollama.com) model **in-process** (no extra server, no HTTP hop).
+
+```bash
+# make sure Ollama is running and the model is pulled
+ollama serve            # if not already running (default port 11434)
+ollama pull gpt-oss:20b # or any model you configure
+```
+
+Connection settings are read from `.env` (see `.env.example`); sensible localhost defaults apply
+if `.env` is absent:
 
 ```env
 OLLAMA_URL=http://127.0.0.1:11434
@@ -162,128 +85,182 @@ OLLAMA_MODE=/api/generate
 OLLAMA_MODEL=gpt-oss:20b
 ```
 
-`.env` is intentionally ignored by Git and should not be committed.
+Start the demo as above, then toggle **決策模式 → LLM** in the control panel. The decision source
+indicator shows whether LLM or Mock is actually in use (it auto-falls back to Mock if the LLM errors).
 
-## Running the Server
+---
 
-Start the FastAPI server (the LLM pipeline now lives in `src/llm_server/`):
+## The interactive demo — what you can do
 
-```bash
-pip install -e .            # makes the llm_server package importable
-uvicorn llm_server.server:app --host 127.0.0.1 --port 8000 --reload
-# without install, set the path instead:  PYTHONPATH=src uvicorn llm_server.server:app ...
+| Action | What you see |
+| --- | --- |
+| **Start / pause / step / reset / speed** | Drive the simulation forward; reproducible per seed. |
+| **Agent-count slider** | Scale the number of vehicles live. |
+| **Mock ⇄ LLM toggle** | Switch the decision source at runtime (LLM auto-fallbacks to Mock). |
+| **Click a vehicle** | Inspect panel: live state, **persona background** (age/occupation/attitudes…), **short- & long-term memory**, and the **LLM's reason** for its current behavioural mode. |
+| **Map** | Roads colour by congestion (incl. minor roads carrying flow); overlapping agents fan out so all are visible; stadium marked as the destination. |
+| **Charts** | Congestion trend, arrival progress, and **cumulative** behavioural-mode distribution. |
+| **Decision-output viewer** | Browse the raw per-step decision-making output (with each agent's `reason`). |
+| **👤 Regenerate personas** | Re-roll the agent persona pool on demand. |
+
+**Scenario.** Vehicles spawn across Tainan's 37 administrative districts and travel to the
+Asia-Pacific Baseball Stadium — an event-peak ingress problem where congestion emerges, propagates,
+and agents react to it spatially.
+
+---
+
+## System architecture
+
+```mermaid
+flowchart TD
+    UI["Web demo (Leaflet + Chart.js)"] <-->|WebSocket| WS["web/ session"]
+    WS --> ENG["SimulationEngine (owns state)"]
+    ENG --> SPA["spatial/ : OSM graph · weighted routing · congestion"]
+    ENG --> DEC["decisions/ : Mock rules ── or ── LLM adapter"]
+    DEC -.in-process.-> PIPE["llm_server pipeline<br/>persona → perception → decision"]
+    PIPE --> OLLAMA["Ollama local LLM"]
+    ENG --> PERC["perception features (qualitative, spatial)"]
+    ENG --> MEM["STM / LTM trip memory"]
 ```
 
-The GAMA model can then post simulation payloads to:
+**Per simulation step:** perceive (speed/congestion/neighbours) → decide behavioural mode
+(Mock or LLM) → move along the weighted-shortest path (reroute if stuck in congestion) →
+recompute road flow/congestion → update metrics, memory, and the live snapshot streamed to the UI.
+
+The decision pipeline is reached **in-process**: `decisions/llm_adapter.py` calls the `llm_server`
+functions (`agent_profile` → `perception` → `decision_making`) directly, which in turn call Ollama.
+There is no separate decision server and no HTTP hop (the project originated as a GAMA + FastAPI
+prototype; that path has since been removed in favour of the in-process pipeline).
+
+---
+
+## Key designs
+
+### 1. Geographically-grounded qualitative perception
+Spatial features are computed in Python on the real road graph and handed to the LLM as compact
+qualitative labels (tunable thresholds, all in `config/simulation.toml`):
+
+- **Global, sent once per step:** `overall_traffic` (city-wide level), `congestion_trend`
+  (improving/steady/worsening vs. the previous step), `congestion_hotspots` (top-K congested
+  **districts**, aggregated from where vehicles actually are — O(agents), not O(28k edges)).
+- **Per vehicle:** `current_road` (name + class), `traffic_here`, `speed_status` (speed ÷ limit),
+  **`road_ahead`** (a forward scan along the planned route: *"jam ~1.2 km ahead on Nanke Rd"*),
+  nearby-vehicle count, straight-line distance to goal.
+
+See [`docs/ENVIRONMENT_zh-TW.md`](docs/ENVIRONMENT_zh-TW.md).
+
+### 2. Human-like two-tier trip memory
+Replaces an unbounded list of raw per-step snapshots with fixed-size, qualitative memory:
+
+- **Short-term:** the previous step as a human impression (where, traffic feel, getting closer…).
+- **Long-term:** the whole trip compressed into a one-sentence `trip_summary` plus a few aggregates
+  (places jammed, strategy switches, overall smoothness). Built by deterministic rolling
+  accumulators (template summary, reproducible) or, optionally, by a small LLM summariser.
+
+See [`docs/MEMORY_zh-TW.md`](docs/MEMORY_zh-TW.md).
+
+### 3. Routing & congestion-aware rerouting
+Paths are weighted-shortest paths (Dijkstra on the OSM graph). Each edge's cost blends
+length/time/comfort/congestion under the agent's behavioural-mode weights; *avoid-congestion*
+adds a heavy congestion penalty and a near-block multiplier. When an agent is stuck on a congested
+road and its mode allows it, the path is recomputed from the current position — reacting to live
+congestion. See [`docs/ACTIVE_MODES_zh-TW.md`](docs/ACTIVE_MODES_zh-TW.md).
+
+### 4. Personas, robustness, reproducibility
+- **Persona pool:** LLM personas are generated once into a stable pool and *sliced* per agent count;
+  changing the slider never re-generates or churns the file (top-up only when needed).
+- **Robust LLM-JSON parsing:** malformed/truncated model output (trailing commas, code fences,
+  cut-off arrays) is salvaged object-by-object instead of falling back to defaults.
+- **Determinism:** seeded throughout; same seed → identical trajectories.
+
+---
+
+## Configuration — one file, no code edits
+
+All tunable parameters live in **`config/simulation.toml`** (defaults in `config.py` are the
+fallback). Sections include:
+
+| Section | Controls |
+| --- | --- |
+| `[time]` / `[agents]` / `[movement]` | steps, agent count, origins, default speeds & route weights |
+| `[perception]` / `[perception_context]` | crowding threshold, hotspot top-K, look-ahead distance, speed-feel ratios |
+| `[memory]` | qualitative thresholds for short-/long-term memory |
+| `[summary]` | LLM trip-summary on/off, model tag, cadence |
+| `[profile]` | persona pool size |
+| `[active_modes.*]` | the five behavioural modes' weights & routing flags |
+| `[roads]` / `[highway_specs]` | congestion model, per-OSM-class speed/capacity |
+| `[ui]` | front-end slider ranges (also the back-end clamps — single source of truth) |
+| `[reproducibility]` | random seed |
+
+---
+
+## Project structure
 
 ```text
-http://127.0.0.1:8000/from-gama
+LLM_abm_model/
+├─ src/
+│  ├─ llm_abm_simulator/          # Python-native traffic ABM simulator (core)
+│  │  ├─ domain/                  #   agent / road / town / state / events (pure data + transitions)
+│  │  ├─ spatial/                 #   OSM graph, routing (Dijkstra), GIS loaders, GeoJSON
+│  │  ├─ decisions/               #   mock policy · LLM adapter · response parser · persona pool
+│  │  ├─ simulation/              #   engine · scheduler · metrics
+│  │  ├─ web/                     #   FastAPI app + WebSocket session (thin)
+│  │  └─ config.py                #   typed config schema + TOML loader
+│  └─ llm_server/                 # LLM pipeline (persona / perception / decision / summary)
+│     ├─ prompts/  schemas/       #   prompt templates + Pydantic schemas
+│     └─ json_utils.py            #   robust LLM-JSON salvage
+├─ simulation_web/frontend/       # Web demo (index.html / map.js / charts.js / simulation.js / app.js)
+├─ config/simulation.toml         # single source of truth for tunable parameters
+├─ data/
+│  ├─ tainan_roads.graphml        # bundled real OSM road network
+│  └─ gis/                        # town / stadium / study-area shapefiles
+├─ docs/                          # architecture + Chinese deep-dive guides
+├─ tests/simulator/               # pytest suite (determinism, routing, parsing, engine…)
+└─ output/                        # runtime artifacts (git-ignored)
 ```
 
-## API
-
-### `POST /from-gama`
-
-Receives simulation state from GAMA and returns the LLM decision result.
-
-Supported payload patterns:
-
-- Initialization payload with `requested_agents`.
-- Step-update payload with `agents_status`.
-- Compatibility payload with `agents`.
-
-Example step-update payload:
-
-```json
-{
-  "request_type": "step_update",
-  "model": "TrafficABM_Tainan_LLM",
-  "cycle": 1,
-  "agents_status": [
-    {
-      "agent_id": "vehicle_001",
-      "origin_town": "Jiali District",
-      "destination_town": "Annan District",
-      "memory": []
-    }
-  ],
-  "environment": {}
-}
-```
-
-More examples are available in `examples/`.
-
-## GAMA Integration
-
-The GAMA modules under `gama_moudle/` define the HTTP client settings used to call the Python server:
-
-| Setting | Value |
-| --- | --- |
-| Host | `127.0.0.1` |
-| Port | `8000` |
-| Endpoint | `/from-gama` |
-| Method | `POST` |
-
-See `docs/GAMA_INTEGRATION.md` for the request lifecycle and payload compatibility notes.
+---
 
 ## Documentation
 
-- `docs/ARCHITECTURE.md`: System architecture and module responsibilities.
-- `docs/API.md`: API payload patterns and endpoint reference.
-- `docs/GAMA_INTEGRATION.md`: GAMA request lifecycle and integration notes.
-- `docs/DATA.md`: GIS data and output versioning policy.
+- [`docs/PYTHON_SIMULATOR_zh-TW.md`](docs/PYTHON_SIMULATOR_zh-TW.md) — full guide: install, run,
+  LLM mode, persona pool, Linux/SSH demo, architecture.
+- [`docs/ENVIRONMENT_zh-TW.md`](docs/ENVIRONMENT_zh-TW.md) — spatial perception design.
+- [`docs/MEMORY_zh-TW.md`](docs/MEMORY_zh-TW.md) — short-/long-term memory design.
+- [`docs/ACTIVE_MODES_zh-TW.md`](docs/ACTIVE_MODES_zh-TW.md) — the five behavioural modes & routing.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/DATA.md`](docs/DATA.md) — system & data notes.
 
-## Examples
+---
 
-The `examples/` directory contains:
+## Requirements
 
-- `gama_request_init.json`: Example initialization payload.
-- `gama_request_step.json`: Example step-update payload.
-- `sample_outputs/`: Selected outputs from local LLM runs for portfolio review.
+- **Python ≥ 3.12** and **[`uv`](https://docs.astral.sh/uv/)** (handles the virtualenv & deps).
+- For LLM mode: **Ollama** (or an Ollama-compatible API) with a pulled model.
+- Optional, for rebuilding the road network from OSM: `uv sync --extra osm`, then
+  `uv run python -m llm_abm_simulator.spatial.build_roads`. The bundled `tainan_roads.graphml`
+  means the demo runs fully offline by default.
 
-The full local `output/` directory is ignored by Git because it contains generated runtime artifacts.
+---
 
-## Data and Output Policy
+## Limitations & roadmap
 
-- `data/gis/` contains spatial input data (towns, stadium, study area). Before public reuse, verify the original data source, coordinate system, attribution requirements, and redistribution terms.
-- `output/` contains generated LLM outputs and is ignored by Git to keep the repository focused on source code and curated examples.
-- `examples/sample_outputs/` contains selected representative outputs for review.
+- **Decision scaling.** A single LLM call per step covers all agents, which limits agent count.
+  The path to city-scale (1000+ agents) is to **bucket decisions by qualitative state × persona
+  archetype** so LLM cost decouples from agent count — a planned core contribution.
+- **Rerouting is reactive.** Agents reroute once *on* a congested road; `road_ahead` currently
+  informs the LLM's mode choice rather than triggering anticipatory rerouting directly.
+- **Congestion slowdown is simplified** (binary factor), not a continuous speed–density relation.
 
-## Validation
+---
 
-Basic local validation commands:
+## License & data
 
-```bash
-python -m compileall -q -x "(\.venv|__pycache__|output)" .
-```
-
-```bash
-PYTHONPATH=src python -c "from pathlib import Path; from llm_server.server import GamaRequest; [GamaRequest.model_validate_json(Path(p).read_text(encoding='utf-8')) for p in ['examples/gama_request_init.json','examples/gama_request_step.json']]; print('GamaRequest examples validated')"
-```
-
-Full integration testing requires both GAMA and Ollama to be running.
-
-## Limitations
-
-- The current LLM backend assumes an Ollama-compatible API.
-- LLM responses may vary depending on model, prompt, temperature, and runtime settings.
-- The current response contract is prompt-driven and should be strengthened with strict JSON validation in future work.
-- This repository is designed for local research and portfolio demonstration, not production deployment.
-
-## Future Work
-
-- Add unit tests for `RAG.py`, `od_converter.py`, and request schema validation.
-- Add stricter JSON schema validation for LLM responses.
-- Expand GitHub Actions from syntax checks to unit tests.
-- Package the project under `src/` after API contracts stabilize.
-- Rename `gama_moudle/` to `gama_module/` in a compatibility-safe migration commit.
-
-## License
-
-Unless otherwise noted, the source code, documentation, prompts, and curated examples in this repository are licensed under the MIT License. See `LICENSE` for details.
-
-GIS files under `data/gis/` are provided for simulation context and remain subject to their original data source licenses. Verify the original source, attribution requirements, and redistribution terms before reuse.
+Source code, prompts, and docs are under the **MIT License** (see `LICENSE`). GIS files under
+`data/gis/` and the bundled OSM road network remain subject to their original sources' licenses
+(OpenStreetMap data © OpenStreetMap contributors, ODbL) — verify attribution and redistribution
+terms before reuse. `output/` and `.env` are git-ignored.
 
 ## Citation
 
-If this repository is used in an academic context, add the related project citation, thesis reference, or research acknowledgement here.
+If you use this work, please cite the accompanying ACM SIGSPATIAL 2026 demonstration (citation to be
+added upon acceptance).

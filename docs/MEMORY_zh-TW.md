@@ -152,7 +152,5 @@ distance_decimals = 1        # remaining 距離小數位數
 - **不受影響**：
   - `output/agent_memory.csv`（由 recorder 直接從 agents 輸出，不依賴 `travel_memory`）。
   - 可重現性（更新全為確定性運算）。
-  - `llm_server/server.py` 的舊 `GamaAgent.travel_memory`（GAMA 時代欄位，
-    `extra="allow"`；模擬器實際走 `agents_status` raw dict，不經此模型，故保留不動）。
   - `analysis/analyze_agents.py` 的 `memory.short_term_memory`（驗的是 **agent profile**
     JSON，與每步旅次記憶不同路徑）。

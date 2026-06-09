@@ -5,8 +5,7 @@
 (2) 用 Python 內建 ``tomllib`` 載入 TOML 並覆寫成 ``DEFAULT_CONFIG`` / ``UI_CONFIG`` /
 ``HIGHWAY_SPECS``。TOML 的 key 名稱與此處 dataclass 欄位名一一對應。
 
-數值與語意刻意對齊 ``gama_moudle/Traffic_ABM_LLM_complete_v2.gaml`` 的 ``global``
-[可調整參數區]，讓 Python 模擬器與原 GAMA 模型行為一致、便於對照。
+數值與語意沿襲原 GAML 交通模型的 ``global`` [可調整參數區]（GAMA 版已移除，此為其行為延續）。
 """
 
 from __future__ import annotations
