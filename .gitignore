@@ -16,6 +16,11 @@ __pycache__
 .mypy_cache/
 .ruff_cache/
 
+#build 產物（uv/pip 安裝時自動重建，不應追蹤）
+*.egg-info/
+build/
+dist/
+
 #本機輸出檔
 output/
 *.log

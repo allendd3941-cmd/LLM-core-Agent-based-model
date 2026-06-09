@@ -2,7 +2,7 @@
 
 本模組以純 Python 完整取代原專案中由 **GAMA** 承擔的交通 Agent-Based Model 模擬責任，
 並提供一個 localhost 互動式 web demo（Leaflet 地圖 + Chart.js 圖表 + WebSocket 即時更新），
-用於 **ACM SIGSPATIAL Demo** 展示。LLM pipeline（`llm_server` 的 agent_profile / perception /
+作為**互動式研究 demo** 展示。LLM pipeline（`llm_server` 的 agent_profile / perception /
 decision_making + prompt/schema）由模擬器以 adapter **在本進程直接呼叫**（不經 HTTP）。
 
 - 套件原始碼：`src/llm_abm_simulator/`

@@ -8,8 +8,8 @@ Each agent perceives its spatial surroundings (congestion ahead on its route, di
 hotspots, distance to goal), carries a human-like trip memory, and is assigned a behavioural
 strategy by an LLM — all visualised live on an interactive map.
 
-> Submission target: **ACM SIGSPATIAL 2026 — Demonstration Track.**
-> Companion deep-dive docs (Traditional Chinese): see [Documentation](#documentation).
+> An interactive research demonstration of spatially-grounded LLM agents in a microscopic
+> traffic ABM. Companion deep-dive docs (Traditional Chinese): see [Documentation](#documentation).
 
 ---
 
@@ -262,5 +262,5 @@ terms before reuse. `output/` and `.env` are git-ignored.
 
 ## Citation
 
-If you use this work, please cite the accompanying ACM SIGSPATIAL 2026 demonstration (citation to be
-added upon acceptance).
+If you use this work in an academic context, please cite this repository (a formal citation will be
+added if/when an associated paper is published).
