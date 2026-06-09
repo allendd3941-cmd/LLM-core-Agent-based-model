@@ -28,6 +28,8 @@
 | `[llm]` | `use_llm`（LLM 決策一律在進程內直呼 pipeline） |
 | `[memory]` | 旅次記憶 STM/LTM 質性門檻（見 `docs/MEMORY_zh-TW.md`） |
 | `[perception_context]` | 送 LLM 的環境感知：熱點/前方路況取樣（見 `docs/ENVIRONMENT_zh-TW.md`） |
+| `[summary]` | 長期記憶 trip_summary 的 LLM 摘要（`use_llm_summary` / `summary_model` / 頻率；見 `docs/MEMORY_zh-TW.md`）|
+| `[profile]` | agent persona 池大小（`pool_size`；見下方「Persona 池」）|
 | `[reproducibility]` | `seed`（同 seed → 同軌跡）|
 | `[network]` | OSM 下載開關、合成路網大小 |
 | `[ui]` | 前端 slider 範圍（速度 / agent 數）；**同時驅動後端 clamp 與前端 slider**，是兩者的單一來源 |
@@ -130,9 +132,28 @@ uvicorn llm_abm_simulator.web.app:app --port 8080
 在網頁右上把決策模式切到 **LLM**。
 
 - **LLM 不可用時會自動 fallback 到 Mock，不會 crash**（介面決策來源欄會顯示實際使用的來源）。
-  in-process 模式下「不可用」包含 `llm_server` 無法匯入或 pipeline 執行丟錯；HTTP 模式下包含
-  連不到 `server.py`。
+  「不可用」包含 `llm_server` 無法匯入、Ollama 連不上、或 pipeline 執行丟錯。
 - LLM 每步需呼叫一次推論，可能數秒~數十秒；現場 demo 建議用 Mock，需要展示 LLM 推理時再切換。
+
+### 4c. Persona 池（agent 人物設定）
+
+LLM 模式下，每個 agent 的人物設定（identity / traits）由 `agent_profile` 階段生成。為避免
+「每次調 agent 數就重生、覆寫」的問題，採**穩定的 persona 池**（`decisions/profile_pool.py`）：
+
+- **生成一次、存成穩定池檔**（`output/agent_profile_output_1.txt`，正規化 JSON）。
+- 調整 agent 數**只是「取池裡前 n 個」**——在記憶體切片，不動池檔、不重生。
+- agent 數**超過 `[profile].pool_size` 才自動補生**差額並追加進池（數量永遠對得上）。
+- 要**整批換人**：前端按 **「👤 重新生成人物」**（清池 + 重新初始化，下次 LLM init 重生）。
+- 池檔與 LLM 生成輸出都用**強韌 JSON 解析**（`llm_server/json_utils.py`）：尾逗號、Python 字面量、
+  智慧引號、**陣列被截斷**等壞結構都會盡量救回**已完整的物件**，而不是整批作廢用預設值。
+
+```toml
+[profile]
+pool_size = 30      # persona 池目標大小（agent 數超過才補生）
+```
+
+> 前端 inspect 點選 agent 會顯示其人物背景（年齡/職業/收入/態度/習慣…），即讀自此池，
+> 以 `identity.name` 對應 `agent.profile_name`。
 
 ---
 

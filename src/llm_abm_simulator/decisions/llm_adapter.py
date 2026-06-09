@@ -23,9 +23,6 @@ logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "TrafficABM_Tainan_LLM"
 
-# 與 server.py 一致的 agent profile 快取檔（兩者算出的 output/ 路徑相同）。
-_AGENT_PROFILE_FILENAME = "agent_profile_output_1.txt"
-
 
 class LLMDecisionPolicy:
     """在本進程直呼 llm_server pipeline 的決策來源。"""
@@ -165,7 +162,6 @@ class LLMDecisionPolicy:
         匯入或執行失敗時回 None，由上層 fallback 到 mock。
         """
         try:
-            from llm_server.agent_profile import run_agent_profile
             from llm_server.decision_making import run_decision_making
             from llm_server.perception import run_perception
         except ImportError as e:
@@ -174,11 +170,9 @@ class LLMDecisionPolicy:
 
         try:
             from .. import config
-            profile_path = config.OUTPUT_DIR / _AGENT_PROFILE_FILENAME
-            if payload.get("request_type") == "init_agents" or not profile_path.exists():
-                agent_profile = run_agent_profile(output=True, agent_count=self.cfg.nb_agents)
-            else:
-                agent_profile = profile_path.read_text(encoding="utf-8")
+            from . import profile_pool
+            # persona 池：穩定快取、按需切前 n 個；不會因為調 agent 數而一直重生（見 profile_pool）。
+            agent_profile = profile_pool.ensure_and_slice(self.cfg.nb_agents, config.PROFILE_CONFIG.pool_size)
 
             perception = run_perception(payload, output=True)
             return run_decision_making(agent_profile, perception, output=True)

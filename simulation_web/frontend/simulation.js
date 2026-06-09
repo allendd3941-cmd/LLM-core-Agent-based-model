@@ -29,6 +29,9 @@ const TrafficUI = (() => {
     $("mode-mock").onclick = () => setMode("mock");
     $("mode-llm").onclick = () => setMode("llm");
 
+    const regen = $("btn-regen-profiles");
+    if (regen) regen.onclick = () => send("regenerate_profiles");
+
     const dsel = $("decision-step");
     if (dsel) dsel.onchange = () => showDecisionOutput(dsel.value);
     const dref = $("decision-refresh");

@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
 import requests
 
+from . import json_utils
 from .llm_config import OLLAMA_MODE, OLLAMA_URL
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,11 @@ def run_memory_summary(facts: list[dict[str, Any]], model: str, timeout: float =
         return {}
     url = f"{OLLAMA_URL}{OLLAMA_MODE}"
     user_prompt = f"{PROMPT}\n\n以下是各 agent 的事實（JSON）：\n{json.dumps(facts, ensure_ascii=False)}"
+    # 註：不傳 "think"。think 只有 reasoning 模型（如 gpt-oss）支援；對 llama3.1:8b 等
+    # 非 thinking 模型，Ollama 會回 400 Bad Request。摘要是小任務，本就不需要 thinking。
     payload = {
         "model": model,
         "prompt": user_prompt,
-        "think": "low",
         "options": {"seed": 42, "temperature": 0},
         "stream": False,
     }
@@ -53,25 +54,22 @@ def run_memory_summary(facts: list[dict[str, Any]], model: str, timeout: float =
 
 
 def _parse(text: str) -> dict[str, str]:
-    """從 LLM 原始文字抽出 {agent_id: summary}。容忍前後雜訊與 ```json 包裝。"""
+    """從 LLM 原始文字抽出 {agent_id: summary}。強韌解析：結構壞掉/截斷也盡量救回。"""
     if not text:
         return {}
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if not m:
-        return {}
-    try:
-        obj = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return {}
-    # 支援兩種格式：{agent_id: summary} 或 {"summaries":[{"agent_id":..,"trip_summary":..}]}
-    if isinstance(obj, dict) and "summaries" in obj and isinstance(obj["summaries"], list):
-        out = {}
-        for row in obj["summaries"]:
-            if isinstance(row, dict) and row.get("agent_id"):
-                s = row.get("trip_summary") or row.get("summary") or ""
-                if s:
-                    out[str(row["agent_id"])] = str(s).strip()
-        return out
-    if isinstance(obj, dict):
-        return {str(k): str(v).strip() for k, v in obj.items() if isinstance(v, str) and v.strip()}
-    return {}
+    obj = json_utils.loads_lenient(text)
+    # 形式一：{agent_id: "摘要"} 直接對應
+    if isinstance(obj, dict) and "summaries" not in obj:
+        mapping = {str(k): str(v).strip() for k, v in obj.items()
+                   if isinstance(v, str) and v.strip()}
+        if mapping:
+            return mapping
+    # 形式二：{"summaries":[{agent_id, trip_summary}]}，或截斷時逐物件救回
+    rows = json_utils.salvage_objects(text)
+    out: dict[str, str] = {}
+    for row in rows:
+        if isinstance(row, dict) and row.get("agent_id"):
+            s = row.get("trip_summary") or row.get("summary") or ""
+            if s:
+                out[str(row["agent_id"])] = str(s).strip()
+    return out

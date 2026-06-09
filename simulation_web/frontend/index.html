@@ -57,7 +57,12 @@
             <button id="mode-llm" class="seg-btn">LLM</button>
           </div>
         </div>
-        <p class="hint" id="mode-hint">Mock：確定性規則，即時流暢。LLM：呼叫 /from-gama（需 Ollama）。</p>
+        <p class="hint" id="mode-hint">Mock：確定性規則，即時流暢。LLM：本進程直呼 pipeline（需 Ollama）。</p>
+
+        <div class="field">
+          <button id="btn-regen-profiles" class="btn">👤 重新生成人物</button>
+          <p class="hint">清除 persona 池，下次 LLM 初始化重生一批；平時調 agent 數會重用同一批人，不會一直重生。</p>
+        </div>
       </section>
 
       <section class="card">

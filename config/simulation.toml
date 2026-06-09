@@ -142,6 +142,12 @@ use_llm_summary = true         # 開關
 summary_model = "llama3.1:8b"    # 摘要模型 tag（請對齊 `ollama list`，可能是 gemma3n:e2b）
 summary_every_n_steps = 2       # 每幾步重算；抵達時也會補算
 
+# ----- agent persona 池 -----
+# persona 生成一次、存成穩定池檔；調整 agent 數只是「取池裡前 n 個」，不會一直重生/覆寫。
+# agent 數超過 pool_size 才自動補生；要整批換人用前端「重新生成人物」按鈕。
+[profile]
+pool_size = 30               # persona 池目標大小
+
 # ----- 可重現性 -----
 [reproducibility]
 seed = 42                    # 同 seed → 同軌跡

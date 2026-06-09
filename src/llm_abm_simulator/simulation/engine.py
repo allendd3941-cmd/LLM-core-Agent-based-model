@@ -623,22 +623,13 @@ class SimulationEngine:
         }
 
     def _load_agent_profiles(self) -> dict[str, Any]:
-        """讀 output/agent_profile_output_1.txt，回傳 {name: {identity, traits}} 供前端 inspect。
+        """回傳 {name: {identity, traits}} 供前端 inspect（以 identity.name 對應 profile_name）。
 
-        檔案不存在或解析失敗回 {}（前端 inspect 就只顯示即時狀態，不顯示人物背景）。
-        以 identity.name 對應 agent.profile_name。
+        讀 persona 池（robust 解析，見 decisions/profile_pool）。池不存在回 {}。
         """
-        import json
-        path = config.OUTPUT_DIR / "agent_profile_output_1.txt"
-        if not path.exists():
-            return {}
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("讀取 agent_profile 失敗：%s", e)
-            return {}
+        from ..decisions import profile_pool
         profiles: dict[str, Any] = {}
-        for a in (data.get("agents") or []):
+        for a in profile_pool.load_pool():
             ident = a.get("identity") or {}
             name = str(ident.get("name") or "").strip()
             if name:

@@ -14,10 +14,10 @@ extract_vehicle_type_from_body / apply_*_response），並對齊既有 LLM pipel
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any
+
+from llm_server import json_utils
 
 logger = logging.getLogger(__name__)
 
@@ -37,61 +37,23 @@ _ROW_LIST_KEYS = ("agents", "decisions", "initial_vehicles", "requested_agents")
 def coerce_json(body: Any) -> Any:
     """把回應 body 轉成 Python 物件。
 
-    支援：已是 dict/list；純 JSON 字串；含 ```json 圍欄或前後雜訊的字串。
-    無法解析時回傳原字串。
+    強韌解析（委派 llm_server.json_utils）：支援 dict/list、純 JSON、```json 圍欄、前後雜訊、
+    尾逗號/Python 字面量等語法雜訊；**陣列被截斷時，逐一救回已完整的物件成 list**，
+    而不是整包放棄。無法解析時回傳原字串（由 parse_rows 視為無 row）。
     """
     if isinstance(body, (dict, list)):
         return body
     if not isinstance(body, str):
         return body
 
-    text = body.strip()
-    # 去除 markdown 圍欄
-    fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    if fence:
-        text = fence.group(1).strip()
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # 退而求其次：抓第一個平衡的 {...} 區塊
-    block = _extract_first_object(text)
-    if block is not None:
-        try:
-            return json.loads(block)
-        except json.JSONDecodeError:
-            pass
+    parsed = json_utils.loads_lenient(body)
+    if parsed is not None:
+        return parsed
+    # 結構壞掉/截斷 → 逐物件搶救成 list（讓 parse_rows 仍能拿到前面完整的 agent）
+    salvaged = json_utils.salvage_objects(body)
+    if salvaged:
+        return salvaged
     return body
-
-
-def _extract_first_object(text: str) -> str | None:
-    start = text.find("{")
-    if start < 0:
-        return None
-    depth = 0
-    in_str = False
-    esc = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-    return None
 
 
 # ---------------------------------------------------------------------------

@@ -186,6 +186,18 @@ class SummaryConfig:
     summary_every_n_steps: int = 5       # 每幾步重算一次；抵達時也會補算
 
 
+@dataclass(frozen=True)
+class ProfileConfig:
+    """agent persona 池設定（對應 TOML ``[profile]``）。
+
+    persona 生成一次、存成穩定的池檔，agent 數只是「取池裡前 n 個」；不會因為調 agent 數而
+    一直重生/覆寫。agent 數超過池大小才自動補生；要整批換人用前端「重新生成人物」按鈕。
+    詳見 docs/PYTHON_SIMULATOR_zh-TW.md。
+    """
+
+    pool_size: int = 30                  # persona 池目標大小（agent 數超過才補生）
+
+
 # road_network 的 highway 速限 fallback（TOML [highway_specs] 缺省時用這組）。
 _DEFAULT_HIGHWAY_SPECS: dict[str, dict[str, float]] = {
     "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity": 60},
@@ -289,7 +301,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -327,6 +339,15 @@ def _build_summary_config(raw: dict[str, Any]) -> SummaryConfig:
     if sc.summary_every_n_steps < 1:
         raise ValueError("設定檔 [summary].summary_every_n_steps 必須 ≥ 1")
     return sc
+
+
+def _build_profile_config(raw: dict[str, Any]) -> ProfileConfig:
+    overrides = {k: v for k, v in raw.get("profile", {}).items()
+                 if k in {f.name for f in fields(ProfileConfig)}}
+    pc = dataclasses.replace(ProfileConfig(), **overrides)
+    if pc.pool_size < 1:
+        raise ValueError("設定檔 [profile].pool_size 必須 ≥ 1")
+    return pc
 
 
 def _build_ui_config(raw: dict[str, Any]) -> UIConfig:
@@ -375,5 +396,6 @@ UI_CONFIG = _build_ui_config(_RAW)
 MEMORY_CONFIG = _build_memory_config(_RAW)
 PERCEPTION_CONTEXT = _build_perception_context(_RAW)
 SUMMARY_CONFIG = _build_summary_config(_RAW)
+PROFILE_CONFIG = _build_profile_config(_RAW)
 HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)
 ACTIVE_MODE_PROFILES = _build_active_mode_profiles(_RAW)

@@ -14,12 +14,10 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .. import config
 from ..config import DEFAULT_CONFIG, UI_CONFIG, SimulationConfig
 from ..simulation.engine import SimulationEngine
 
 logger = logging.getLogger(__name__)
-_AGENT_PROFILE_FILENAME = "agent_profile_output_1.txt"
 
 
 class SimulationSession:
@@ -84,6 +82,8 @@ class SimulationSession:
         elif action == "set_mode":
             self._set_mode(str(value or "mock"))
             await self.status(f"決策模式：{'LLM' if self.cfg.use_llm else 'Mock'}")
+        elif action == "regenerate_profiles":
+            await self._regenerate_profiles()
         else:
             logger.warning("未知控制指令: %s", action)
 
@@ -124,8 +124,8 @@ class SimulationSession:
                 pass
 
     async def _reset(self) -> None:
+        # 注意：reset 不刪 persona 池——調 agent 數/重設都重用同一批人物，避免一直重生。
         await self._stop_run_task()
-        self._clear_agent_profile_output()
         await asyncio.to_thread(self.engine.reset)
         await self.send(self.engine.init_payload())
         await self.status("模擬已重設")
@@ -135,7 +135,6 @@ class SimulationSession:
             await self.status("模擬進行中無法變更 agent 數，請先重設。")
             return
         n = max(UI_CONFIG.agents_min, min(n, UI_CONFIG.agents_max))
-        self._clear_agent_profile_output()
         self.cfg = dataclasses.replace(self.cfg, nb_agents=n)
         await self._stop_run_task()
         self.engine = SimulationEngine(self.cfg)
@@ -143,12 +142,14 @@ class SimulationSession:
         await self.send(self.engine.init_payload())
         await self.status(f"agent 數設為 {n}")
 
-    def _clear_agent_profile_output(self) -> None:
-        profile_path = config.OUTPUT_DIR / _AGENT_PROFILE_FILENAME
-        try:
-            profile_path.unlink(missing_ok=True)
-        except OSError as e:
-            logger.warning("無法刪除 agent profile output: %s", e)
+    async def _regenerate_profiles(self) -> None:
+        """『重新生成人物』：清掉 persona 池並重新初始化（下次 LLM init 會重生整批）。"""
+        from ..decisions import profile_pool
+        await self._stop_run_task()
+        profile_pool.clear_pool()
+        await asyncio.to_thread(self.engine.reset)
+        await self.send(self.engine.init_payload())
+        await self.status("已清除人物池，將於下次 LLM 初始化重新生成。")
 
     def _set_mode(self, mode: str) -> None:
         # 動態切換 mock/llm；engine 內部 cfg 與本 session cfg 同步
