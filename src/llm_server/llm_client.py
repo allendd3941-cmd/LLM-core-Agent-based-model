@@ -19,6 +19,10 @@ import requests
 from . import llm_config
 from .timer import time_counter
 
+# 記住「不支援 thinking」的模型：第一次被 Ollama 以 400 拒絕後加入，
+# 之後對同模型就不再帶 think（避免每次都先失敗一次）。
+_NO_THINK_MODELS: set[str] = set()
+
 
 def generate(
     prompt: str,
@@ -41,18 +45,32 @@ def generate(
         label:    計時 log 用標籤。
         timeout:  HTTP 逾時秒數（None＝不設限，保留原行為）。
     """
-    if llm_config.LLM_BACKEND == "vllm":
+    is_ollama = llm_config.LLM_BACKEND != "vllm"
+    if not is_ollama:
         url, payload, parse = _build_vllm(prompt, system, options, model)
     else:
         url, payload, parse = _build_ollama(prompt, system, options, think, model)
 
     @time_counter
     def _post(u: str, p: dict[str, Any]) -> requests.Response:
-        r = requests.post(u, json=p, timeout=timeout)
-        r.raise_for_status()
-        return r
+        return requests.post(u, json=p, timeout=timeout)
 
     resp = _post(url, payload, file_name=label)
+
+    # think 容錯：模型不支援 thinking → Ollama 回 400「does not support thinking」。
+    # 拿掉 think 重試一次，並記住該模型，之後不再帶 think。
+    if (is_ollama and resp.status_code == 400 and "think" in payload
+            and "does not support thinking" in resp.text):
+        _NO_THINK_MODELS.add(payload.get("model", ""))
+        payload.pop("think", None)
+        resp = _post(url, payload, file_name=label)
+
+    if resp.status_code >= 400:
+        # 把後端的錯誤內文帶出來（原本 raise_for_status 會吞掉，難以診斷）
+        raise RuntimeError(
+            f"LLM 後端回 {resp.status_code}：{resp.text[:500]}"
+            f"（url={url}, model={payload.get('model')}）"
+        )
     return parse(resp.json())
 
 
@@ -61,14 +79,16 @@ def generate(
 # ---------------------------------------------------------------------------
 def _build_ollama(prompt, system, options, think, model):
     url = f"{llm_config.OLLAMA_URL}{llm_config.OLLAMA_MODE}"
+    model_name = model or llm_config.OLLAMA_MODEL
     payload: dict[str, Any] = {
-        "model": model or llm_config.OLLAMA_MODEL,
+        "model": model_name,
         "prompt": prompt,
         "stream": False,
     }
     if system:
         payload["system"] = system
-    if think:
+    # 已知不支援 thinking 的模型就不帶 think（避免每次都先 400 一次）
+    if think and model_name not in _NO_THINK_MODELS:
         payload["think"] = think
     if options:
         payload["options"] = options
