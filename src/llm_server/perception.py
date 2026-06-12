@@ -25,7 +25,7 @@ def run_perception(gama_body, output: bool= False):
 
     final_response = llm_client.generate(
         user_prompt, system=SYSTEM_PROMPT,
-        options={"seed": 42, "temperature": 0, "top_k": 1, "num_predict": 10000},
+        options={"seed": 42, "temperature": 0, "top_k": 1},
         think="low", label=FILE_NAME)
 
     if output:
