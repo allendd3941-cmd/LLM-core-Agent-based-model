@@ -1,7 +1,5 @@
 from pathlib import Path
-from .timer import time_counter
-import requests
-from .llm_config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_MODE
+from . import llm_client
 from .output_engine import output_process
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -23,34 +21,12 @@ def run_perception(gama_body, output: bool= False):
     global count
     count += 1
 
-    url = f"{OLLAMA_URL}{OLLAMA_MODE}"
-
     user_prompt = f"{USER_PROMPT} \n {gama_body}"
-    
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": user_prompt,
-        "system": SYSTEM_PROMPT,
-        #"format": "json",
-        "think": "low",
-        "options": {
-            "seed": 42 ,
-            "temperature": 0,
-            "top_k": 1,
-            "num_predict": 10000
-        },
-        "stream": False
-    }
 
-    @time_counter
-    def request_with_timeout(url, payload, file_name : str = FILE_NAME):
-        response = requests.post(url, json = payload)
-        response.raise_for_status()  # 確保 HTTP 狀態碼為 200
-        return response
-
-    http_response = request_with_timeout(url, payload, file_name=FILE_NAME) 
-    response_data = http_response.json()
-    final_response = response_data["response"]
+    final_response = llm_client.generate(
+        user_prompt, system=SYSTEM_PROMPT,
+        options={"seed": 42, "temperature": 0, "top_k": 1, "num_predict": 10000},
+        think="low", label=FILE_NAME)
 
     if output:
         output_path = OUTPUT_PATH / f"{FILE_NAME}_output_{count}.txt"

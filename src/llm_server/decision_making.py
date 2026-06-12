@@ -1,9 +1,7 @@
 from .RAG import RAG
 import json
 from pathlib import Path
-from .timer import time_counter
-import requests
-from .llm_config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_MODE
+from . import llm_client
 from .agent_profile import run_agent_profile
 from .perception import run_perception
 from .output_engine import output_process
@@ -27,37 +25,17 @@ def run_decision_making(agent_profile_data, perception_data, output: bool= False
     global count
     count += 1
 
-    url = f"{OLLAMA_URL}{OLLAMA_MODE}"
-
     #retrieved_texts =RAG(agent_profile_data, perception_data)
 
-    user_prompt = f'''{USER_PROMPT} \n 
+    user_prompt = f'''{USER_PROMPT} \n
     {perception_data}\n
     "agent profile資料"如下:\n
     {agent_profile_data}
     '''
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": user_prompt,
-        "system": SYSTEM_PROMPT,
-        #"format": "json",  
-        "think": "low",
-        "options": {
-            "seed": 42 
-        },
-        "stream": False
-    }
-
-    @time_counter
-    def request_with_timeout(url, payload, file_name : str = FILE_NAME):
-        response = requests.post(url, json = payload)
-        response.raise_for_status()  # 確保 HTTP 狀態碼為 200
-        return response
-
-    http_response = request_with_timeout(url, payload, file_name=FILE_NAME) 
-    response_data = http_response.json()
-    final_response = response_data["response"]
+    final_response = llm_client.generate(
+        user_prompt, system=SYSTEM_PROMPT,
+        options={"seed": 42}, think="low", label=FILE_NAME)
 
     if output:
         output_path = OUTPUT_PATH / f"{FILE_NAME}_output_{count}.txt"

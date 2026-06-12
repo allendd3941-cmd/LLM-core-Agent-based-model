@@ -36,6 +36,9 @@ const TrafficUI = (() => {
     if (dsel) dsel.onchange = () => showDecisionOutput(dsel.value);
     const dref = $("decision-refresh");
     if (dref) dref.onclick = () => refreshDecisionSteps();
+
+    const sigToggle = $("toggle-signals");
+    if (sigToggle) sigToggle.onchange = () => TrafficMap.toggleSignals(sigToggle.checked);
   }
 
   function setMode(mode) {
@@ -84,7 +87,7 @@ const TrafficUI = (() => {
       ["姓名", a.profile_name || "—"],
       ["車種", a.vehicle_type],
       ["行為模式", a.active_mode],
-      ["狀態", a.route_status],
+      ["狀態", a.waiting_at_signal ? "🚦 等紅燈" : a.route_status],
       ["起點區", a.origin_town],
       ["目前區", a.current_town || "—"],
       ["速度", `${a.speed_kmh} km/h`],

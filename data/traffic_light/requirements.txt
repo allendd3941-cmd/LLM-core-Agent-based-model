@@ -1,0 +1,10 @@
+requests
+pandas
+geopandas
+shapely
+pyproj
+pyogrio
+openpyxl
+beautifulsoup4
+PyMuPDF
+

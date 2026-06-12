@@ -12,6 +12,19 @@ const TrafficMap = (() => {
   let stadiumMarker = null;
   let onAgentSelect = null;
 
+  // 號誌圖層（獨立 canvas，與車流/道路完全分離）
+  let signalRenderer = null;  // 專用 canvas renderer，避免與車輛 marker 互搶
+  let signalLayer = null;     // L.layerGroup
+  let signalBars = [];        // [{g0, g1, off}] g0/g1 為 Leaflet polyline
+  let signalCfg = null;       // {cycle_s, yellow_s}
+  let signalsOn = true;       // 使用者開關
+  let lastElapsedS = 0;       // 最近一次相位時間（zoom 進來時補上色用）
+
+  const SIGNAL_MIN_ZOOM = 14; // 號誌是細節層級：放大到此才顯示（兼顧效能與可讀性）
+  const SIGNAL_BAR_M = 16;    // 每條相位軸短桿的半長（公尺）
+  const SIG_GREEN = "#19d36b";
+  const SIG_RED = "#e5403a";
+
   const BASE_ROAD = { color: "#3a4658", weight: 1.2, opacity: 0.55 };
 
   function init(onSelect) {
@@ -21,17 +34,21 @@ const TrafficMap = (() => {
       attribution: "&copy; OpenStreetMap &copy; CARTO",
       maxZoom: 19,
     }).addTo(map);
+    signalRenderer = L.canvas({ padding: 0.5 });
+    map.on("zoomend", refreshSignalVisibility);
   }
 
   function setInit(data) {
     // 清掉舊圖層（reset 時會重送 init）
     if (townLayer) map.removeLayer(townLayer);
     if (roadLayer) map.removeLayer(roadLayer);
+    if (signalLayer) { map.removeLayer(signalLayer); signalLayer = null; }
     Object.values(agentMarkers).forEach((m) => map.removeLayer(m));
     Object.values(flowOverlay).forEach((l) => map.removeLayer(l));
     agentMarkers = {};
     flowOverlay = {};
     roadById = {};
+    signalBars = [];
 
     // 行政區界
     townLayer = L.geoJSON(data.towns_geojson, {
@@ -53,7 +70,67 @@ const TrafficMap = (() => {
       radius: 9, color: "#fff", weight: 2, fillColor: "#ff3b3b", fillOpacity: 1,
     }).addTo(map).bindPopup("🏟️ 亞太棒球場（目的地）");
 
+    // 號誌圖層（方向相位短桿）
+    setSignals(data.signals);
+
     try { map.fitBounds(townLayer.getBounds().pad(0.05)); } catch (e) {}
+  }
+
+  // ---- 號誌：建立每路口的兩條相位軸短桿（組0＝ax 路軸，組1＝垂直）----
+  function setSignals(cfg) {
+    if (!cfg || !cfg.signals || !cfg.signals.length) { signalCfg = null; return; }
+    signalCfg = { cycle_s: cfg.cycle_s, yellow_s: cfg.yellow_s };
+    signalLayer = L.layerGroup();
+    signalBars = [];
+    cfg.signals.forEach((s) => {
+      if (!s.two) return; // 只畫兩相位路口（單軸/匝道型恆綠，不畫桿避免雜訊）
+      const e0 = barEndpoints(s.lat, s.lng, s.ax, SIGNAL_BAR_M);
+      const e1 = barEndpoints(s.lat, s.lng, s.ax + 90, SIGNAL_BAR_M);
+      const opt = { renderer: signalRenderer, weight: 3, opacity: 0.95, lineCap: "round" };
+      const g0 = L.polyline(e0, { ...opt, color: SIG_RED });
+      const g1 = L.polyline(e1, { ...opt, color: SIG_RED });
+      signalLayer.addLayer(g0); signalLayer.addLayer(g1);
+      signalBars.push({ g0, g1, off: s.off });
+    });
+    updateSignalPhase(lastElapsedS);     // 先上一次色
+    refreshSignalVisibility();            // 依 zoom / 開關決定是否掛上地圖
+  }
+
+  // 公尺座標方位角 axisDeg（0=東,90=北）→ 以 (lat,lng) 為中心、半長 Lm 的線段兩端 latlng。
+  function barEndpoints(lat, lng, axisDeg, Lm) {
+    const th = (axisDeg * Math.PI) / 180;
+    const dym = Lm * Math.sin(th), dxm = Lm * Math.cos(th);
+    const dlat = dym / 111320;
+    const dlng = dxm / (111320 * Math.cos((lat * Math.PI) / 180));
+    return [[lat - dlat, lng - dlng], [lat + dlat, lng + dlng]];
+  }
+
+  // 依模擬時間重算每路口相位並上色（組0綠↔組1紅，黃燈尾段兩組皆紅）。
+  function updateSignalPhase(elapsedS) {
+    lastElapsedS = elapsedS;
+    if (!signalCfg || !signalLayer) return;
+    const cycle = signalCfg.cycle_s, yellow = signalCfg.yellow_s, half = cycle / 2;
+    signalBars.forEach((b) => {
+      const tc = (((elapsedS + b.off) % cycle) + cycle) % cycle;
+      const g0green = tc >= 0 && tc < half - yellow;
+      const g1green = tc >= half && tc < cycle - yellow;
+      b.g0.setStyle({ color: g0green ? SIG_GREEN : SIG_RED });
+      b.g1.setStyle({ color: g1green ? SIG_GREEN : SIG_RED });
+    });
+  }
+
+  // 號誌只在「開關開 且 zoom 夠近」時掛上地圖（效能 + 可讀性）。
+  function refreshSignalVisibility() {
+    if (!signalLayer) return;
+    const show = signalsOn && map.getZoom() >= SIGNAL_MIN_ZOOM;
+    const on = map.hasLayer(signalLayer);
+    if (show && !on) map.addLayer(signalLayer);
+    else if (!show && on) map.removeLayer(signalLayer);
+  }
+
+  function toggleSignals(on) {
+    signalsOn = on;
+    refreshSignalVisibility();
   }
 
   function colorFor(status, congestion) {
@@ -144,5 +221,5 @@ const TrafficMap = (() => {
     });
   }
 
-  return { init, setInit, updateAgents, updateRoads };
+  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals };
 })();

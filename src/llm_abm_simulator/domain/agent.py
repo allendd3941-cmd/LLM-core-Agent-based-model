@@ -163,6 +163,7 @@ class VehicleAgent:
     speed_kmh: float = 40.0
     perception_radius: float = 300.0
     is_crowded: bool = False
+    waiting_at_signal: bool = False      # 本步是否停在號誌路口等紅燈（由 engine 號誌 gating 設定）
     distance_moved_last_step: float = 0.0
     distance_to_destination: float = 0.0
     nearby_agent_count: int = 0
@@ -184,6 +185,10 @@ class VehicleAgent:
     summary_source: str = "template"     # trip_summary 來源："template"（模板）或 "llm"（gemma 摘要）
     api_status: str = "not_sent"
     warning_message: str = ""
+
+    # --- 事件觸發決策狀態（規模化用，內部狀態）---
+    _prev_congestion_signal: bool = field(default=False, repr=False)  # 上一步是否有壅塞訊號（算上升緣）
+    _decision_cooldown_until: int = field(default=0, repr=False)       # 此 cycle 前不重複觸發
 
     # --- LTM 滾動累積器（內部狀態，不外送 LLM）---
     _start_cycle: int | None = field(default=None, repr=False)

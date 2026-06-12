@@ -62,7 +62,7 @@ class LLMDecisionPolicy:
         self, agents: list[VehicleAgent], environment: dict[str, Any], cycle: int
     ) -> dict[str, StepDecision]:
         payload = self._build_step_payload(agents, environment, cycle)
-        body = self._call_inproc(payload)
+        body = self._call_inproc(payload, agents)
         if body is None:
             self.last_call_ok = False
             return {}
@@ -155,11 +155,11 @@ class LLMDecisionPolicy:
     # ------------------------------------------------------------------
     # 傳輸層：在本進程直呼 llm_server pipeline
     # ------------------------------------------------------------------
-    def _call_inproc(self, payload: dict[str, Any]) -> Any | None:
+    def _call_inproc(self, payload: dict[str, Any], agents: list[VehicleAgent] | None = None) -> Any | None:
         """直接在本進程跑 llm_server pipeline（persona 池 → perception → decision_making）。
 
-        回傳 run_decision_making 的 LLM 原始文字，供下游 response_parser 解析。
-        匯入或執行失敗時回 None，由上層 fallback 到 mock。
+        ``agents`` 給定時（每步批次決策）→ 只送這批 agent 的 persona（與 payload 對齊）；
+        未給定時（init 或整批）→ 切前 nb_agents 個。回傳 LLM 原始文字，失敗回 None 交由上層 fallback。
         """
         try:
             from llm_server.decision_making import run_decision_making
@@ -171,8 +171,11 @@ class LLMDecisionPolicy:
         try:
             from .. import config
             from . import profile_pool
-            # persona 池：穩定快取、按需切前 n 個；不會因為調 agent 數而一直重生（見 profile_pool）。
-            agent_profile = profile_pool.ensure_and_slice(self.cfg.nb_agents, config.PROFILE_CONFIG.pool_size)
+            # persona 池：穩定快取。批次決策只送該批 agent 的 persona；否則切前 n 個。
+            if agents is not None:
+                agent_profile = profile_pool.personas_json(agents)
+            else:
+                agent_profile = profile_pool.ensure_and_slice(self.cfg.nb_agents, config.PROFILE_CONFIG.pool_size)
 
             perception = run_perception(payload, output=True)
             return run_decision_making(agent_profile, perception, output=True)

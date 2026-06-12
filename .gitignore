@@ -36,3 +36,10 @@ Thumbs.db
 
 #Claude Code 本機個人設定
 .claude/
+
+#large data files (if any, e.g., for testing)
+data/traffic_light/logs/
+data/traffic_light/metadata/
+data/traffic_light/processed/
+data/traffic_light/raw/
+data/traffic_light/shapefile/

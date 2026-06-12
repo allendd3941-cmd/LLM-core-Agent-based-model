@@ -69,13 +69,11 @@ def _generate(count: int) -> list[dict]:
     return [o for o in json_utils.salvage_objects(raw) if _is_persona(o)]
 
 
-def ensure_and_slice(n_needed: int, pool_size: int, force: bool = False) -> str:
-    """確保池足夠並回傳「前 n_needed 個 persona」的 JSON 字串（餵 decision prompt 用）。
+def ensure_pool(n_needed: int, pool_size: int, force: bool = False) -> list[dict]:
+    """確保池有 ≥ max(pool_size, n_needed) 個 persona，回傳池 list（生成失敗回 []）。
 
     - force=True 或池為空 → 生成 max(pool_size, n_needed) 個成新池。
-    - 池不足 n_needed → 補生差額並追加。
-    - 否則直接重用。
-    n_needed 超過池大小時（生成也可能不足）以循環重用補滿，確保切片長度 = n_needed。
+    - 池不足 n_needed → 補生差額並追加。否則直接重用。
     """
     pool = [] if force else load_pool()
     target = max(pool_size, n_needed)
@@ -87,14 +85,67 @@ def ensure_and_slice(n_needed: int, pool_size: int, force: bool = False) -> str:
         pool = pool + _generate(n_needed - len(pool))
         if pool:
             save_pool(pool)
+    return pool
 
+
+def ensure_and_slice(n_needed: int, pool_size: int, force: bool = False) -> str:
+    """確保池足夠並回傳「前 n_needed 個 persona」的 JSON 字串（餵 decision prompt 用）。"""
+    pool = ensure_pool(n_needed, pool_size, force)
     if not pool:
         return json.dumps({"agents": []}, ensure_ascii=False)  # 生成失敗 → 空，上層 fallback
+    chosen = pool[:n_needed] if n_needed <= len(pool) else [pool[i % len(pool)] for i in range(n_needed)]
+    return json.dumps({"agents": chosen}, ensure_ascii=False)
 
-    if n_needed <= len(pool):
-        chosen = pool[:n_needed]
-    else:  # 仍不足（生成失敗或 pool_size 太小）→ 循環重用
-        chosen = [pool[i % len(pool)] for i in range(n_needed)]
+
+def assign_to_agents(agents, pool_size: int,
+                     available_towns: list[str] | None = None,
+                     default_origin: str = "") -> bool:
+    """init 用：依序把 persona 指派給 agent（agent i ← pool[i]），設 profile_name + vehicle_type + 出生點。
+
+    這是「確定性 persona 指派」，不呼叫 LLM 做決策 → 純事件觸發模式下 init 不爆量。
+    出生點直接由 persona 的 ``identity.residential_location`` 決定（用 response_parser 正規化成
+    available_towns 內的行政區），讓「自帶出生地」**不分事件觸發與否**都生效；無法匹配時保留
+    呼叫前既有的 origin_town（通常是 mock 隨機指派的合法區），其次才退到 default_origin。
+    回傳是否成功（池可用）；失敗（生成不到，如 Ollama 掛）回 False，由上層 fallback 到 mock。
+    """
+    pool = ensure_pool(len(agents), pool_size)
+    if not pool:
+        return False
+    from . import response_parser
+    towns = list(available_towns or [])
+    for i, a in enumerate(agents):
+        ident = pool[i % len(pool)].get("identity") or {}
+        name = str(ident.get("name") or "").strip()
+        a.profile_name = name or a.agent_id
+        vt = str(ident.get("vehicle_ownership", ""))
+        if "機車" in vt:
+            a.vehicle_type = "機車"
+        elif "汽車" in vt:
+            a.vehicle_type = "汽車"
+        # 由 persona 的 residential_location 指定出生點（不分事件觸發與否）。
+        res = ident.get("residential_location")
+        if towns and res is not None and str(res).strip():
+            a.origin_town = response_parser.normalize_town_name(
+                res, towns, a.origin_town or default_origin)
+    return True
+
+
+def personas_json(agents) -> str:
+    """為「這批」agent 組 decision prompt 用的 agent_profile JSON（依 profile_name 對應，缺則按序）。
+
+    讓每批決策只送該批 agent 的 persona（與其 agents_status 對齊），不送整池、不漏不錯配。
+    """
+    pool = load_pool()
+    by_name = {}
+    for p in pool:
+        nm = str((p.get("identity") or {}).get("name") or "").strip()
+        if nm:
+            by_name[nm] = p
+    chosen = []
+    for i, a in enumerate(agents):
+        p = by_name.get(a.profile_name) or (pool[i % len(pool)] if pool else None)
+        if p is not None:
+            chosen.append(p)
     return json.dumps({"agents": chosen}, ensure_ascii=False)
 
 

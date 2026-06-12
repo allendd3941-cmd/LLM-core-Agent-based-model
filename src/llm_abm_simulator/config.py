@@ -197,6 +197,35 @@ class ProfileConfig:
     pool_size: int = 30                  # persona 池目標大小（agent 數超過才補生）
 
 
+@dataclass(frozen=True)
+class ScalingConfig:
+    """LLM 決策的規模化設定（對應 TOML ``[scaling]``）。詳見 docs/SCALING_zh-TW.md。
+
+    純事件觸發：LLM 模式下只在「踩到壅塞/前方塞」時才呼叫 LLM 重決 active_mode；
+    順暢的車整趟維持規則式初始 mode。觸發的 agent 分批、並行送 LLM（同步等齊再推前端）。
+    """
+
+    event_triggered_decisions: bool = True  # 關閉＝退回「每步對全部 agent 決策」的舊行為
+    cooldown_steps: int = 5                  # 同車觸發後幾步內不重複觸發（去抖動）
+    batch_size: int = 30                     # B：每批最多幾個 agent（吃 context 預算）
+    concurrency: int = 4                     # C：同時並行幾批（搭配後端真並行上限）
+
+
+@dataclass(frozen=True)
+class SignalConfig:
+    """紅綠燈號誌系統設定（對應 TOML ``[signals]``）。詳見 spatial/signals.py。
+
+    台南無真實時相秒數，故 ``cycle_s`` / ``yellow_s`` 為合成值（runtime 可調，改了不需重建 artifact）；
+    哪些節點是號誌、相位軸、offset 由 ``build_signals.py`` 烤進 ``data/tainan_signals.json``。
+    停用（enabled=False）或 artifact 不存在時，引擎行為等同無號誌（不影響既有車流模擬）。
+    """
+
+    enabled: bool = True
+    cycle_s: float = 90.0        # 號誌週期秒（兩相位各佔約一半）
+    yellow_s: float = 3.0        # 每相位末尾的黃燈/清道秒（此段兩組皆紅）
+    snap_threshold_m: float = 40.0  # 僅記錄用途；實際 snap 門檻在 build_signals 決定
+
+
 # road_network 的 highway 速限 fallback（TOML [highway_specs] 缺省時用這組）。
 _DEFAULT_HIGHWAY_SPECS: dict[str, dict[str, float]] = {
     "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity": 60},
@@ -300,7 +329,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -347,6 +376,26 @@ def _build_profile_config(raw: dict[str, Any]) -> ProfileConfig:
     if pc.pool_size < 1:
         raise ValueError("設定檔 [profile].pool_size 必須 ≥ 1")
     return pc
+
+
+def _build_scaling_config(raw: dict[str, Any]) -> ScalingConfig:
+    overrides = {k: v for k, v in raw.get("scaling", {}).items()
+                 if k in {f.name for f in fields(ScalingConfig)}}
+    sc = dataclasses.replace(ScalingConfig(), **overrides)
+    if sc.cooldown_steps < 0 or sc.batch_size < 1 or sc.concurrency < 1:
+        raise ValueError("設定檔 [scaling]：cooldown_steps≥0、batch_size≥1、concurrency≥1")
+    return sc
+
+
+def _build_signal_config(raw: dict[str, Any]) -> SignalConfig:
+    overrides = {k: v for k, v in raw.get("signals", {}).items()
+                 if k in {f.name for f in fields(SignalConfig)}}
+    sc = dataclasses.replace(SignalConfig(), **overrides)
+    if sc.cycle_s <= 0:
+        raise ValueError("設定檔 [signals].cycle_s 必須為正數")
+    if not (0 <= sc.yellow_s < sc.cycle_s / 2):
+        raise ValueError("設定檔 [signals].yellow_s 必須 ≥0 且 < cycle_s/2")
+    return sc
 
 
 def _build_ui_config(raw: dict[str, Any]) -> UIConfig:
@@ -396,5 +445,7 @@ MEMORY_CONFIG = _build_memory_config(_RAW)
 PERCEPTION_CONTEXT = _build_perception_context(_RAW)
 SUMMARY_CONFIG = _build_summary_config(_RAW)
 PROFILE_CONFIG = _build_profile_config(_RAW)
+SCALING_CONFIG = _build_scaling_config(_RAW)
+SIGNAL_CONFIG = _build_signal_config(_RAW)
 HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)
 ACTIVE_MODE_PROFILES = _build_active_mode_profiles(_RAW)

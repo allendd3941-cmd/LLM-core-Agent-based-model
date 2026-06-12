@@ -7,6 +7,9 @@
 #
 # 缺少的 key 會自動回退到 config.py 內的程式碼預設值；整個檔不存在也能正常跑。
 # 數值/語意對齊 gama_moudle/Traffic_ABM_LLM_complete_v2.gaml 的 global [可調整參數區]。
+#
+# 註：本檔只管「模擬模型參數」。LLM 的「連線設定」（Ollama/vLLM 的 URL、後端、endpoint 模型）
+#     刻意放在 .env（隨機器變、不進 repo），由 src/llm_server/llm_config.py 讀取——兩者不重疊。
 # ============================================================================
 
 # ----- 模擬時間 -----
@@ -148,6 +151,15 @@ summary_every_n_steps = 2       # 每幾步重算；抵達時也會補算
 [profile]
 pool_size = 30               # persona 池目標大小
 
+# ----- 規模化（LLM 決策的事件觸發 + 並行批次）-----
+# 純事件觸發：LLM 模式下只在踩到壅塞/前方塞時才重決 active_mode；順暢的車維持規則式初始 mode。
+# 詳見 docs/SCALING_zh-TW.md。
+[scaling]
+event_triggered_decisions = true   # 關閉＝退回「每步對全部 agent 決策」舊行為
+cooldown_steps = 5                 # 同車觸發後幾步內不重複觸發
+batch_size = 30                    # 每批最多幾個 agent
+concurrency = 4                    # 同時並行幾批
+
 # ----- 可重現性 -----
 [reproducibility]
 seed = 42                    # 同 seed → 同軌跡
@@ -156,6 +168,15 @@ seed = 42                    # 同 seed → 同軌跡
 [network]
 allow_osm_download = true    # bundle 路網不存在時是否嘗試用 OSMnx 即時下載
 synthetic_grid_size = 12     # synthetic fallback 網格邊長節點數
+
+# ----- 紅綠燈號誌（方向相位：一次只放行一個路軸）-----
+# 號誌節點/相位軸/offset 由 data/tainan_signals.json 提供（執行 build_signals 產生）。
+# ⚠ 台南無真實時相秒數，cycle_s / yellow_s 為合成值（改這裡即時生效，不需重建 artifact）。
+# 停用或 artifact 不存在 → 引擎行為等同無號誌（不影響既有車流模擬）。詳見 spatial/signals.py。
+[signals]
+enabled = true       # 是否啟用號誌停等
+cycle_s = 90.0       # 號誌週期秒（兩相位各約一半）
+yellow_s = 3.0       # 每相位末尾黃燈/清道秒（此段兩組皆紅）
 
 # ----- 前端控制範圍（同時驅動後端 clamp 與前端 slider）-----
 [ui]

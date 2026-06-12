@@ -29,6 +29,7 @@ class AgentSnapshot:
     destination_town: str
     current_town: str
     current_road_id: str
+    waiting_at_signal: bool = False  # 本步是否停在號誌路口等紅燈
     trip_summary: str = ""          # long_term_memory 的整趟旅次摘要（前端點擊 agent 顯示）
     summary_source: str = "template"  # trip_summary 來源："template" | "llm"
     decision_reason: str = ""       # 本步選擇此 active_mode 的原因（前端顯示）

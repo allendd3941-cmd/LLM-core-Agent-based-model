@@ -1,9 +1,6 @@
 ﻿from pathlib import Path
-import requests
-from .timer import time_counter
-from .llm_config import OLLAMA_URL, OLLAMA_MODE, OLLAMA_MODEL
+from . import llm_client
 from .output_engine import output_process
-from .schemas.agentprofile_schema import AgentProfileSchema
 
 BASE_DIR = Path(__file__).resolve().parent
 FILE_NAME = Path(__file__).stem
@@ -28,29 +25,9 @@ def build_user_prompt(agent_count: int) -> str:
 
 def run_agent_profile(output: bool = False, agent_count: int = 10):
 
-    url = f"{OLLAMA_URL}{OLLAMA_MODE}"
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": build_user_prompt(agent_count),
-        "system": SYSTEM_PROMPT,
-        #"format": AgentProfileSchema.model_json_schema(),
-        #"think": "low",
-        "options": {
-            "seed": 42
-        },
-        "stream": False
-    }
-
-    @time_counter
-    def request_with_timeout(url, payload, file_name : str = FILE_NAME):
-        response = requests.post(url, json = payload)
-        response.raise_for_status()  
-        return response
-
-    http_response = request_with_timeout(url, payload, file_name=FILE_NAME) 
-    response_data = http_response.json()
-    final_response = response_data["response"]
+    final_response = llm_client.generate(
+        build_user_prompt(agent_count), system=SYSTEM_PROMPT,
+        options={"seed": 42}, label=FILE_NAME)
 
     if output:
         output_path = OUTPUT_PATH / f"{FILE_NAME}_output_1.txt"

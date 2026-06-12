@@ -17,8 +17,7 @@ from typing import Any
 
 import requests
 
-from . import json_utils
-from .llm_config import OLLAMA_MODE, OLLAMA_URL
+from . import json_utils, llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +32,13 @@ def run_memory_summary(facts: list[dict[str, Any]], model: str, timeout: float =
     """批次生成摘要。facts 每筆需含 ``agent_id``。回傳 {agent_id: summary}；失敗回 {}。"""
     if not facts:
         return {}
-    url = f"{OLLAMA_URL}{OLLAMA_MODE}"
     user_prompt = f"{PROMPT}\n\n以下是各 agent 的事實（JSON）：\n{json.dumps(facts, ensure_ascii=False)}"
     # 註：不傳 "think"。think 只有 reasoning 模型（如 gpt-oss）支援；對 llama3.1:8b 等
-    # 非 thinking 模型，Ollama 會回 400 Bad Request。摘要是小任務，本就不需要 thinking。
-    payload = {
-        "model": model,
-        "prompt": user_prompt,
-        "options": {"seed": 42, "temperature": 0},
-        "stream": False,
-    }
+    # 非 thinking 模型會 400。摘要是小任務，本就不需要 thinking。
     try:
-        resp = requests.post(url, json=payload, timeout=timeout)
-        resp.raise_for_status()
-        text = resp.json()["response"]
+        text = llm_client.generate(
+            user_prompt, options={"seed": 42, "temperature": 0},
+            model=model, label="memory_summary", timeout=timeout)
     except (requests.RequestException, KeyError, ValueError) as e:
         logger.warning("memory_summary 呼叫失敗（model=%s）：%s", model, e)
         return {}

@@ -45,6 +45,7 @@
         case "state_update":
           TrafficMap.updateRoads(msg.roads);
           TrafficMap.updateAgents(msg.agents);
+          TrafficMap.updateSignalPhase((msg.elapsed_minutes || 0) * 60);
           TrafficUI.updateStats(msg);
           TrafficCharts.update(msg);
           break;

@@ -29,6 +29,7 @@ from ..decisions.base import DecisionPolicy
 from ..decisions.llm_adapter import LLMDecisionPolicy
 from ..decisions.mock_policy import MockDecisionPolicy
 from ..spatial import gis_loader, geojson, routing
+from ..spatial import signals as signals_mod
 from ..spatial.road_network import RoadNetwork, load_road_network
 from . import metrics
 from .random_seed import make_rng
@@ -57,6 +58,8 @@ class SimulationEngine:
         self.recorder = metrics.MetricsRecorder(self.cfg)
 
         self.network: RoadNetwork | None = None
+        self.signals: signals_mod.SignalSystem = signals_mod.SignalSystem({}, 90.0, 3.0, enabled=False)
+        self._elapsed_seconds: float = 0.0   # 號誌相位用：模擬已過秒數（= cycle × step_minutes × 60）
         self.agents: list[VehicleAgent] = []
         self.towns: list = []
         self._stadium_xy: tuple[float, float] = (0.0, 0.0)
@@ -84,6 +87,7 @@ class SimulationEngine:
         self._stadium_xy = (stadium_pt.x, stadium_pt.y)
 
         self.network = load_road_network(self.cfg)
+        self.signals = signals_mod.load_signal_system()
         self._dest_node = self.network.nearest_node(*self._stadium_xy)
 
         self._build_agents()
@@ -103,9 +107,16 @@ class SimulationEngine:
         ]
 
     def _initial_decisions(self) -> None:
-        """指派 profile/起點/車種/初始 mode；LLM 失敗自動 fallback mock。"""
+        """指派 profile/起點/車種/初始 mode。
+
+        事件觸發模式（預設）：用規則式（mock）建立確定性基線，再用 persona 池**確定性覆寫**
+        name/車種（不呼叫 LLM 做初始決策、開場不爆量）；初始 active_mode 維持規則式。
+        關閉事件觸發（舊行為）：用 LLM init 決策；失敗 fallback mock。
+        """
+        sc = config.SCALING_CONFIG
+
         assignments = {}
-        if self.cfg.use_llm:
+        if self.cfg.use_llm and not sc.event_triggered_decisions:
             assignments = self._llm.initialize_agents(self.agents, self._available_towns)
             if assignments and self._llm.last_call_ok:
                 self.last_decision_source = "llm"
@@ -126,6 +137,19 @@ class SimulationEngine:
             if a.active_mode:
                 agent.apply_active_mode(a.active_mode)   # 套用 mode 的數值 + 路徑策略
             agent.api_status = "init_response_applied" if self.last_decision_source == "llm" else "mock"
+
+        # LLM 模式（不分事件觸發）：persona 池為「出生地 / name / 車種」的單一真實來源，
+        # 確定性覆寫之（初始 active_mode 維持上面的規則式或 LLM init 結果）。
+        # 出生地只在此處設一次；之後每步決策不會、也不應再更動出生地（agent 只出生一次）。
+        if self.cfg.use_llm:
+            from ..decisions import profile_pool
+            if profile_pool.assign_to_agents(self.agents, config.PROFILE_CONFIG.pool_size,
+                                             self._available_towns, self.cfg.default_origin_town):
+                self.last_decision_source = "llm"
+                for agent in self.agents:
+                    agent.api_status = "persona_assigned"
+            else:
+                logger.warning("persona 池不可用（Ollama？），沿用既有人物")
 
     def _place_agent(self, agent: VehicleAgent) -> None:
         """把 agent 放到起點行政區內的路網節點，計算到球場的初始路徑。"""
@@ -159,6 +183,7 @@ class SimulationEngine:
             raise RuntimeError("引擎尚未初始化")
 
         cycle = self.scheduler.advance()
+        self._elapsed_seconds = cycle * self.cfg.step_minutes * 60.0  # 號誌相位基準時間
 
         # 1. 感知快照（用上一步遺留的道路壅塞）
         for agent in self.agents:
@@ -241,17 +266,38 @@ class SimulationEngine:
         }
 
     def _apply_step_decisions(self, env: dict[str, Any], cycle: int) -> None:
-        decisions = {}
-        if self.cfg.use_llm:
+        """每步決策。詳見 docs/SCALING_zh-TW.md。
+
+        - mock 模式：每步對全部 agent 決策（便宜、確定性，不變）。
+        - LLM 模式 + 事件觸發（預設）：只對「踩到壅塞/前方塞」的 agent 重決，分批並行。
+        - LLM 模式 + 關閉事件觸發：退回「每步對全部 agent 決策」的舊行為。
+        """
+        sc = config.SCALING_CONFIG
+
+        if not self.cfg.use_llm:
+            self.last_decision_source = "mock"
+            self._apply_decisions(self._mock.decide_step(self.agents, env, cycle))
+            return
+
+        if not sc.event_triggered_decisions:  # 舊行為：每步決策全部
             decisions = self._llm.decide_step(self.agents, self._llm_environment(env), cycle)
             if decisions and self._llm.last_call_ok:
                 self.last_decision_source = "llm"
             else:
-                decisions = {}
-        if not decisions:
-            decisions = self._mock.decide_step(self.agents, env, cycle)
-            self.last_decision_source = "mock"
+                decisions = self._mock.decide_step(self.agents, env, cycle)
+                self.last_decision_source = "mock"
+            self._apply_decisions(decisions)
+            return
 
+        # 事件觸發：只決策觸發的 agent（順暢的車維持現有 mode）
+        self.last_decision_source = "llm"
+        triggered = self._triggered_agents(cycle)
+        if not triggered:
+            return  # 沒人觸發 → 不呼叫 LLM
+        self._apply_decisions(self._llm_decide_batched(triggered, self._llm_environment(env), cycle))
+
+    def _apply_decisions(self, decisions: dict[str, Any]) -> None:
+        """依 agent_id 順序套用決策（確定性，與批次回來的順序無關）。"""
         for agent in self.agents:
             d = decisions.get(agent.agent_id)
             if d is None:
@@ -262,6 +308,42 @@ class SimulationEngine:
                 agent.apply_vehicle_type(d.vehicle_type)
             if d.reason:
                 agent.decision_reason = d.reason
+
+    def _triggered_agents(self, cycle: int) -> list[VehicleAgent]:
+        """回傳本步「需要重決」的 agent：壅塞訊號上升緣 + 過了 cooldown。"""
+        sc = config.SCALING_CONFIG
+        thr = self.cfg.crowded_road_threshold
+        out: list[VehicleAgent] = []
+        for a in self.agents:
+            if a.route_status in (RouteStatus.ARRIVED, RouteStatus.ERROR):
+                a._prev_congestion_signal = False
+                continue
+            # 腳下壅塞 或 前方路徑有塞點（congestion_proxy / road_ahead 已於 pre-move 感知算好）
+            signal = (a.congestion_proxy >= thr) or (a.road_ahead not in ("", agent_mod.AHEAD_CLEAR))
+            if signal and not a._prev_congestion_signal and cycle >= a._decision_cooldown_until:
+                out.append(a)
+                a._decision_cooldown_until = cycle + sc.cooldown_steps
+            a._prev_congestion_signal = signal
+        return out
+
+    def _llm_decide_batched(self, agents: list[VehicleAgent], env: dict[str, Any],
+                            cycle: int) -> dict[str, Any]:
+        """把觸發的 agent 分批、並行送 LLM（同步等齊再回傳合併決策）。"""
+        sc = config.SCALING_CONFIG
+        batches = [agents[i:i + sc.batch_size] for i in range(0, len(agents), sc.batch_size)]
+        merged: dict[str, Any] = {}
+        if len(batches) <= 1:
+            merged.update(self._llm.decide_step(batches[0], env, cycle) if batches else {})
+            return merged
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(sc.concurrency, len(batches))) as ex:
+            futures = [ex.submit(self._llm.decide_step, b, env, cycle) for b in batches]
+            for f in futures:
+                try:
+                    merged.update(f.result())
+                except Exception as e:  # noqa: BLE001  單批失敗 → 該批維持現有 mode
+                    logger.warning("批次決策失敗：%s", e)
+        return merged
 
     # ==================================================================
     # 感知 / 移動
@@ -289,6 +371,7 @@ class SimulationEngine:
             agent.distance_moved_last_step = 0.0
             agent.selected_action = "arrived" if agent.route_status == RouteStatus.ARRIVED else "error"
             return
+        agent.waiting_at_signal = False   # 每步先清，_advance_along_path 停在紅燈時才設 True
 
         # 壅塞 → 重算路徑（避開壅塞）；tolerate_congestion 的 recompute_on_crowded=False 不重算
         if agent.is_crowded and agent.recompute_on_crowded and agent.current_node and agent.destination_node:
@@ -328,6 +411,16 @@ class SimulationEngine:
         path = agent.current_path
         remaining = distance_m
         while remaining > 0 and agent.path_index < len(path) - 1:
+            # 號誌 gating：剛好停在路口節點（edge_progress==0）、要進入下一條邊前先看燈。
+            # 控制相位的是「進場方向」＝ 前一節點→本節點；紅燈 → 停在路口、本步不再前進。
+            if agent.edge_progress == 0.0 and agent.path_index > 0:
+                node = path[agent.path_index]
+                if self.signals.is_signalized(node):
+                    bearing = self._bearing(path[agent.path_index - 1], node)
+                    if not self.signals.is_green(node, bearing, self._elapsed_seconds):
+                        agent.waiting_at_signal = True
+                        agent.selected_action = "wait_at_signal"
+                        break
             u = path[agent.path_index]
             v = path[agent.path_index + 1]
             road = self.network.road_between(u, v)
@@ -349,6 +442,12 @@ class SimulationEngine:
                 agent.x = ux + (vx - ux) * frac
                 agent.y = uy + (vy - uy) * frac
                 remaining = 0.0
+
+    def _bearing(self, u: str, v: str) -> float:
+        """節點 u→v 的方位角（度，0..360，公尺座標）。號誌進場方向判定用。"""
+        ux, uy = self.network.node_xy(u)
+        vx, vy = self.network.node_xy(v)
+        return math.degrees(math.atan2(vy - uy, vx - ux)) % 360.0
 
     def _recompute_flows(self) -> None:
         """依 agent 當前佔用的 edge 統計 flow，更新每條道路（對齊 GAML road.update_flow）。"""
@@ -539,6 +638,7 @@ class SimulationEngine:
                 nearby_agent_count=a.nearby_agent_count,
                 origin_town=a.origin_town, destination_town=a.destination_town,
                 current_town=a.current_town, current_road_id=a.current_road_id,
+                waiting_at_signal=a.waiting_at_signal,
                 trip_summary=a.long_term_memory.get("trip_summary", ""),
                 summary_source=a.summary_source,
                 decision_reason=a.decision_reason,
@@ -613,6 +713,7 @@ class SimulationEngine:
             "type": "init",
             "towns_geojson": gis_loader.load_towns_geojson(),
             "roads_geojson": geojson.roads_to_geojson(self.network, only_major=True),
+            "signals": self.signals.phase_payload(),
             "stadium": {"lat": self._stadium_latlng[0], "lng": self._stadium_latlng[1]},
             "agent_profiles": self._load_agent_profiles(),
             "config": {

@@ -137,6 +137,9 @@ body {
 .lg-green { background: var(--green); } .lg-yellow { background: var(--yellow); }
 .lg-orange { background: var(--orange); } .lg-red { background: var(--red); }
 .lg-dest { background: #ff3b3b; border-radius: 50%; width: 10px; height: 10px; }
+.lg-sep { height: 1px; background: var(--border); margin: 2px 0; }
+.lg-toggle { cursor: pointer; user-select: none; gap: 4px !important; }
+.lg-toggle input { accent-color: #19d36b; margin: 0 2px 0 0; }
 
 /* ── Toast ─────────────────────────────────────────────── */
 .toast {
