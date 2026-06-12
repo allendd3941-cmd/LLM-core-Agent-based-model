@@ -9,8 +9,18 @@ const TrafficMap = (() => {
   let roadById = {};          // road_id → Leaflet polyline（用於即時上色）
   let flowOverlay = {};       // road_id → 動態疊畫的 polyline（底圖沒有的非主要道路）
   let agentMarkers = {};      // agent_id → marker
+  let agentMode = null;       // "icon"（少量→emoji 圖標）| "dot"（大量→canvas 彩點），依數量自動切
   let stadiumMarker = null;
   let onAgentSelect = null;
+
+  // agent 依「狀態」上色（與道路壅塞上色分離，不再重複混淆）
+  const AGENT_ICON_MAX = 150;  // ≤ 此數用 emoji 圖標；超過退回 canvas 彩點保效能
+  const STATE_COLOR = {
+    moving: "#3fb6ff",   // 移動中（藍）
+    waiting: "#ffb300",  // 等紅燈（琥珀）
+    arrived: "#00c853",  // 已抵達（綠）
+    error: "#7a8699",    // 找不到路徑（灰）
+  };
 
   // 號誌圖層（獨立 canvas，與車流/道路完全分離）
   let signalRenderer = null;  // 專用 canvas renderer，避免與車輛 marker 互搶
@@ -46,6 +56,7 @@ const TrafficMap = (() => {
     Object.values(agentMarkers).forEach((m) => map.removeLayer(m));
     Object.values(flowOverlay).forEach((l) => map.removeLayer(l));
     agentMarkers = {};
+    agentMode = null;
     flowOverlay = {};
     roadById = {};
     signalBars = [];
@@ -133,12 +144,27 @@ const TrafficMap = (() => {
     refreshSignalVisibility();
   }
 
-  function colorFor(status, congestion) {
-    if (status === "arrived") return "#00c853";
-    if (status === "error") return "#7a8699";
-    if (congestion >= 0.7) return "#d50000";
-    if (congestion >= 0.4) return "#ff6d00";
-    return "#3fb6ff";
+  // agent 狀態（優先序：抵達 > error > 等紅燈 > 移動中）。顏色只反映「狀態」，壅塞由道路表示。
+  function agentState(a) {
+    if (a.route_status === "arrived") return "arrived";
+    if (a.route_status === "error") return "error";
+    if (a.waiting_at_signal) return "waiting";
+    return "moving";
+  }
+
+  // emoji 圖標 HTML：車種 emoji + 狀態色外框 + 角落狀態徽章（等紅燈🚦 / 抵達🏁）。
+  function agentIconHtml(a, state) {
+    const veh = a.vehicle_type === "機車" ? "🏍️" : "🚗";
+    const badge = state === "waiting" ? "🚦" : state === "arrived" ? "🏁" : "";
+    const ring = STATE_COLOR[state];
+    return `<div class="agent-pin" style="border-color:${ring}">`
+      + `<span class="agent-veh">${veh}</span>`
+      + (badge ? `<span class="agent-badge">${badge}</span>` : "")
+      + `</div>`;
+  }
+
+  function makeAgentIcon(a, state) {
+    return L.divIcon({ html: agentIconHtml(a, state), className: "", iconSize: [24, 24], iconAnchor: [12, 12] });
   }
 
   // 把座標相同的 agent 在畫面上散開成一個小圈（spiderfy），避免疊成一點看不到。
@@ -165,31 +191,59 @@ const TrafficMap = (() => {
   }
 
   function updateAgents(agents) {
+    // 智慧混合：agent 少 → emoji 圖標（好看）；多 → canvas 彩點（保效能）。
+    const mode = agents.length <= AGENT_ICON_MAX ? "icon" : "dot";
+    if (mode !== agentMode) {  // 模式切換 → 清掉舊 marker 重建（避免混用兩種 marker 型別）
+      Object.values(agentMarkers).forEach((m) => map.removeLayer(m));
+      agentMarkers = {};
+      agentMode = mode;
+    }
     const seen = new Set();
     const pos = spreadPositions(agents);
     agents.forEach((a) => {
       seen.add(a.agent_id);
-      const color = colorFor(a.route_status, a.congestion_proxy);
-      const radius = a.vehicle_type === "機車" ? 4 : 6;
       const ll = pos[a.agent_id] || [a.lat, a.lng];
-      let m = agentMarkers[a.agent_id];
-      if (!m) {
-        m = L.circleMarker(ll, {
-          radius, color: "#0b0f16", weight: 1, fillColor: color, fillOpacity: 0.95,
-        }).addTo(map);
-        // 用 m._agentData（每步更新）而非閉包捕捉的初始 a，確保點擊看到最新一步資料（含 trip_summary）
-        m.on("click", () => onAgentSelect && onAgentSelect(m._agentData));
-        agentMarkers[a.agent_id] = m;
-      } else {
-        m.setLatLng(ll);
-        m.setStyle({ fillColor: color, radius });
-      }
-      m._agentData = a;
+      const state = agentState(a);
+      if (mode === "icon") upsertAgentIcon(a, ll, state);
+      else upsertAgentDot(a, ll, state);
     });
     // 移除已不存在的（reset / set_agents）
     Object.keys(agentMarkers).forEach((id) => {
       if (!seen.has(id)) { map.removeLayer(agentMarkers[id]); delete agentMarkers[id]; }
     });
+  }
+
+  function upsertAgentIcon(a, ll, state) {
+    let m = agentMarkers[a.agent_id];
+    if (!m) {
+      m = L.marker(ll, { icon: makeAgentIcon(a, state) }).addTo(map);
+      m.on("click", () => onAgentSelect && onAgentSelect(m._agentData));
+      agentMarkers[a.agent_id] = m;
+      m._state = state; m._veh = a.vehicle_type;
+    } else {
+      m.setLatLng(ll);
+      if (m._state !== state || m._veh !== a.vehicle_type) {  // 狀態/車種變了才換 icon（省重繪）
+        m.setIcon(makeAgentIcon(a, state));
+        m._state = state; m._veh = a.vehicle_type;
+      }
+    }
+    m._agentData = a;  // 每步更新，確保點擊看到最新資料（含 trip_summary）
+  }
+
+  function upsertAgentDot(a, ll, state) {
+    const radius = a.vehicle_type === "機車" ? 4 : 6;
+    let m = agentMarkers[a.agent_id];
+    if (!m) {
+      m = L.circleMarker(ll, {
+        radius, color: "#0b0f16", weight: 1, fillColor: STATE_COLOR[state], fillOpacity: 0.95,
+      }).addTo(map);
+      m.on("click", () => onAgentSelect && onAgentSelect(m._agentData));
+      agentMarkers[a.agent_id] = m;
+    } else {
+      m.setLatLng(ll);
+      m.setStyle({ fillColor: STATE_COLOR[state], radius });
+    }
+    m._agentData = a;
   }
 
   function updateRoads(roads) {

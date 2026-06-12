@@ -133,7 +133,7 @@ distance_decimals = 1        # remaining 距離顯示小數位數
 # 質性門檻（順暢/普通/壅塞）沿用上面 [memory] 的 feel_*，保持同一套詞彙。
 [perception_context]
 hotspots_top_k = 5            # 全域 congestion_hotspots 取前幾個最塞的行政區（不乘 agent 數）
-lookahead_distance_m = 2000  # 每車 road_ahead 沿路徑往前看的距離（公尺）
+lookahead_distance_m = 500  # 每車 road_ahead 沿路徑往前看的距離（公尺）
 speed_free_ratio = 0.8       # speed/速限 ≥ 此值 →「自由流」
 speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩行」
 
@@ -149,7 +149,7 @@ summary_every_n_steps = 2       # 每幾步重算；抵達時也會補算
 # persona 生成一次、存成穩定池檔；調整 agent 數只是「取池裡前 n 個」，不會一直重生/覆寫。
 # agent 數超過 pool_size 才自動補生；要整批換人用前端「重新生成人物」按鈕。
 [profile]
-pool_size = 30               # persona 池目標大小
+pool_size = 100               # persona 池目標大小
 
 # ----- 規模化（LLM 決策的事件觸發 + 並行批次）-----
 # 純事件觸發：LLM 模式下只在踩到壅塞/前方塞時才重決 active_mode；順暢的車維持規則式初始 mode。

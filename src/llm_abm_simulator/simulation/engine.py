@@ -294,6 +294,9 @@ class SimulationEngine:
         triggered = self._triggered_agents(cycle)
         if not triggered:
             return  # 沒人觸發 → 不呼叫 LLM
+        n_batches = math.ceil(len(triggered) / sc.batch_size)
+        logger.info("step %d · LLM 重決 %d 台（壅塞觸發）→ %d 批 ×%d 並行",
+                    cycle, len(triggered), n_batches, min(sc.concurrency, n_batches))
         self._apply_decisions(self._llm_decide_batched(triggered, self._llm_environment(env), cycle))
 
     def _apply_decisions(self, decisions: dict[str, Any]) -> None:

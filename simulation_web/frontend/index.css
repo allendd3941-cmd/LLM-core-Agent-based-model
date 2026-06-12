@@ -140,6 +140,20 @@ body {
 .lg-sep { height: 1px; background: var(--border); margin: 2px 0; }
 .lg-toggle { cursor: pointer; user-select: none; gap: 4px !important; }
 .lg-toggle input { accent-color: #19d36b; margin: 0 2px 0 0; }
+.lg-title { color: var(--text); font-weight: 600; font-size: 10px; opacity: .75; margin-top: 2px; }
+.lg-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.lg-ag-move { background: #3fb6ff; } .lg-ag-wait { background: #ffb300; }
+.lg-ag-arr { background: #00c853; }
+
+/* agent emoji 圖標（少量 agent 時）：車種 emoji + 狀態色外框 + 角落徽章 */
+.agent-pin {
+  position: relative; width: 24px; height: 24px; border-radius: 50%;
+  border: 2px solid #3fb6ff; background: rgba(11, 15, 22, .82);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .5);
+}
+.agent-veh { font-size: 13px; line-height: 1; }
+.agent-badge { position: absolute; top: -9px; right: -9px; font-size: 12px; line-height: 1; }
 
 /* ── Toast ─────────────────────────────────────────────── */
 .toast {

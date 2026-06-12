@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
@@ -26,7 +27,24 @@ from .websocket import SimulationSession
 logger = logging.getLogger(__name__)
 
 
+def configure_logging(level: int = logging.INFO) -> None:
+    """為本專案 logger 設一個乾淨、有時間戳的 console handler。
+
+    uvicorn 預設不會顯示 app logger 的 INFO，且 pipeline 原本用 print 在併發批次下會交錯亂印。
+    這裡給 ``llm_abm_simulator`` 與 ``llm_server`` 各掛一個格式化 handler、關掉 propagate（不重複），
+    讓「運行中狀態」乾淨呈現：每步決策摘要走 INFO、單次 LLM 呼叫走 DEBUG、卡住的呼叫走 WARNING。
+    """
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
+    for name in ("llm_abm_simulator", "llm_server"):
+        lg = logging.getLogger(name)
+        lg.handlers = [handler]
+        lg.setLevel(level)
+        lg.propagate = False
+
+
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title="LLM ABM 交通模擬器", version="0.1.0")
     frontend = config.FRONTEND_DIR
 

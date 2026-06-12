@@ -1,6 +1,9 @@
-def output_process(response, output_path, file_name):
-    print(response[:50])
+import logging
 
+logger = logging.getLogger(__name__)
+
+
+def output_process(response, output_path, file_name):
     if not response:
         raise ValueError("Ollama response是空的")
 
@@ -8,4 +11,6 @@ def output_process(response, output_path, file_name):
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(response)
-        print(F"已完成{file_name}的output。")
+
+    # 原本 print(response[:50]) 會把原始 LLM 文字噴進 console（併發時很亂）→ 降為 DEBUG。
+    logger.debug("已寫出 %s 輸出 → %s（%d 字）", file_name, output_path, len(response))
