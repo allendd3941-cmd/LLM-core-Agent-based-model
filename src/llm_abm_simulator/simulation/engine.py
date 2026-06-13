@@ -79,6 +79,14 @@ class SimulationEngine:
         self._event_vehsteps: int = 0                     # 事件車「車·步」累積（路網負載占比用）
         self._ambient_vehsteps: int = 0                   # 背景車「車·步」累積
 
+        # 規模化：節點→行政區索引、鄰近空間網格、前端可視範圍
+        self._town_nodes: dict[str, list[str]] = {}       # 區名 → 覆蓋它的節點清單（init 一次性建，放置 O(1)）
+        self._node_town: dict[str, str] = {}              # 節點 → 所屬區（同一索引反向；current_town O(1)）
+        self._nearby_grid: dict[tuple[int, int], int] | None = None  # 每步重建的鄰近計數網格
+        self._nearby_cell: float = 1.0
+        self._view: dict[str, float] | None = None        # 前端回報的可視範圍（公尺框 + zoom）；大規模裁切用
+        self._to_metric = None                            # lazy pyproj transformer（set_view 用）
+
         # 決策核心（可選；見 decisions/registry.py）：規則式（rule）/ LLM 認知核心（llm）
         self._mock = MockDecisionPolicy(self.cfg, self.rng)   # 規則式核心（背景車流也用它）
         self._llm = LLMDecisionPolicy(self.cfg)
@@ -102,6 +110,7 @@ class SimulationEngine:
         self.network = load_road_network(self.cfg)
         self.signals = signals_mod.load_signal_system()
         self._dest_node = self.network.nearest_node(*self._stadium_xy)
+        self._build_town_node_index()   # ① 節點→行政區一次性索引（放置 O(1)）
 
         self._road_peak = {}
         self._event_vehsteps = 0
@@ -174,6 +183,42 @@ class SimulationEngine:
             else:
                 logger.warning("persona 池不可用（Ollama？），沿用既有人物")
 
+    def _build_town_node_index(self) -> None:
+        """① 一次性把每個節點歸到「覆蓋它的行政區」清單。
+
+        判定（``geom.covers``）與成員順序刻意與 ``random_node_in_town`` 的 ``inside`` 完全一致，
+        確保改用索引後**放置結果與逐台版完全相同**（同 seed 同軌跡）。一次成本 ~O(節點×區)；
+        之後 ``_node_in_town`` 直接 O(1) 抽，取代每台車掃全節點的 shapely。
+        """
+        from shapely.geometry import Point
+        assert self.network is not None
+        nodes = list(self.network.graph.nodes())
+        xy = {n: self.network.node_xy(n) for n in nodes}
+        idx: dict[str, list[str]] = {}
+        node_town: dict[str, str] = {}
+        for t in self.towns:
+            geom = t.geometry_metric
+            covered = ([n for n in nodes if geom.covers(Point(*xy[n]))]
+                       if geom is not None else [])
+            idx[t.town_name] = covered
+            for n in covered:           # 反向表：邊界節點被多區覆蓋時，第一個區勝出（確定性）
+                node_town.setdefault(n, t.town_name)
+        self._town_nodes = idx
+        self._node_town = node_town
+        logger.info("節點→行政區索引完成：%d 節點 / %d 區", len(nodes), len(idx))
+
+    def _node_in_town(self, town_name: str) -> str:
+        """在指定行政區內抽一個節點（O(1)）。與 ``random_node_in_town`` 同邏輯、同 rng 消耗：
+        覆蓋清單非空 → 隨機抽；否則退到形心最近節點；再否則全域隨機。"""
+        assert self.network is not None
+        nodes = self._town_nodes.get(town_name)
+        if nodes:
+            return nodes[self.rng.randrange(len(nodes))]
+        t = self._town_by_name(town_name)
+        if t is not None and t.centroid_metric is not None:
+            return self.network.nearest_node(t.centroid_metric.x, t.centroid_metric.y)
+        return self.network._node_ids[self.rng.randrange(len(self.network._node_ids))]
+
     def _place_agent(self, agent: VehicleAgent) -> None:
         """把 agent 放到起點行政區內的路網節點，計算到目的地的初始路徑。
 
@@ -183,13 +228,13 @@ class SimulationEngine:
         assert self.network is not None
         town = self._town_by_name(agent.origin_town)
         if town is not None:
-            origin_node = self.network.random_node_in_town(town, self.rng)
+            origin_node = self._node_in_town(agent.origin_town)
         else:
             origin_node = self.network.nearest_node(*self._stadium_xy)
 
         if agent.role == "ambient":
             dtown = self._town_by_name(agent.destination_town)
-            dest_node = (self.network.random_node_in_town(dtown, self.rng)
+            dest_node = (self._node_in_town(agent.destination_town)
                          if dtown is not None else self._dest_node)
         else:
             agent.destination_town = self._dest_town
@@ -258,7 +303,7 @@ class SimulationEngine:
                 continue
             dest = demand_mod.sample_dest_town(self.towns, (a.x, a.y), self.rng, config.DEMAND_CONFIG)
             dtown = self._town_by_name(dest) if dest else None
-            dnode = (self.network.random_node_in_town(dtown, self.rng)
+            dnode = (self._node_in_town(dest)
                      if dtown is not None else self._dest_node)
             path = self._route(a.current_node, dnode, a.routing_strategy())
             if len(path) <= 1:
@@ -287,6 +332,8 @@ class SimulationEngine:
         self._elapsed_seconds = cycle * self.cfg.step_minutes * 60.0  # 號誌相位基準時間
 
         # 1. 感知快照（用上一步遺留的道路壅塞）
+        if self.cfg.nearby_mode == "grid":
+            self._build_nearby_grid()
         for agent in self.agents:
             self._refresh_agent_perception(agent, pre_move=True)
 
@@ -304,6 +351,8 @@ class SimulationEngine:
         self._recompute_flows()
 
         # 5. 移動後感知快照（供 memory / 輸出）
+        if self.cfg.nearby_mode == "grid":
+            self._build_nearby_grid()
         for agent in self.agents:
             self._refresh_agent_perception(agent, pre_move=False)
 
@@ -340,6 +389,7 @@ class SimulationEngine:
         也省 LLM（不每步、不對全車）。失敗（匯入/呼叫/解析）一律保留既有摘要/模板，不中斷模擬。
         整套統一：摘要也用前端所選的模型（current_model）；取不到才退回 [summary].summary_model。
         """
+        agents = [a for a in agents if a.memory]
         if not agents:
             return
         try:
@@ -347,19 +397,39 @@ class SimulationEngine:
         except ImportError as e:
             logger.warning("memory_summary 匯入失敗，沿用模板摘要：%s", e)
             return
-        facts = [a.memory_facts() for a in agents if a.memory]
-        if not facts:
-            return
         try:
             from llm_server import llm_config as _lc
             model = _lc.current_model() or config.SUMMARY_CONFIG.summary_model
         except ImportError:
             model = config.SUMMARY_CONFIG.summary_model
-        summaries = run_memory_summary(facts, model)
-        if not summaries:
+
+        # ④ 分批（比照決策的 token 預算切批、可並行）：避免大規模時上千台塞一個 prompt 爆 context。
+        sc = config.SCALING_CONFIG
+        bsize = self._budget_batch_size(agents, sc.batch_size)
+        batches = [agents[i:i + bsize] for i in range(0, len(agents), bsize)]
+
+        def _one(batch: list[VehicleAgent]) -> dict[str, str]:
+            try:
+                return run_memory_summary([a.memory_facts() for a in batch], model)
+            except Exception as e:  # noqa: BLE001  單批失敗不影響其他批
+                logger.warning("記憶摘要批次失敗：%s", e)
+                return {}
+
+        merged: dict[str, str] = {}
+        if len(batches) <= 1:
+            merged = _one(batches[0]) if batches else {}
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(sc.concurrency, len(batches))) as ex:
+                for f in [ex.submit(_one, b) for b in batches]:
+                    try:
+                        merged.update(f.result())
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("記憶摘要批次取結果失敗：%s", e)
+        if not merged:
             return
         for a in agents:
-            s = summaries.get(a.agent_id)
+            s = merged.get(a.agent_id)
             if s:
                 a.memory["summary"] = s
                 a.summary_source = "llm"
@@ -655,7 +725,7 @@ class SimulationEngine:
         agent.current_road_class = agent_mod.clean_highway(road.highway) if road else ""
         agent.congestion_proxy = road.congestion_proxy if road else 0.0
         agent.next_road_id = road.road_id if road else "unknown"
-        agent.current_town = self._town_of_point(agent.x, agent.y)
+        agent.current_town = self._current_town(agent)
         dx, dy = self._dest_xy(agent)
         agent.distance_to_destination = math.hypot(agent.x - dx, agent.y - dy)
         agent.nearby_agent_count = self._count_nearby(agent)
@@ -700,15 +770,52 @@ class SimulationEngine:
                 break
         return agent_mod.AHEAD_CLEAR
 
-    def _count_nearby(self, agent: VehicleAgent) -> int:
-        r2 = agent.perception_radius ** 2
-        count = 0
-        for other in self.agents:
-            if other is agent or other.route_status == RouteStatus.ARRIVED:
+    def _build_nearby_grid(self) -> None:
+        """③ 每步建一次空間網格（桶＝邊長 perception_radius 的方格，只裝未抵達的車），
+        讓 grid 模式的鄰近估計變 O(1)。整步 O(n) 取代舊的 O(n²)。"""
+        cell = max(1.0, self.cfg.perception_radius_m)
+        grid: dict[tuple[int, int], int] = {}
+        for a in self.agents:
+            if a.route_status == RouteStatus.ARRIVED:
                 continue
-            if (other.x - agent.x) ** 2 + (other.y - agent.y) ** 2 <= r2:
-                count += 1
-        return count
+            key = (int(a.x // cell), int(a.y // cell))
+            grid[key] = grid.get(key, 0) + 1
+        self._nearby_grid = grid
+        self._nearby_cell = cell
+
+    def _count_nearby(self, agent: VehicleAgent) -> int:
+        """附近車數。grid（預設、O(1)）：查自己＋周圍 8 格的車數（近似半徑）；
+        exact：精確半徑全比對（O(n)，整步 O(n²)，可還原舊值供對照）。只餵 LLM 感知。"""
+        if self.cfg.nearby_mode == "exact":
+            r2 = agent.perception_radius ** 2
+            count = 0
+            for other in self.agents:
+                if other is agent or other.route_status == RouteStatus.ARRIVED:
+                    continue
+                if (other.x - agent.x) ** 2 + (other.y - agent.y) ** 2 <= r2:
+                    count += 1
+            return count
+        grid = self._nearby_grid
+        if not grid:
+            return 0   # 尚未建網格（例如 init 放置階段）；首步會正確重算
+        cell = self._nearby_cell
+        cx, cy = int(agent.x // cell), int(agent.y // cell)
+        total = sum(grid.get((cx + dx, cy + dy), 0) for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+        if agent.route_status != RouteStatus.ARRIVED:
+            total -= 1   # 扣掉自己（自己也在某格裡）
+        return max(0, total)
+
+    def _current_town(self, agent: VehicleAgent) -> str:
+        """⑦ agent 目前所屬行政區。
+        - town_mode="node"（預設、O(1)）：用所在節點 `current_node` 的所屬區（反向索引查表）；
+          查不到（極少：節點不在任何區）才退回精確判定。
+        - town_mode="exact"：用精確內插位置做點在多邊形內（O(車數×區數)，可還原舊值）。
+        """
+        if self.cfg.town_mode == "node":
+            t = self._node_town.get(agent.current_node)
+            if t:
+                return t
+        return self._town_of_point(agent.x, agent.y)
 
     def _town_of_point(self, x: float, y: float) -> str:
         from shapely.geometry import Point
@@ -790,11 +897,25 @@ class SimulationEngine:
         rows.sort(key=lambda r: r["crowded_roads"], reverse=True)
         return rows[:config.PERCEPTION_CONTEXT.hotspots_top_k]
 
+    def _visible_agents(self) -> list[VehicleAgent]:
+        """⑥ 決定本步要送前端的車（大規模渲染）：
+        - 車數 ≤ [ui].render_individual_max → 全送（小 demo 任何 zoom 都看得到車）。
+        - 超過 且（尚未收到視圖 或 zoom < agent_min_zoom）→ 不送車（前端只看道路壅塞）。
+        - 超過 且 zoom 夠近 → 只送「可視範圍內」的車（公尺框過濾，O(n)；經緯度只算這批）。"""
+        ui = config.UI_CONFIG
+        if len(self.agents) <= ui.render_individual_max:
+            return self.agents
+        v = self._view
+        if v is None or v.get("zoom", 0.0) < ui.agent_min_zoom:
+            return []
+        return [a for a in self.agents
+                if v["minx"] <= a.x <= v["maxx"] and v["miny"] <= a.y <= v["maxy"]]
+
     def _snapshot(self, cycle: int, env: dict[str, Any],
                   mode_dist: dict[str, int], status_dist: dict[str, int]) -> SimulationState:
         assert self.network is not None
         agents_snap = []
-        for a in self.agents:
+        for a in self._visible_agents():
             lat, lng = self._xy_to_latlng(a.x, a.y)
             agents_snap.append(AgentSnapshot(
                 agent_id=a.agent_id, profile_name=a.profile_name, lat=lat, lng=lng,
@@ -855,6 +976,21 @@ class SimulationEngine:
 
     def resume(self) -> None:
         self.running = True
+
+    def set_view(self, zoom: float, bounds: dict) -> None:
+        """⑥ 前端回報目前可視範圍（zoom + lat/lng bounds {s,w,n,e}）；大規模時據此只送範圍內的車。
+        把 lat/lng 框轉成公尺框存起來（agent 用公尺座標過濾,免每台算經緯度）。"""
+        try:
+            from pyproj import Transformer
+            if self._to_metric is None:
+                self._to_metric = Transformer.from_crs(config.CRS_WGS84, config.CRS_METRIC, always_xy=True)
+            x1, y1 = self._to_metric.transform(float(bounds["w"]), float(bounds["s"]))
+            x2, y2 = self._to_metric.transform(float(bounds["e"]), float(bounds["n"]))
+            self._view = {"zoom": float(zoom),
+                          "minx": min(x1, x2), "maxx": max(x1, x2),
+                          "miny": min(y1, y2), "maxy": max(y1, y2)}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("set_view 失敗：%s", e)
 
     def reset(self) -> None:
         """重設並重新初始化（同 seed → 同初始狀態）。"""

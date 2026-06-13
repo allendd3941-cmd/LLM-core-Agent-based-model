@@ -124,7 +124,32 @@ chars_per_token = 2.0   # 字元→token 粗估比；用 `python -m llm_abm_simu
 
 ---
 
-## 6. 研究定位（誠實）
+## 6. 引擎規模化（往 1～2 萬台事件車；2026-06）
+
+LLM 那層已可擴（上面的事件觸發+批次）；真正擋住大規模的是**引擎的純計算與 I/O**。以下優化讓
+「擋住 2 萬台」的牆退場（皆可開關、不改物理結果者直接做）：
+
+- **① 節點→行政區索引一次**（`engine._build_town_node_index`/`_node_in_town`）：放置不再每台車掃全節點做
+  shapely（O(節點×車數)）→ init 時把每個節點歸到「覆蓋它的區」一次（與 `random_node_in_town` 的
+  `covers` 判定一致 → **結果與逐台版完全相同**），之後 O(1) 抽。實測 init 2 萬台 **~1 小時 → ~1 分鐘**。
+- **③ 鄰近車數網格化**（`engine._build_nearby_grid`/`_count_nearby`，`[perception].nearby_mode`）：
+  每步 O(車數²) 全比對 → 公尺方格桶 O(車數)。`grid`（預設、近似、只餵 LLM 感知）/ `exact`（精確、可還原舊值對照）。
+- **⑦ `current_town` 查表 O(1)**（`engine._current_town`，`[perception].town_mode`）：原本每步每台車對 37 區做
+  點在多邊形內（O(車數×區數)，2 萬台 ≈ 每步 148 萬次 shapely）→ **重用 ① 的索引反向表**（`_node_town`：節點→區），
+  current_town = 所在節點所屬區、查表 O(1)（反向表在 ① 既有索引迴圈內順手建，額外成本 ≈ 0）。
+  `node`（預設）/ `exact`（精確內插位置、可還原舊值）。近似只在**行政區交界**差一個區，區內部相同；不影響軌跡。
+- **④ 記憶摘要分批**（`engine._summarize_memory`）：原本把所有觸發車塞一個 prompt（大規模爆 context）→
+  比照決策用 `_budget_batch_size` 分批、可並行。**不設「每步重決上限」**（依使用者決定，保留所有觸發車重決）。
+- **⑤ persona 池記憶體快取**（`profile_pool` `_POOL_CACHE`）：`personas_json` 每決策批次都呼叫 → 不再每批
+  重讀+重解析池檔（2 萬 persona 大檔尤其有感）；`save_pool` 更新、`clear_pool` 清。
+- **⑥ 前端 zoom/可視範圍裁切**（`engine._visible_agents`/`set_view`，`[ui].render_individual_max`/`agent_min_zoom`）：
+  車數 ≤ 門檻 → 逐台送/畫；超過 → zoom out 只送道路壅塞、zoom in 只送「可視範圍內」的車（公尺框過濾，
+  經緯度只算這批）。把 WS 流量與前端繪製綁在「可視範圍」而非總車數。詳見 `docs/DEMO_FEATURES_zh-TW.md`。
+
+> 驗證:`nearby_mode="exact"` + `town_mode="exact"` 時模擬結果與舊版一致(回歸基準);① 經 determinism / 計數測試確認未破。
+> 路徑規劃(每台一次 Dijkstra)實測便宜(~14ms/台),**未改**;若日後每步重算路成瓶頸再評估「終點最短路徑樹」。
+
+## 7. 研究定位（誠實）
 vLLM / continuous batching 是現成基礎設施，不是貢獻。**貢獻在應用層**：
 > 「以**事件觸發 + 同步並行批次**的 LLM 決策管線，使 LLM 驅動的微觀交通 ABM 的 LLM 成本 ∝ 決策事件數
 > 而非 agent×步數，讓城市尺度可即時互動」+ 量測到的 scalability 曲線。

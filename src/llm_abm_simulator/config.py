@@ -82,6 +82,8 @@ class SimulationConfig:
     crowded_speed_factor: float = 0.55
     missing_road_speed_cap_kmh: float = 40.0
     crowded_road_threshold: float = 0.5          # congestion_proxy ≥ 此值視為壅塞 / 觸發 recompute
+    nearby_mode: str = "grid"                    # 鄰近車數估法："grid"（空間網格近似、O(n)）|"exact"（精確全比對、O(n²)）
+    town_mode: str = "node"                      # current_town 估法："node"（所在節點所屬區、O(1)）|"exact"（精確位置、O(車數×區數)）
 
     # === 預設移動偏好（GAML default_* active_mode）===
     default_vehicle_type: str = "汽車"
@@ -125,6 +127,10 @@ class UIConfig:
     agents_min: int = 5
     agents_max: int = 80        # 同時是後端 set_agents 的 clamp 上限
     agents_step: int = 5
+    # 大規模渲染：車數 ≤ render_individual_max → 逐台送/畫（任何 zoom）；超過 → 依 zoom/可視範圍裁切，
+    # zoom < agent_min_zoom 時只送道路壅塞、不送車（見 engine._visible_agents）。
+    render_individual_max: int = 1500
+    agent_min_zoom: int = 14
 
     def to_payload(self) -> dict[str, Any]:
         """給 engine.init_payload 下發前端（key 與前端 slider 屬性對應）。"""
@@ -189,14 +195,15 @@ class SummaryConfig:
 
 @dataclass(frozen=True)
 class ProfileConfig:
-    """agent persona 池設定（對應 TOML ``[profile]``）。
+    """agent persona「原型池」設定（對應 TOML ``[profile]``）。
 
-    persona 生成一次、存成穩定的池檔，agent 數只是「取池裡前 n 個」；不會因為調 agent 數而
-    一直重生/覆寫。agent 數超過池大小才自動補生；要整批換人用前端「重新生成人物」按鈕。
+    ``pool_size`` 是**原型數上限**（人物範本數），與模擬車數（nb_agents）分離：生成一次、
+    存成穩定池檔、分批生成；模擬車數超過池大小時由 ``pool[i % len]`` 循環抽樣重用，
+    **不會為了車多而生更多 persona**。要整批換人用前端「重新生成人物」按鈕。
     詳見 docs/PYTHON_SIMULATOR_zh-TW.md。
     """
 
-    pool_size: int = 30                  # persona 池目標大小（agent 數超過才補生）
+    pool_size: int = 30                  # persona 原型數上限（建議數百個；車多時循環重用）
 
 
 @dataclass(frozen=True)
@@ -382,6 +389,10 @@ def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
+    if cfg.nearby_mode not in ("grid", "exact"):
+        raise ValueError("設定檔 [perception].nearby_mode 必須為 'grid' 或 'exact'")
+    if cfg.town_mode not in ("node", "exact"):
+        raise ValueError("設定檔 [perception].town_mode 必須為 'node' 或 'exact'")
     return cfg
 
 
@@ -485,6 +496,8 @@ def _build_ui_config(raw: dict[str, Any]) -> UIConfig:
         raise ValueError("設定檔 [ui].agents_min 不可大於 agents_max")
     if ui.speed_min > ui.speed_max:
         raise ValueError("設定檔 [ui].speed_min 不可大於 speed_max")
+    if ui.render_individual_max < 0 or ui.agent_min_zoom < 0:
+        raise ValueError("設定檔 [ui].render_individual_max / agent_min_zoom 不可為負")
     return ui
 
 

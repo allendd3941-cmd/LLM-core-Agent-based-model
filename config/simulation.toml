@@ -31,6 +31,8 @@ arrival_distance_threshold_m = 100     # 抵達判定容差（公尺）
 crowded_speed_factor = 0.55             # 壅塞時速度乘數（越小降越多）
 missing_road_speed_cap_kmh = 60.0       # 無速限資料路段的速度上限
 crowded_road_threshold = 0.3            # congestion_proxy ≥ 此值視為壅塞 / 觸發重算路徑
+nearby_mode = "grid"                    # 鄰近車數估法：grid（空間網格近似、O(n)，大規模用）| exact（精確全比對、O(n²)）
+town_mode = "node"                      # current_town 估法：node（所在節點所屬區、O(1)，大規模用）| exact（精確位置、O(車數×區數)）
 
 # ----- 預設移動偏好（每個 agent 的初始 active_mode 權重）-----
 # 註：time/distance/comfort/capacity 為路徑規劃權重，數值相對大小決定取向。
@@ -149,11 +151,14 @@ speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩�
 [summary]
 summary_model = "llama3.1:8b"    # 後備摘要模型 tag（整套 LLM 一般共用前端所選模型；取不到才用這個）
 
-# ----- agent persona 池 -----
-# persona 生成一次、存成穩定池檔；調整 agent 數只是「取池裡前 n 個」，不會一直重生/覆寫。
-# agent 數超過 pool_size 才自動補生；要整批換人用前端「重新生成人物」按鈕。
+# ----- agent persona 原型池 -----
+# pool_size 是「原型數上限」（人物範本數），與模擬車數（nb_agents）分離：生成一次、存成穩定池檔、
+# 分批生成（每批數量依輸出預算自動推算、每批不同 seed、沿用 [scaling].concurrency 並行）。
+# 模擬車數超過 pool_size 時會循環重複套用原型（pool[i % len]），不會為了車多而生更多 persona。
+# 數量決定首次建池要呼叫幾次 LLM、生成多久（500 約 20 次呼叫）；之後重用、不重生。
+# 要整批換人用前端「重新生成人物」按鈕。詳見 docs/PYTHON_SIMULATOR_zh-TW.md。
 [profile]
-pool_size = 20000               # persona 池目標大小
+pool_size = 500                 # persona 原型數上限（建議數百；車多時循環重用，不再 1 車 1 persona）
 
 # ----- 規模化（LLM 決策的事件觸發 + 並行批次）-----
 # 純事件觸發：LLM 模式下只在踩到壅塞/前方塞時才重決 active_mode；順暢的車維持規則式初始 mode。
@@ -194,7 +199,7 @@ min_distance_km = 0.5  # 距離下限，避免場館同區距離→0 權重爆�
 enabled = true       # 是否注入背景常態車流
 count = 40           # 穩態背景車數（前端 slider 可在 0..max_count 覆寫）；初始化要為每台算路徑，越大開場越久
 respawn = true       # 抵達後以新 OD 重生，維持穩態（false＝抵達即停）
-max_count = 600      # 前端/介入可設的背景車上限（保護效能；數百台時開場/重設較久）
+max_count = 10000      # 前端/介入可設的背景車上限（保護效能；數百台時開場/重設較久）
 
 # ----- 可重現性 -----
 [reproducibility]
@@ -223,6 +228,10 @@ speed_default = 1.0
 agents_min = 5              # agent 數下限
 agents_max = 1000           # agent 數上限（同時是後端 clamp 上限）
 agents_step = 5
+# 大規模渲染：車數 ≤ render_individual_max → 逐台送/畫（任何 zoom）；超過 → 依 zoom/可視範圍裁切。
+# zoom < agent_min_zoom 時只顯示道路壅塞、不送/不畫車（前端 zoom 進去才看到範圍內車流）。
+render_individual_max = 1500
+agent_min_zoom = 14
 
 # ----- 各 OSM highway 型別的速限 / 車道 / 容量 -----
 # ⚠ 註：改這區只在「重建路網」時生效。bundle 的 data/tainan_roads.graphml

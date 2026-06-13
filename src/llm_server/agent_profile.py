@@ -26,11 +26,12 @@ def build_user_prompt(agent_count: int) -> str:
     )
 
 
-def run_agent_profile(output: bool = False, agent_count: int = 10):
-
+def run_agent_profile(output: bool = False, agent_count: int = 10, seed: int = 42):
+    # seed 可由呼叫端帶入：分批生成 persona 池時，每批用不同 seed 以避免「每批生出一模一樣的人」
+    # （同一 seed＋同 prompt → 相同輸出），同時 seed 由批次序號決定 → 仍可重現。
     final_response = llm_client.generate(
         build_user_prompt(agent_count), system=SYSTEM_PROMPT,
-        options={"seed": 42}, label=FILE_NAME)
+        options={"seed": seed}, label=FILE_NAME)
 
     if output:
         output_path = OUTPUT_PATH / f"{FILE_NAME}_output_1.txt"

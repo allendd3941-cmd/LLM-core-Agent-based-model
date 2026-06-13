@@ -22,7 +22,7 @@
 |---|---|
 | `[time]` | `max_steps` / `step_minutes`（模擬時長）|
 | `[agents]` | `nb_agents`（預設 agent 數）/ 起訖行政區 |
-| `[perception]` | 感知半徑、抵達容差、`crowded_speed_factor`（壅塞降速）、壅塞門檻 |
+| `[perception]` | 感知半徑、抵達容差、`crowded_speed_factor`（壅塞降速）、壅塞門檻、`nearby_mode`（鄰近車數 grid/exact）、`town_mode`（current_town node/exact）；見 `docs/SCALING_zh-TW.md` §6 |
 | `[movement]` | agent 速度（`default_desired_speed_kmh` / `default_speed_car_kmh` / `default_speed_moto_kmh`）與預設路徑權重 |
 | `[active_modes.*]` | 五種 active_mode 各自的數值權重與路徑策略（詳見 [`ACTIVE_MODES_zh-TW.md`](ACTIVE_MODES_zh-TW.md)）|
 | `[roads]` | 車流→壅塞估計與權重、視覺化門檻 |
@@ -30,14 +30,14 @@
 | `[memory]` | 單一旅次記憶 memory 的質性門檻（不再分長短期；見 `docs/MEMORY_zh-TW.md`） |
 | `[perception_context]` | 送 LLM 的環境感知：熱點/前方路況取樣（見 `docs/ENVIRONMENT_zh-TW.md`） |
 | `[summary]` | 單一 memory 的後備摘要模型（`summary_model`；LLM 摘要時機＝重決策時，見 `docs/MEMORY_zh-TW.md`）|
-| `[profile]` | agent persona 池大小（`pool_size`；見下方「Persona 池」）|
+| `[profile]` | persona **原型數上限**（`pool_size`，與車數分離、分批生成、車多時循環重用；見下方「Persona 原型池」）|
 | `[reproducibility]` | `seed`（同 seed → 同軌跡）|
 | `[network]` | OSM 下載開關、合成路網大小 |
 | `[demand]` | 事件車出生地由**重力模型**依人口+距離衰減分配（`beta`/`decay`；人口來源 `data/gis/town_population.csv`，見 `docs/DEMAND_zh-TW.md`）|
 | `[ambient]` | 背景常態交通流（`enabled`/`count`/`respawn`；雙邊重力 OD、規則式、納入路網層交評，見 `docs/AMBIENT_zh-TW.md`）|
 | `[signals]` | 紅綠燈號誌停等（`enabled` / `cycle_s` / `yellow_s`；號誌點位由 `data/tainan_signals.json` 提供，見 `spatial/signals.py`）|
 | `[llm_budget]` | LLM token 預算，依此動態切批避免 prompt 溢位（見 `docs/CHANGES_LLM_PIPELINE_zh-TW.md`、`calibrate.py`）|
-| `[ui]` | 前端 slider 範圍（速度 / agent 數）；**同時驅動後端 clamp 與前端 slider**，是兩者的單一來源 |
+| `[ui]` | 前端 slider 範圍（速度 / agent 數）+ 大規模渲染門檻（`render_individual_max` / `agent_min_zoom`，見 `docs/SCALING_zh-TW.md` §6）；**同時驅動後端 clamp 與前端 slider** |
 | `[highway_specs.*]` | 各 OSM 路型的速限/車道/容量 |
 
 > **TOML key 名稱與 `config.py` 的 dataclass 欄位一一對應**；要新增參數＝在 dataclass 加欄位、TOML 加同名一行即可。
@@ -142,23 +142,33 @@ uvicorn llm_abm_simulator.web.app:app --port 8080
   「不可用」包含 `llm_server` 無法匯入、Ollama 連不上、或 pipeline 執行丟錯。
 - LLM 每步需呼叫一次推論，可能數秒~數十秒；現場 demo 建議用 Mock，需要展示 LLM 推理時再切換。
 
-### 4c. Persona 池（agent 人物設定）
+### 4c. Persona 原型池（agent 人物設定）
 
-LLM 模式下，每個 agent 的人物設定（identity / traits）由 `agent_profile` 階段生成。為避免
-「每次調 agent 數就重生、覆寫」的問題，採**穩定的 persona 池**（`decisions/profile_pool.py`）：
+LLM 核心模式下，每個事件車的人物設定（identity / traits）由 `agent_profile` 階段生成。採
+**「原型（archetype）+ 抽樣重用」**的穩定池（`decisions/profile_pool.py`）：
 
-- **生成一次、存成穩定池檔**（`output/agent_profile_output_1.txt`，正規化 JSON）。
-- 調整 agent 數**只是「取池裡前 n 個」**——在記憶體切片，不動池檔、不重生。
-- agent 數**超過 `[profile].pool_size` 才自動補生**差額並追加進池（數量永遠對得上）。
+- **`pool_size` 是「原型數上限」**（人物範本數），**與模擬車數（`nb_agents`）分離**：
+  - 模擬車數 ≤ 原型數 → 每車一個不同原型（名字唯一）。
+  - 模擬車數 > 原型數 → **循環重複套用**原型（`pool[i % len]`）：第 501 台＝第 1 個原型…。
+    **不會為了車多而生更多 persona**（所以可用少量原型餵大量車；超出部分會出現同名車，屬預期）。
+- **生成一次、存成穩定池檔**（`output/agent_profile_output_1.txt`，正規化 JSON），之後重用、不重生。
+- **分批生成**（解決「一次討大量 persona → 輸出截斷」）：把 `pool_size` 切成多批，
+  - 每批數量**依輸出預算自動推算**（`effective_max_model_len − prompt_overhead`÷每 persona 估算 token，clamp 5–40），隨所選模型 context 自動調整；
+  - 每批帶不同 **seed（42＋批次序號）** → 避免每批生出相同的人、又可重現；
+  - 沿用 **`[scaling].concurrency`** 並行；結果依批次序號順序合併（池可重現）。
 - 要**整批換人**：前端按 **「👤 重新生成人物」**（清池 + 重新初始化，下次 LLM init 重生）。
 - 池檔與 LLM 生成輸出都用**強韌 JSON 解析**（`llm_server/json_utils.py`）：尾逗號、Python 字面量、
   智慧引號、**陣列被截斷**等壞結構都會盡量救回**已完整的物件**，而不是整批作廢用預設值。
+- 出生地**不**由 persona 決定，而是由重力模型分配（見 `docs/DEMAND_zh-TW.md`）；persona 只負責「人是誰」。
+- 背景常態車流（ambient）**不使用 persona**（見 `docs/AMBIENT_zh-TW.md`）。
 
 ```toml
 [profile]
-pool_size = 30      # persona 池目標大小（agent 數超過才補生）
+pool_size = 500     # persona 原型數上限（建議數百；車多時循環重用，不再 1 車 1 persona）
 ```
 
+> ⏱️ **首次建池成本**：第一次進 LLM 核心會一次性分批生成 `pool_size` 個原型（500 約 20 次 LLM 呼叫、需數分鐘），
+> 之後存檔重用、不重生。要更快可調低 `pool_size`。規則式核心**完全不用 persona**，無此成本。
 > 前端 inspect 點選 agent 會顯示其人物背景（年齡/職業/收入/態度/習慣…），即讀自此池，
 > 以 `identity.name` 對應 `agent.profile_name`。
 

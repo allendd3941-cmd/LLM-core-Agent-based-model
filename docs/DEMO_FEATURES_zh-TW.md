@@ -150,3 +150,15 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 
 記憶不再分長短期（1 step=1 分鐘，區分無意義），合併為**單一 `memory`**；LLM 摘要的時機改為
 **事件車「重新決策」時**重寫一次（記憶在做決定的當下最新、也省 LLM）。完整設計見 `docs/MEMORY_zh-TW.md`。
+
+## 14. 大規模渲染：zoom / 可視範圍裁切（P3+）
+
+往 1～2 萬台事件車時,逐台送/畫會讓 WS 流量(~MB/步)與瀏覽器(數萬 marker)垮掉。**自動切換**:
+
+- 車數 ≤ `[ui].render_individual_max`(預設 1500)→ **逐台送/畫**(現有 icon/dot,任何 zoom)。
+- 超過 → 依**前端目前 zoom 與可視範圍**裁切:
+  - **zoom out（< `[ui].agent_min_zoom`,預設 14）→ 不送車,只看道路壅塞**(道路本來就依壅塞上色)。
+  - **zoom in → 只送「可視範圍內」的車**(後端用公尺框過濾,經緯度只算這批)→ 就算總共 2 萬台,畫面內通常幾百台。
+- 前端 `map.js` 在 zoom/平移後(節流)回報 `{zoom, bounds}`(`control{action:"set_view"}`);後端 `engine.set_view`
+  存成公尺框,`_visible_agents` 據此決定本步送哪些車。全域統計/圖表不受影響(由伺服器對全部車算)。
+- **限制(誠實)**:zoom out 時點不了單一車(本來就只看全局壅塞)。詳見 `docs/SCALING_zh-TW.md` §6。

@@ -102,6 +102,10 @@ class SimulationSession:
             await self.status(f"決策核心：{'LLM 認知核心' if self.cfg.use_llm else '規則式（Rule-based）'}")
         elif action == "set_ambient":
             await self._set_ambient(int(value) if value is not None else 0)
+        elif action == "set_view":
+            # ⑥ 前端回報可視範圍（zoom + bounds），大規模時只送範圍內的車。高頻、同步、不回狀態。
+            v = value or {}
+            self.engine.set_view(v.get("zoom", 0), v.get("bounds") or {})
         elif action == "set_llm":
             await self._set_llm(value or {})
         elif action == "regenerate_profiles":

@@ -14,6 +14,8 @@ const TrafficMap = (() => {
   let onAgentSelect = null;
   let ambientOn = true;       // 背景常態車流顯示開關
   let lastAgents = [];        // 最近一次 agents（toggle 背景車時即時重繪）
+  let onViewChange = null;    // ⑥ 回報可視範圍（zoom+bounds）給後端的 callback
+  let _viewTimer = null;      // 視圖回報節流
 
   // agent 依「狀態」上色（與道路壅塞上色分離，不再重複混淆）
   const AGENT_ICON_MAX = 150;  // ≤ 此數用 emoji 圖標；超過退回 canvas 彩點保效能
@@ -49,7 +51,23 @@ const TrafficMap = (() => {
     }).addTo(map);
     signalRenderer = L.canvas({ padding: 0.5 });
     map.on("zoomend", refreshSignalVisibility);
+    map.on("zoomend moveend", scheduleReportView);   // ⑥ zoom/平移後回報可視範圍給後端
   }
+
+  // ⑥ 回報目前 zoom + 可視範圍（節流）→ 後端大規模時據此只送範圍內的車
+  function reportView() {
+    if (!onViewChange || !map) return;
+    const b = map.getBounds();
+    onViewChange({
+      zoom: map.getZoom(),
+      bounds: { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() },
+    });
+  }
+  function scheduleReportView() {
+    clearTimeout(_viewTimer);
+    _viewTimer = setTimeout(reportView, 250);
+  }
+  function setViewReporter(cb) { onViewChange = cb; reportView(); }
 
   function setInit(data) {
     // 清掉舊圖層（reset 時會重送 init）
@@ -308,5 +326,5 @@ const TrafficMap = (() => {
     });
   }
 
-  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient };
+  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient, setViewReporter };
 })();

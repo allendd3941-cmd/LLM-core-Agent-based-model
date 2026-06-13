@@ -67,6 +67,7 @@
   // 啟動
   window.addEventListener("DOMContentLoaded", () => {
     TrafficMap.init((agent) => TrafficUI.inspectAgent(agent));
+    TrafficMap.setViewReporter((v) => send("set_view", v));   // ⑥ 大規模時回報可視範圍給後端
     TrafficCharts.init();
     TrafficUI.bind(send);
     connect();
