@@ -18,6 +18,7 @@ from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 
 from .. import config
+from .. import scenarios
 from ..domain.town import Town
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,31 @@ def _first_col(gdf: gpd.GeoDataFrame, candidates: tuple[str, ...]) -> str | None
         if col in gdf.columns:
             return col
     return None
+
+
+def _load_population(path=None) -> dict[str, float]:
+    """讀 population csv → {town_name: population}。檔案不存在/壞掉回 {}（重力模型會 fallback）。"""
+    path = path or config.TOWN_POPULATION_CSV
+    if not path.exists():
+        logger.info("找不到人口檔 %s，重力模型將回退（面積代理或停用）。", path)
+        return {}
+    try:
+        import csv
+        pops: dict[str, float] = {}
+        with path.open("r", encoding="utf-8") as f:
+            for row in csv.reader(f):
+                if not row or row[0].lstrip().startswith("#") or row[0].strip() == "town_name":
+                    continue
+                if len(row) >= 2:
+                    try:
+                        pops[row[0].strip()] = float(row[1])
+                    except ValueError:
+                        continue
+        logger.info("載入人口資料 %d 區", len(pops))
+        return pops
+    except OSError as e:
+        logger.warning("讀取人口檔失敗：%s", e)
+        return {}
 
 
 def load_towns(cfg: config.SimulationConfig | None = None) -> list[Town]:
@@ -51,23 +77,27 @@ def load_towns(cfg: config.SimulationConfig | None = None) -> list[Town]:
     if town_col is None:
         raise ValueError(f"TOWN_MOI 找不到行政區名稱欄位，現有欄位: {list(gdf.columns)}")
 
-    # 只保留臺南市（對齊 GAML county_name == 臺南市）
+    # 只保留目前場景指定的縣市（TOWN_MOI 為全台；county_filter 由 scenario 決定）
+    scn = scenarios.active()
     if county_col is not None:
-        gdf = gdf[gdf[county_col].astype(str).str.contains("臺南|台南", na=False)].copy()
-    logger.info("篩出臺南市行政區 %d 個", len(gdf))
+        gdf = gdf[gdf[county_col].astype(str).str.contains(scn.county_filter, na=False)].copy()
+    logger.info("篩出行政區 %d 個（county_filter=%s）", len(gdf), scn.county_filter)
 
+    populations = _load_population(scn.population_csv)
     towns: list[Town] = []
     for _, row in gdf.iterrows():
         geom: BaseGeometry = row.geometry
+        name = str(row[town_col])
         towns.append(
             Town(
-                town_name=str(row[town_col]),
+                town_name=name,
                 county_name=str(row[county_col]) if county_col else cfg.county_name,
                 town_id=str(row.get("TOWNID", "")),
                 town_code=str(row.get("TOWNCODE", "")),
                 town_eng=str(row.get("TOWNENG", "")),
                 county_id=str(row.get("COUNTYID", "")),
                 county_code=str(row.get("COUNTYCODE", "")),
+                population=populations.get(name, 0.0),
                 geometry_metric=geom,
                 centroid_metric=geom.centroid,
             )
@@ -82,7 +112,7 @@ def load_towns_geojson() -> dict:
         gdf = gdf.set_crs(config.CRS_METRIC, allow_override=True)
     county_col = _first_col(gdf, _COUNTYNAME_COLS)
     if county_col is not None:
-        gdf = gdf[gdf[county_col].astype(str).str.contains("臺南|台南", na=False)].copy()
+        gdf = gdf[gdf[county_col].astype(str).str.contains(scenarios.active().county_filter, na=False)].copy()
     town_col = _first_col(gdf, _TOWNNAME_COLS)
     # 只保留名稱欄位，避免 GeoJSON 帶出大量無用屬性
     keep = [c for c in (town_col, county_col) if c]
@@ -97,7 +127,16 @@ def load_stadium_point() -> tuple[Point, tuple[float, float]]:
 
     回傳 (公尺座標 Point[EPSG:3826], (lat, lng)[WGS84])，
     對齊 GAML fixed_destination_location。
+    場景指定 dest_lat/lng 時用之（換事件地點）；否則用內建球場 shapefile（預設台南場景）。
     """
+    scn = scenarios.active()
+    if scn.dest_lat is not None and scn.dest_lng is not None:
+        from pyproj import Transformer
+        to_m = Transformer.from_crs(config.CRS_WGS84, config.CRS_METRIC, always_xy=True)
+        x, y = to_m.transform(scn.dest_lng, scn.dest_lat)
+        logger.info("場景目的地：%s (%.5f, %.5f)", scn.name, scn.dest_lat, scn.dest_lng)
+        return Point(x, y), (scn.dest_lat, scn.dest_lng)
+
     logger.info("載入球場固定終點: %s", config.STADIUM_SHP)
     gdf = gpd.read_file(str(config.STADIUM_SHP), encoding="utf-8")
     if gdf.crs is None:

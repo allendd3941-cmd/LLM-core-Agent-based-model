@@ -22,7 +22,6 @@ decision-making 結果輸出必須完全符合以下結構，除此結構內容�
     {
       "agent name": "王大偉",
       "active mode": "fast",
-      "residential_location": "東區",
       "vehicle_type":"機車",
       "reason": "路況順暢且趕時間，想快點抵達"
     }

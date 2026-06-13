@@ -26,11 +26,22 @@ const TrafficUI = (() => {
     agents.oninput = () => { $("agents-val").textContent = agents.value; };
     agents.onchange = () => send("set_agents", parseInt(agents.value, 10));
 
-    $("mode-mock").onclick = () => setMode("mock");
+    const ambient = $("ambient");
+    if (ambient) {
+      ambient.oninput = () => { $("ambient-val").textContent = ambient.value; };
+      ambient.onchange = () => send("set_ambient", parseInt(ambient.value, 10));
+    }
+
+    $("mode-mock").onclick = () => setMode("rule");
     $("mode-llm").onclick = () => setMode("llm");
 
     const regen = $("btn-regen-profiles");
     if (regen) regen.onclick = () => send("regenerate_profiles");
+
+    const ep = $("btn-edit-prompts");
+    if (ep) ep.onclick = openPrompts;
+    const pc = $("prompt-close");
+    if (pc) pc.onclick = () => { $("prompt-modal").style.display = "none"; };
 
     const dsel = $("decision-step");
     if (dsel) dsel.onchange = () => showDecisionOutput(dsel.value);
@@ -39,10 +50,162 @@ const TrafficUI = (() => {
 
     const sigToggle = $("toggle-signals");
     if (sigToggle) sigToggle.onchange = () => TrafficMap.toggleSignals(sigToggle.checked);
+    const ambToggle = $("toggle-ambient");
+    if (ambToggle) ambToggle.onchange = () => TrafficMap.toggleAmbient(ambToggle.checked);
+
+    const lb = $("llm-backend");
+    if (lb) lb.onchange = () => refreshLlmModels(lb.value);
+    const lm = $("llm-model");
+    if (lm) lm.onchange = () => {
+      send("set_llm", { backend: $("llm-backend").value, model: lm.value });
+      updateLlmHint();
+    };
+
+    document.querySelectorAll(".tab-btn").forEach((b) => {
+      b.onclick = () => activateTab(b.dataset.tab);
+    });
+
+    const chatSend = $("chat-send"), chatText = $("chat-text");
+    if (chatSend) chatSend.onclick = sendChat;
+    if (chatText) chatText.onkeydown = (e) => { if (e.key === "Enter") sendChat(); };
+    const chips = $("chat-chips");
+    if (chips) chips.onclick = (e) => {
+      if (e.target.dataset && e.target.dataset.q) { $("chat-text").value = e.target.dataset.q; sendChat(); }
+    };
+    const ma = $("chat-mode-ask"), mc = $("chat-mode-act");
+    if (ma) ma.onclick = () => setChatMode("ask");
+    if (mc) mc.onclick = () => setChatMode("act");
+    const ci = $("btn-clear-intervene");
+    if (ci) ci.onclick = () => send("clear_intervention");
+    if ($("chat-chips")) setChatMode("ask");
+
+    const ragBtn = $("btn-rag");
+    if (ragBtn) ragBtn.onclick = openRag;
+    const upBtn = $("btn-upload-scenario");
+    if (upBtn) upBtn.onclick = openUpload;
+    const uc = $("util-close");
+    if (uc) uc.onclick = () => { $("util-modal").style.display = "none"; };
   }
 
+  async function postJson(url, body) {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return r.json();
+  }
+
+  // ===== RAG 知識庫 =====
+  async function openRag() {
+    $("util-title").textContent = "📚 RAG 知識庫";
+    $("util-body").innerHTML =
+      `<p class="hint">上傳純文字 / markdown / csv，decision 時會檢索相關內容注入。</p>`
+      + `<label class="lg-toggle"><input type="checkbox" id="rag-enabled"> 啟用 RAG</label>`
+      + `<div style="margin:8px 0"><input type="file" id="rag-file" accept=".txt,.md,.csv,.json" /> `
+      + `<button class="seg-btn" id="rag-add">加入</button></div>`
+      + `<div id="rag-stat" class="hint"></div>`
+      + `<button class="seg-btn" id="rag-clear" style="margin-top:6px">清空知識庫</button>`;
+    $("util-modal").style.display = "flex";
+    const refresh = async () => {
+      const s = await (await fetch("/api/rag/status")).json();
+      $("rag-enabled").checked = s.enabled;
+      $("rag-stat").textContent = `共 ${s.chunks} 塊；來源：`
+        + (s.sources.map((x) => `${x.name}(${x.chunks})`).join("、") || "無");
+    };
+    await refresh();
+    $("rag-enabled").onchange = async () => { await postJson("/api/rag/toggle", { enabled: $("rag-enabled").checked }); refresh(); };
+    $("rag-add").onclick = async () => {
+      const f = $("rag-file").files[0]; if (!f) return;
+      await postJson("/api/rag/add", { name: f.name, text: await f.text() }); refresh();
+    };
+    $("rag-clear").onclick = async () => { await postJson("/api/rag/clear", {}); refresh(); };
+  }
+
+  // ===== 上傳自訂場景 =====
+  function openUpload() {
+    $("util-title").textContent = "⬆ 上傳自訂場景";
+    $("util-body").innerHTML =
+      `<p class="hint">上傳本專案格式的路網 graphml（由 build_scenario / build_roads 產生）＋選填人口 CSV。</p>`
+      + `<div class="prompt-field"><label>場景 key（英數）</label><input id="up-key" type="text" /></div>`
+      + `<div class="prompt-field"><label>顯示名稱</label><input id="up-name" type="text" /></div>`
+      + `<div class="prompt-field"><label>縣市篩選（如 高雄）</label><input id="up-county" type="text" value="臺南|台南" /></div>`
+      + `<div class="prompt-field"><label>目的地 lat / lng / 區名</label>`
+      + `<input id="up-lat" type="text" placeholder="lat" /> <input id="up-lng" type="text" placeholder="lng" /> <input id="up-town" type="text" placeholder="區名" /></div>`
+      + `<div class="prompt-field"><label>路網 graphml</label><input id="up-graphml" type="file" accept=".graphml,.xml" /></div>`
+      + `<div class="prompt-field"><label>人口 CSV（選填）</label><input id="up-pop" type="file" accept=".csv" /></div>`
+      + `<button class="seg-btn" id="up-go">上傳並註冊</button> <span id="up-stat" class="hint"></span>`;
+    $("util-modal").style.display = "flex";
+    $("up-go").onclick = doUpload;
+  }
+
+  async function doUpload() {
+    const stat = $("up-stat"); stat.textContent = "上傳中…";
+    const gf = $("up-graphml").files[0];
+    if (!gf) { stat.textContent = "請選 graphml"; return; }
+    const pf = $("up-pop").files[0];
+    const body = {
+      key: $("up-key").value, name: $("up-name").value, county_filter: $("up-county").value,
+      dest_lat: parseFloat($("up-lat").value) || null, dest_lng: parseFloat($("up-lng").value) || null,
+      dest_town: $("up-town").value, roads_graphml: await gf.text(),
+      population_csv: pf ? await pf.text() : "",
+    };
+    const r = await postJson("/api/scenario/upload", body);
+    if (r.ok) {
+      stat.textContent = `成功（${r.nodes} 節點）。切換中…`;
+      setScenarios({ list: r.scenarios, active: body.key });
+      send("set_scenario", body.key);
+    } else {
+      stat.textContent = "失敗：" + (r.error || "未知");
+    }
+  }
+
+  let llmVllmModels = []; // 從 init 帶入的 vLLM 候選登錄表
+
+  function setLlmInit(llm) {
+    if (!llm) return;
+    llmVllmModels = llm.vllm_models || [];
+    const lb = $("llm-backend");
+    if (lb && llm.backend) lb.value = llm.backend;
+    refreshLlmModels(llm.backend || "ollama", llm.current_model || "");
+  }
+
+  // 依後端填模型下拉：vllm 用登錄表、ollama 即時查實裝模型
+  async function refreshLlmModels(backend, preselect) {
+    const lm = $("llm-model");
+    if (!lm) return;
+    let models = [];
+    if (backend === "vllm") {
+      models = llmVllmModels;
+    } else {
+      try {
+        const res = await fetch("/api/llm/models?backend=ollama");
+        models = (await res.json()).models || [];
+      } catch (e) { models = []; }
+    }
+    lm.innerHTML = models.length
+      ? models.map((m) => `<option value="${m.id}">${escapeHtml(m.label || m.id)}</option>`).join("")
+      : `<option value="">（無可用模型）</option>`;
+    if (preselect && models.some((m) => m.id === preselect)) lm.value = preselect;
+    updateLlmHint();
+  }
+
+  function updateLlmHint() {
+    const hint = $("llm-model-hint");
+    if (!hint) return;
+    const backend = $("llm-backend").value;
+    const id = $("llm-model").value;
+    if (backend === "vllm") {
+      const m = llmVllmModels.find((x) => x.id === id);
+      hint.textContent = m
+        ? `${m.params} · context ${m.max_context}（${m.note}）· 對齊目標：請自行 vllm serve 此模型`
+        : "vLLM：請先 vllm serve 對應模型";
+    } else {
+      hint.textContent = id ? `Ollama 模型（context 由系統設 ~8192）` : "Ollama 未偵測到模型（請先 ollama pull）";
+    }
+  }
+
+  // 決策核心顯示名（核心 key 同時是 engine.last_decision_source）
+  const CORE_LABEL = { rule: "規則式", llm: "LLM", mock: "規則式" };
+
   function setMode(mode) {
-    $("mode-mock").classList.toggle("active", mode === "mock");
+    $("mode-mock").classList.toggle("active", mode !== "llm");
     $("mode-llm").classList.toggle("active", mode === "llm");
     send("set_mode", mode);
   }
@@ -69,14 +232,32 @@ const TrafficUI = (() => {
 
     $("agents").value = cfg.nb_agents;
     $("agents-val").textContent = cfg.nb_agents;
-    if (cfg.decision_source) $("m-source").textContent = cfg.decision_source;
+
+    // 背景常態車流 slider（範圍/值由後端 [ambient] 下發）
+    if (cfg.ambient) {
+      const amb = $("ambient");
+      if (amb) {
+        amb.max = cfg.ambient.max;
+        amb.value = cfg.ambient.count;
+        $("ambient-val").textContent = cfg.ambient.count;
+      }
+      $("m-ambient").textContent = cfg.ambient.active != null ? cfg.ambient.active : 0;
+    }
+    // 決策核心：依後端目前核心設定 active（不發送）
+    if (cfg.current_core) {
+      $("mode-mock").classList.toggle("active", cfg.current_core !== "llm");
+      $("mode-llm").classList.toggle("active", cfg.current_core === "llm");
+    }
+    if (cfg.decision_source) $("m-source").textContent = CORE_LABEL[cfg.decision_source] || cfg.decision_source;
+    setLlmInit(cfg.llm);
   }
 
   function updateStats(state) {
     $("m-cycle").textContent = `${state.cycle} / ${state.max_steps}`;
     $("m-elapsed").textContent = `${state.elapsed_minutes} 分`;
-    $("m-source").textContent = state.decision_source;
+    $("m-source").textContent = CORE_LABEL[state.decision_source] || state.decision_source;
     $("m-arrived").textContent = state.status_distribution.arrived || 0;
+    $("m-ambient").textContent = (state.metrics && state.metrics.ambient_count) || 0;
     $("m-crowded").textContent = state.metrics.crowded_road_count;
     $("m-avgcong").textContent = Number(state.metrics.average_congestion_proxy).toFixed(2);
   }
@@ -190,6 +371,96 @@ const TrafficUI = (() => {
     $("conn-text").textContent = ok ? "已連線" : "連線中斷";
   }
 
+  // ===== 右側分頁（即時 / 分析 / 對話）=====
+  function activateTab(name) {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+  }
+
+  // ===== 編輯 Prompts（demo 即時改 prompt）=====
+  async function openPrompts() {
+    const box = $("prompt-fields");
+    box.innerHTML = "載入中…";
+    $("prompt-modal").style.display = "flex";
+    try {
+      const data = await (await fetch("/api/prompts")).json();
+      box.innerHTML = "";
+      Object.entries(data).forEach(([name, p]) => {
+        const wrap = document.createElement("div");
+        wrap.className = "prompt-field";
+        wrap.innerHTML =
+          `<label>${escapeHtml(p.label)} ${p.overridden ? "<em>(已自訂)</em>" : ""}</label>`
+          + `<textarea data-name="${name}">${escapeHtml(p.current)}</textarea>`
+          + `<div class="prompt-btns">`
+          + `<button class="seg-btn" data-act="save" data-name="${name}">套用</button>`
+          + `<button class="seg-btn" data-act="reset" data-name="${name}">還原預設</button></div>`;
+        box.appendChild(wrap);
+      });
+      box.querySelectorAll("button[data-act]").forEach((b) => {
+        b.onclick = () => {
+          const ta = box.querySelector(`textarea[data-name="${b.dataset.name}"]`);
+          if (b.dataset.act === "reset") {
+            ta.value = "";
+            send("set_prompt", { name: b.dataset.name, text: "" });
+          } else {
+            send("set_prompt", { name: b.dataset.name, text: ta.value });
+          }
+        };
+      });
+    } catch (e) {
+      box.innerHTML = "載入失敗（伺服器未連線？）。";
+    }
+  }
+
+  // ===== 場景（圖層）切換 =====
+  function setScenarios(scn) {
+    const sel = $("scenario-select");
+    if (!sel || !scn) return;
+    sel.innerHTML = (scn.list || []).map(
+      (s) => `<option value="${s.key}">${escapeHtml(s.name)}</option>`).join("");
+    if (scn.active) sel.value = scn.active;
+    sel.onchange = () => send("set_scenario", sel.value);
+  }
+
+  // ===== 與模擬對話 / 介入 =====
+  let chatMode = "ask";
+  const CHIPS = {
+    ask: [["現在哪裡最塞？", "哪裡最塞？"], ["目前抵達多少人？還有多少在路上？", "抵達多少？"],
+          ["整體交通狀況與趨勢如何？", "整體如何？"]],
+    act: [["避開東區一帶", "避開東區"], ["從永康區湧入 300 台車", "永康湧入300"], ["避開北區", "避開北區"]],
+  };
+
+  function setChatMode(m) {
+    chatMode = m;
+    $("chat-mode-ask").classList.toggle("active", m === "ask");
+    $("chat-mode-act").classList.toggle("active", m === "act");
+    $("chat-hint").textContent = m === "act"
+      ? "輸入介入指令（避開某區 / 從某區湧入 N 台），套用後即時更新地圖。"
+      : "暫停時詢問當前路況（唯讀，用所選 LLM 回答）。";
+    $("chat-text").placeholder = m === "act" ? "例如：避開東區 / 從永康區湧入300台" : "輸入問題後按 Enter…";
+    $("chat-chips").innerHTML = (CHIPS[m] || [])
+      .map(([q, l]) => `<button class="chip" data-q="${q}">${l}</button>`).join("");
+  }
+
+  function sendChat() {
+    const t = $("chat-text");
+    const q = (t.value || "").trim();
+    if (!q) return;
+    appendChat("user", q);
+    t.value = "";
+    send(chatMode === "act" ? "intervene" : "ask", q);
+  }
+
+  function appendChat(role, text) {
+    const log = $("chat-log");
+    if (!log) return;
+    const div = document.createElement("div");
+    div.className = "chat-msg chat-" + role;
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
   return { bind, applyInitConfig, updateStats, inspectAgent, setProfiles,
-           refreshDecisionSteps, toast, setConnected };
+           refreshDecisionSteps, toast, setConnected, appendChat, setScenarios, activateTab };
 })();

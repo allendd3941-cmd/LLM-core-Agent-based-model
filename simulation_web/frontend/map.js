@@ -12,6 +12,8 @@ const TrafficMap = (() => {
   let agentMode = null;       // "icon"（少量→emoji 圖標）| "dot"（大量→canvas 彩點），依數量自動切
   let stadiumMarker = null;
   let onAgentSelect = null;
+  let ambientOn = true;       // 背景常態車流顯示開關
+  let lastAgents = [];        // 最近一次 agents（toggle 背景車時即時重繪）
 
   // agent 依「狀態」上色（與道路壅塞上色分離，不再重複混淆）
   const AGENT_ICON_MAX = 150;  // ≤ 此數用 emoji 圖標；超過退回 canvas 彩點保效能
@@ -21,6 +23,7 @@ const TrafficMap = (() => {
     arrived: "#00c853",  // 已抵達（綠）
     error: "#7a8699",    // 找不到路徑（灰）
   };
+  const AMBIENT_COLOR = "#8a93a6";   // 背景常態車流：低調灰（與事件車的鮮明狀態色明顯區隔）
 
   // 號誌圖層（獨立 canvas，與車流/道路完全分離）
   let signalRenderer = null;  // 專用 canvas renderer，避免與車輛 marker 互搶
@@ -75,11 +78,12 @@ const TrafficMap = (() => {
       },
     }).addTo(map);
 
-    // 目的地球場
+    // 目的地（事件地點；名稱依場景）
     if (stadiumMarker) map.removeLayer(stadiumMarker);
+    const destName = (data.scenario && data.scenario.name) || "目的地";
     stadiumMarker = L.circleMarker([data.stadium.lat, data.stadium.lng], {
       radius: 9, color: "#fff", weight: 2, fillColor: "#ff3b3b", fillOpacity: 1,
-    }).addTo(map).bindPopup("🏟️ 亞太棒球場（目的地）");
+    }).addTo(map).bindPopup(`🎯 ${destName}（目的地）`);
 
     // 號誌圖層（方向相位短桿）
     setSignals(data.signals);
@@ -191,26 +195,41 @@ const TrafficMap = (() => {
   }
 
   function updateAgents(agents) {
-    // 智慧混合：agent 少 → emoji 圖標（好看）；多 → canvas 彩點（保效能）。
-    const mode = agents.length <= AGENT_ICON_MAX ? "icon" : "dot";
+    lastAgents = agents;
+    // 事件車與背景車分開畫：事件車用鮮明狀態色 icon/dot，背景車用低調灰小點。
+    const eventAgents = agents.filter((a) => a.role !== "ambient");
+    const ambientAgents = agents.filter((a) => a.role === "ambient");
+    // icon/dot 模式由「事件車數」決定（背景車一律小灰點，不影響事件車可讀性）。
+    const mode = eventAgents.length <= AGENT_ICON_MAX ? "icon" : "dot";
     if (mode !== agentMode) {  // 模式切換 → 清掉舊 marker 重建（避免混用兩種 marker 型別）
       Object.values(agentMarkers).forEach((m) => map.removeLayer(m));
       agentMarkers = {};
       agentMode = mode;
     }
     const seen = new Set();
-    const pos = spreadPositions(agents);
-    agents.forEach((a) => {
+    const pos = spreadPositions(ambientOn ? agents : eventAgents);
+    eventAgents.forEach((a) => {
       seen.add(a.agent_id);
       const ll = pos[a.agent_id] || [a.lat, a.lng];
       const state = agentState(a);
       if (mode === "icon") upsertAgentIcon(a, ll, state);
       else upsertAgentDot(a, ll, state);
     });
-    // 移除已不存在的（reset / set_agents）
+    if (ambientOn) {
+      ambientAgents.forEach((a) => {
+        seen.add(a.agent_id);
+        upsertAmbientDot(a, pos[a.agent_id] || [a.lat, a.lng]);
+      });
+    }
+    // 移除已不存在的（reset / set_agents / 關閉背景車）
     Object.keys(agentMarkers).forEach((id) => {
       if (!seen.has(id)) { map.removeLayer(agentMarkers[id]); delete agentMarkers[id]; }
     });
+  }
+
+  function toggleAmbient(on) {
+    ambientOn = on;
+    if (lastAgents.length) updateAgents(lastAgents);   // 即時重繪
   }
 
   function upsertAgentIcon(a, ll, state) {
@@ -246,6 +265,20 @@ const TrafficMap = (() => {
     m._agentData = a;
   }
 
+  // 背景常態車流：低調灰小點（不可點選，純粹表現路網基礎負載）。
+  function upsertAmbientDot(a, ll) {
+    let m = agentMarkers[a.agent_id];
+    if (!m) {
+      m = L.circleMarker(ll, {
+        radius: 3, stroke: false, fillColor: AMBIENT_COLOR, fillOpacity: 0.5,
+        interactive: false,
+      }).addTo(map);
+      agentMarkers[a.agent_id] = m;
+    } else {
+      m.setLatLng(ll);
+    }
+  }
+
   function updateRoads(roads) {
     // 先把所有主要道路還原底色
     Object.values(roadById).forEach((l) => l.setStyle(BASE_ROAD));
@@ -275,5 +308,5 @@ const TrafficMap = (() => {
     });
   }
 
-  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals };
+  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient };
 })();

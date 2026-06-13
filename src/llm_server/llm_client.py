@@ -32,6 +32,7 @@ def generate(
     model: str | None = None,
     label: str = "llm",
     timeout: float | None = None,
+    fmt: dict[str, Any] | None = None,
 ) -> str:
     """送一段 prompt 給 LLM，回傳純文字回應。後端由 llm_config.LLM_BACKEND 決定。
 
@@ -44,12 +45,14 @@ def generate(
         model:    覆寫模型名（預設用該後端的設定模型）。
         label:    計時 log 用標籤。
         timeout:  HTTP 逾時秒數（None＝不設限，保留原行為）。
+        fmt:      結構化輸出 JSON schema（限制模型只能吐合法 JSON、綁住輸出長度）。
+                  Ollama → ``format``；vLLM → ``extra_body.guided_json``。None＝不限制（同原行為）。
     """
     is_ollama = llm_config.LLM_BACKEND != "vllm"
     if not is_ollama:
-        url, payload, parse = _build_vllm(prompt, system, options, model)
+        url, payload, parse = _build_vllm(prompt, system, options, model, fmt)
     else:
-        url, payload, parse = _build_ollama(prompt, system, options, think, model)
+        url, payload, parse = _build_ollama(prompt, system, options, think, model, fmt)
 
     @time_counter
     def _post(u: str, p: dict[str, Any]) -> requests.Response:
@@ -77,7 +80,7 @@ def generate(
 # ---------------------------------------------------------------------------
 # Ollama 原生 /api/generate（保留原行為）
 # ---------------------------------------------------------------------------
-def _build_ollama(prompt, system, options, think, model):
+def _build_ollama(prompt, system, options, think, model, fmt=None):
     url = f"{llm_config.OLLAMA_URL}{llm_config.OLLAMA_MODE}"
     model_name = model or llm_config.OLLAMA_MODEL
     payload: dict[str, Any] = {
@@ -90,8 +93,14 @@ def _build_ollama(prompt, system, options, think, model):
     # 已知不支援 thinking 的模型就不帶 think（避免每次都先 400 一次）
     if think and model_name not in _NO_THINK_MODELS:
         payload["think"] = think
-    if options:
-        payload["options"] = options
+    if fmt:  # 結構化輸出：Ollama 用 format=<json schema> 做受限解碼
+        payload["format"] = fmt
+    # options：合併使用者 options + runtime num_ctx（讓 ollama 真的吃選定的 context，否則預設 ~2k 截斷）
+    if options or llm_config.OLLAMA_NUM_CTX:
+        opts = dict(options or {})
+        if llm_config.OLLAMA_NUM_CTX:
+            opts.setdefault("num_ctx", llm_config.OLLAMA_NUM_CTX)
+        payload["options"] = opts
 
     def parse(body: dict[str, Any]) -> str:
         return body["response"]
@@ -102,7 +111,7 @@ def _build_ollama(prompt, system, options, think, model):
 # ---------------------------------------------------------------------------
 # vLLM / OpenAI 相容 /v1/chat/completions
 # ---------------------------------------------------------------------------
-def _build_vllm(prompt, system, options, model):
+def _build_vllm(prompt, system, options, model, fmt=None):
     url = f"{llm_config.VLLM_URL.rstrip('/')}/v1/chat/completions"
     messages = []
     if system:
@@ -123,6 +132,8 @@ def _build_vllm(prompt, system, options, model):
             payload["max_tokens"] = options["num_predict"]
         if "top_k" in options:                 # vLLM 擴充參數（非 OpenAI 標準）
             payload.setdefault("extra_body", {})["top_k"] = options["top_k"]
+    if fmt:  # 結構化輸出：vLLM 用 guided_json 做受限解碼
+        payload.setdefault("extra_body", {})["guided_json"] = fmt
 
     def parse(body: dict[str, Any]) -> str:
         return body["choices"][0]["message"]["content"]

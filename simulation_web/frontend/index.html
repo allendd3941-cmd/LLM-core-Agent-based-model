@@ -41,27 +41,62 @@
         </div>
 
         <label class="field">
+          <span>場景（圖層）</span>
+          <select id="scenario-select"></select>
+          <p class="hint">切換事件場景／圖層，重新初始化模擬。</p>
+        </label>
+
+        <label class="field">
           <span>速度 <b id="speed-val">1.0×</b></span>
           <input id="speed" type="range" min="0.5" max="5" step="0.5" value="1" />
         </label>
 
         <label class="field">
-          <span>Agent 數量 <b id="agents-val">10</b></span>
+          <span>事件車數量 <b id="agents-val">10</b></span>
           <input id="agents" type="range" min="5" max="80" step="5" value="10" />
+          <p class="hint">前往事件地點（球場）的車流；可用 LLM 或規則式核心。</p>
+        </label>
+
+        <label class="field">
+          <span>背景常態車流 <b id="ambient-val">40</b></span>
+          <input id="ambient" type="range" min="0" max="600" step="20" value="40" />
+          <p class="hint">不指定事件終點的常態背景車（雙邊重力 OD、一律規則式核心），造成路網基礎負載。0＝關閉。</p>
         </label>
 
         <div class="field toggle">
-          <span>決策模式</span>
+          <span>決策核心 <em>（事件車）</em></span>
           <div class="seg">
-            <button id="mode-mock" class="seg-btn active">Mock</button>
+            <button id="mode-mock" class="seg-btn active">規則式</button>
             <button id="mode-llm" class="seg-btn">LLM</button>
           </div>
         </div>
-        <p class="hint" id="mode-hint">Mock：確定性規則，即時流暢。LLM：本進程直呼 pipeline（需 Ollama）。</p>
+        <p class="hint" id="mode-hint">規則式（Rule-based）：確定性啟發式核心，即時流暢、作對照基線。LLM：依人格與感知決策（需 Ollama/vLLM）。背景車流一律走規則式核心。</p>
+
+        <label class="field">
+          <span>LLM 模型 <em>（整套 LLM 共用）</em></span>
+          <div class="llm-pick">
+            <select id="llm-backend">
+              <option value="ollama">Ollama</option>
+              <option value="vllm">vLLM</option>
+            </select>
+            <select id="llm-model"></select>
+          </div>
+          <p class="hint" id="llm-model-hint"></p>
+        </label>
 
         <div class="field">
           <button id="btn-regen-profiles" class="btn">👤 重新生成人物</button>
           <p class="hint">清除 persona 池，下次 LLM 初始化重生一批；平時調 agent 數會重用同一批人，不會一直重生。</p>
+        </div>
+
+        <div class="field">
+          <button id="btn-edit-prompts" class="btn">✎ 編輯 Prompts</button>
+          <p class="hint">demo 可改人物/決策 prompt 做不同模擬（結構化輸出會保護格式不崩）。</p>
+        </div>
+
+        <div class="field btn-row">
+          <button id="btn-rag" class="btn">📚 RAG 知識庫</button>
+          <button id="btn-upload-scenario" class="btn">⬆ 上傳場景</button>
         </div>
       </section>
 
@@ -70,8 +105,9 @@
         <div class="stat-grid">
           <div class="stat"><span>週期</span><b id="m-cycle">0 / 36</b></div>
           <div class="stat"><span>已歷時</span><b id="m-elapsed">0 分</b></div>
-          <div class="stat"><span>決策來源</span><b id="m-source">mock</b></div>
-          <div class="stat"><span>已抵達</span><b id="m-arrived">0</b></div>
+          <div class="stat"><span>決策核心</span><b id="m-source">規則式</b></div>
+          <div class="stat"><span>事件已抵達</span><b id="m-arrived">0</b></div>
+          <div class="stat"><span>背景車</span><b id="m-ambient">0</b></div>
           <div class="stat"><span>壅塞路段</span><b id="m-crowded">0</b></div>
           <div class="stat"><span>平均壅塞</span><b id="m-avgcong">0.00</b></div>
         </div>
@@ -104,34 +140,101 @@
         <div><span class="lg lg-orange"></span>壅塞</div>
         <div><span class="lg lg-red"></span>嚴重</div>
         <div class="lg-sep"></div>
-        <div class="lg-title">車輛狀態</div>
+        <div class="lg-title">事件車狀態</div>
         <div><span class="lg-dot lg-ag-move"></span>移動中</div>
         <div><span class="lg-dot lg-ag-wait"></span>等紅燈 🚦</div>
         <div><span class="lg-dot lg-ag-arr"></span>已抵達 🏁</div>
+        <div><span class="lg-dot lg-ag-ambient"></span>背景常態車流</div>
         <div><span class="lg lg-dest"></span>目的地（球場）</div>
         <div class="lg-sep"></div>
         <label class="lg-toggle" title="放大到街區層級才會顯示號誌"><input id="toggle-signals" type="checkbox" checked /> 🚦 號誌</label>
+        <label class="lg-toggle" title="顯示/隱藏背景常態車流"><input id="toggle-ambient" type="checkbox" checked /> 🚙 背景車流</label>
       </div>
     </section>
 
-    <!-- 右：圖表 -->
+    <!-- 右：分頁（即時 / 分析 / 對話）-->
     <aside class="panel panel-right">
-      <section class="card">
-        <h2>壅塞趨勢</h2>
-        <canvas id="chart-congestion" height="160"></canvas>
-      </section>
-      <section class="card">
-        <h2>抵達進度</h2>
-        <canvas id="chart-arrived" height="160"></canvas>
-      </section>
-      <section class="card">
-        <h2>行為模式分佈（累積）</h2>
-        <canvas id="chart-mode" height="170"></canvas>
-      </section>
+      <div class="tabbar">
+        <button class="tab-btn active" data-tab="live">📈 即時</button>
+        <button class="tab-btn" data-tab="analysis">📊 分析</button>
+        <button class="tab-btn" data-tab="chat">💬 對話</button>
+      </div>
+
+      <div class="tab-pane active" id="tab-live">
+        <section class="card">
+          <h2>壅塞趨勢</h2>
+          <canvas id="chart-congestion" height="160"></canvas>
+        </section>
+        <section class="card">
+          <h2>抵達進度</h2>
+          <canvas id="chart-arrived" height="160"></canvas>
+        </section>
+        <section class="card">
+          <h2>行為模式分佈（累積）</h2>
+          <canvas id="chart-mode" height="170"></canvas>
+        </section>
+      </div>
+
+      <div class="tab-pane" id="tab-analysis">
+        <section class="card" id="analysis-card" style="display:none">
+          <h2>📊 交通分析（模擬完成後）</h2>
+          <h3 class="sub layer-tag">① 事件層（只算前往球場的事件車）</h3>
+          <div id="analysis-summary" class="analysis-summary"></div>
+          <h3 class="sub">抵達曲線（累積 / 每步抵達率）</h3>
+          <canvas id="chart-arrival" height="150"></canvas>
+          <h3 class="sub">旅行時間分布（分鐘）</h3>
+          <canvas id="chart-traveltime" height="150"></canvas>
+          <h3 class="sub">出發地分布（Top，實際 vs 重力期望）</h3>
+          <canvas id="chart-od" height="170"></canvas>
+
+          <h3 class="sub layer-tag">② 路網層（事件車＋背景車，交通局視角）</h3>
+          <div id="network-summary" class="analysis-summary"></div>
+          <h3 class="sub">路網車流量隨時間（事件 vs 背景，堆疊）</h3>
+          <canvas id="chart-volume" height="150"></canvas>
+          <h3 class="sub">Top 瓶頸路段（整趟尖峰 V/C 與服務水準）</h3>
+          <div id="bottleneck-table" class="bottleneck-table"></div>
+        </section>
+        <p class="hint" id="analysis-empty">模擬完成後（或按單步走到結束）會在此顯示交通分析圖。</p>
+      </div>
+
+      <div class="tab-pane" id="tab-chat">
+        <section class="card">
+          <h2>💬 與模擬對話 / 介入</h2>
+          <div class="seg" style="margin-bottom:6px">
+            <button id="chat-mode-ask" class="seg-btn active">問（唯讀）</button>
+            <button id="chat-mode-act" class="seg-btn">介入</button>
+          </div>
+          <p class="hint" id="chat-hint">暫停時詢問當前路況（唯讀，用所選 LLM 回答）。</p>
+          <div class="chat-chips" id="chat-chips"></div>
+          <div id="chat-log" class="chat-log"></div>
+          <div class="chat-input">
+            <input id="chat-text" type="text" placeholder="輸入問題後按 Enter…" />
+            <button id="chat-send" class="seg-btn">送出</button>
+          </div>
+          <button id="btn-clear-intervene" class="seg-btn" style="margin-top:6px">🧹 清除介入</button>
+        </section>
+      </div>
     </aside>
   </main>
 
   <div id="toast" class="toast"></div>
+
+  <div id="prompt-modal" class="modal" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2>編輯 Prompts（即時生效，可還原）</h2>
+        <button id="prompt-close" class="btn">✕</button>
+      </div>
+      <div id="prompt-fields"></div>
+    </div>
+  </div>
+
+  <div id="util-modal" class="modal" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head"><h2 id="util-title"></h2><button id="util-close" class="btn">✕</button></div>
+      <div id="util-body"></div>
+    </div>
+  </div>
 
   <script src="map.js"></script>
   <script src="charts.js"></script>

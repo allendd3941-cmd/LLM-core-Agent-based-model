@@ -1,5 +1,6 @@
 ﻿from pathlib import Path
 from . import llm_client
+from . import prompt_store
 from .output_engine import output_process
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -15,11 +16,13 @@ with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
 with open(USER_PROMPT_PATH, "r", encoding="utf-8") as f:
     USER_PROMPT = f.read()
 
+prompt_store.register_default("agent_profile", USER_PROMPT)
+
 
 def build_user_prompt(agent_count: int) -> str:
     return (
         f"請生成 {agent_count} 個用於「台南市亞太棒球場球賽進出場尖峰人潮短期交通衝擊評估」的交通模擬 agents。\n\n"
-        + USER_PROMPT
+        + prompt_store.get("agent_profile")   # 前端可即時覆寫；未覆寫＝預設
     )
 
 

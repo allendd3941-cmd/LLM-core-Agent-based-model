@@ -1,11 +1,12 @@
-"""memory_summary.py — 用小模型（如 gemma）批次生成 agent 長期記憶的 trip_summary。
+"""memory_summary.py — 用小模型批次生成 agent **單一 memory** 的 ``summary``。
 
 設計：把每個 agent 已經算好的「結構化事實」（出發/目的地、塞過的點、換策略次數、整趟順暢度、
-已行進時間、目前狀態）批次包成一個 prompt，呼叫 Ollama 上的 ``summary_model``，回傳
+已行進時間、目前狀態）批次包成一個 prompt，呼叫 Ollama/vLLM 上的模型，回傳
 ``{agent_id: 一句繁體中文摘要}``。只負責「把事實寫成一句話」，不得新增事實。
 
-由 simulation/engine.py 在開啟 ``[summary].use_llm_summary`` 時呼叫；任何失敗都回空 dict，
-讓引擎保留各 agent 既有的模板摘要（fallback）。與 perception/decision_making 共用同一個 Ollama。
+由 simulation/engine.py 的 ``_summarize_memory`` 在 **LLM 核心模式下、該 agent「重新決策」時**
+呼叫（記憶恰好在做決定的當下最新，也省 LLM）；任何失敗都回空 dict，讓引擎保留既有的模板摘要
+（fallback）。與 perception/decision_making 共用同一個模型（前端所選）。
 """
 
 from __future__ import annotations

@@ -46,6 +46,7 @@ def find_path(
     dest_node: str,
     strategy: dict[str, Any] | None = None,
     seed: int = 0,
+    avoid_circles: list[tuple[float, float, float]] | None = None,
 ) -> list[str]:
     """加權最短路徑；找不到時回傳空 list（對齊 GAML 找不到 path 的情況）。
 
@@ -100,6 +101,12 @@ def find_path(
                 cost *= 1.0 + road_class_bias
         if randomness:                               # 確定性微擾，分散車流
             cost *= _edge_jitter(u, v, seed, salt, randomness)
+        if avoid_circles:                            # NL 介入：避讓區（圓）內的邊近乎封路
+            vx, vy = network.node_xy(v)
+            for cx, cy, r in avoid_circles:
+                if (vx - cx) ** 2 + (vy - cy) ** 2 <= r * r:
+                    cost *= _AVOID_MULTIPLIER
+                    break
         return max(cost, 1e-3)
 
     try:

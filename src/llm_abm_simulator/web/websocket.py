@@ -70,6 +70,24 @@ class SimulationSession:
             if not self.engine.scheduler.finished:
                 state = await asyncio.to_thread(self.engine.step)
                 await self.send(state.to_message())
+                if self.engine.scheduler.finished:  # 手動單步走到結束 → 出分析
+                    await self._send_analysis()
+        elif action == "analysis":
+            await self._send_analysis()
+        elif action == "ask":
+            await self._ask(str(value or ""))
+        elif action == "intervene":
+            await self._intervene(str(value or ""))
+        elif action == "clear_intervention":
+            msg = await asyncio.to_thread(self.engine.clear_interventions)
+            await self.send({"type": "chat", "text": "🧹 " + msg})
+            await self.send(self.engine.snapshot_now().to_message())
+        elif action == "set_prompt":
+            v = value or {}
+            from llm_server import prompt_store
+            prompt_store.set_override(str(v.get("name", "")), v.get("text"))
+            ov = bool((v.get("text") or "").strip())
+            await self.status(f"已{'套用自訂' if ov else '還原預設'} prompt：{v.get('name')}")
         elif action == "reset":
             await self._reset()
         elif action == "set_speed":
@@ -80,10 +98,16 @@ class SimulationSession:
         elif action == "set_agents":
             await self._set_agents(int(value or self.cfg.nb_agents))
         elif action == "set_mode":
-            self._set_mode(str(value or "mock"))
-            await self.status(f"決策模式：{'LLM' if self.cfg.use_llm else 'Mock'}")
+            self._set_mode(str(value or "rule"))
+            await self.status(f"決策核心：{'LLM 認知核心' if self.cfg.use_llm else '規則式（Rule-based）'}")
+        elif action == "set_ambient":
+            await self._set_ambient(int(value) if value is not None else 0)
+        elif action == "set_llm":
+            await self._set_llm(value or {})
         elif action == "regenerate_profiles":
             await self._regenerate_profiles()
+        elif action == "set_scenario":
+            await self._set_scenario(str(value or ""))
         else:
             logger.warning("未知控制指令: %s", action)
 
@@ -113,6 +137,7 @@ class SimulationSession:
                     f"模擬完成：共 {self.engine.scheduler.cycle} 步"
                     f"（{self.engine.scheduler.elapsed_minutes} 分鐘）"
                 )
+                await self._send_analysis()
 
     async def _stop_run_task(self) -> None:
         self.engine.pause()
@@ -142,6 +167,19 @@ class SimulationSession:
         await self.send(self.engine.init_payload())
         await self.status(f"agent 數設為 {n}")
 
+    async def _set_ambient(self, n: int) -> None:
+        """設定背景常態車數（runtime 覆寫 [ambient].count），重新初始化。模擬進行中先擋。"""
+        from .. import config
+        if self.engine.running or self.engine.scheduler.cycle > 0:
+            await self.status("模擬進行中無法變更背景車數，請先重設。")
+            return
+        config.set_runtime_ambient_count(max(0, min(n, config.AMBIENT_CONFIG.max_count)))
+        await self._stop_run_task()
+        self.engine = SimulationEngine(self.cfg)
+        await asyncio.to_thread(self.engine.initialize)
+        await self.send(self.engine.init_payload())
+        await self.status(f"背景車數設為 {config.effective_ambient_count()}")
+
     async def _regenerate_profiles(self) -> None:
         """『重新生成人物』：清掉 persona 池並重新初始化（下次 LLM init 會重生整批）。"""
         from ..decisions import profile_pool
@@ -150,6 +188,72 @@ class SimulationSession:
         await asyncio.to_thread(self.engine.reset)
         await self.send(self.engine.init_payload())
         await self.status("已清除人物池，將於下次 LLM 初始化重新生成。")
+
+    async def _set_scenario(self, key: str) -> None:
+        """切換場景（圖層）：設 active → 重新初始化引擎 → 重送 init。模擬進行中先停。"""
+        from .. import scenarios
+        if not scenarios.set_active(key):
+            await self.status(f"未知場景：{key}")
+            return
+        await self._stop_run_task()
+        await asyncio.to_thread(self.engine.reset)
+        await self.send(self.engine.init_payload())
+        await self.status(f"已切換場景：{scenarios.active().name}")
+
+    async def _ask(self, question: str) -> None:
+        """暫停對話查詢（唯讀）：用當前模擬狀態 + LLM 回答；LLM 不可用則回附狀態文字。"""
+        if not question.strip():
+            return
+        ctx = self.engine.chat_context()
+        try:
+            from llm_server.sim_chat import run_sim_chat
+            answer = await asyncio.to_thread(run_sim_chat, ctx, question)
+        except Exception as e:  # noqa: BLE001  LLM 不可用 → fallback 附狀態
+            logger.warning("sim_chat 失敗：%s", e)
+            answer = "（LLM 暫時不可用，附當前模擬狀態）\n" + ctx
+        await self.send({"type": "chat", "text": answer})
+
+    async def _intervene(self, text: str) -> None:
+        """NL 介入：解析指令 → 套用受限動作 → 回報 + 即時更新前端。"""
+        if not text.strip():
+            return
+        try:
+            from llm_server.sim_intervene import run_intervene
+            act = await asyncio.to_thread(run_intervene, text, self.engine._available_towns)
+        except Exception as e:  # noqa: BLE001
+            await self.send({"type": "chat", "text": f"（介入解析失敗：{e}）"})
+            return
+        if act["action"] == "none":
+            await self.send({"type": "chat", "text": "未能對應到可執行的介入（可試：避開某區 / 從某區湧入 N 台）。"})
+            return
+        summary = await asyncio.to_thread(
+            self.engine.apply_intervention, act["action"], act["town"], act["count"])
+        await self.send({"type": "chat", "text": "🛠️ " + summary})
+        await self.send(self.engine.snapshot_now().to_message())
+
+    async def _send_analysis(self) -> None:
+        """送模擬後交通分析資料給前端（分析面板）。"""
+        try:
+            data = await asyncio.to_thread(self.engine.build_analysis)
+            await self.send({"type": "analysis", **data})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("分析資料產生失敗：%s", e)
+
+    async def _set_llm(self, value: dict) -> None:
+        """前端選模型：套用 runtime 後端/模型，並連動 max_model_len 與 ollama num_ctx（整套 LLM 共用）。"""
+        from .. import config
+        from llm_server import llm_config, model_registry
+        backend = value.get("backend") or llm_config.LLM_BACKEND
+        model = value.get("model") or ""
+        if backend == "vllm" and model:
+            max_len = model_registry.suggested_max_model_len(model)
+            llm_config.set_runtime_llm("vllm", model, num_ctx=None)
+            config.set_runtime_max_model_len(max_len)
+        else:  # ollama
+            max_len = model_registry.PROJECT_CONTEXT_CAP
+            llm_config.set_runtime_llm("ollama", model, num_ctx=max_len)
+            config.set_runtime_max_model_len(max_len)
+        await self.status(f"LLM 已切換：{backend} · {model or '(預設)'}（max_model_len={max_len}）")
 
     def _set_mode(self, mode: str) -> None:
         # 動態切換 mock/llm；engine 內部 cfg 與本 session cfg 同步

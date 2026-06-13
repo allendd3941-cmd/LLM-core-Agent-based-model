@@ -117,6 +117,9 @@ class VehicleAgent:
     # === identity（GAML: agent_id / profile_agent_name）===
     agent_id: str
     profile_name: str = ""
+    # 角色：event＝去事件地點（球場）的事件車流（可用 LLM 核心）；
+    #       ambient＝不指定事件終點的常態背景車流（一律規則式、無記憶；見 docs/AMBIENT_zh-TW.md）。
+    role: str = "event"
 
     # === 旅程起訖（GAML: origin_town / destination_town / vehicle_type）===
     origin_town: str = ""
@@ -164,6 +167,7 @@ class VehicleAgent:
     perception_radius: float = 300.0
     is_crowded: bool = False
     waiting_at_signal: bool = False      # 本步是否停在號誌路口等紅燈（由 engine 號誌 gating 設定）
+    arrival_cycle: int | None = None     # 抵達的週期（首次抵達時設定一次；供旅行時間分析）
     distance_moved_last_step: float = 0.0
     distance_to_destination: float = 0.0
     nearby_agent_count: int = 0
@@ -176,13 +180,12 @@ class VehicleAgent:
     speed_status: str = ""               # 速度感（自由流/略慢/壅塞緩行）
     road_ahead: str = ""                 # 前方路況（沿路徑往前看固定距離）
 
-    # === API & memory（旅次記憶：STM 上一步 / LTM 壓縮印象）===
-    # short_term_memory：只保留「上一步」的人類化印象（每步覆蓋）。
-    # long_term_memory ：整趟壓縮成一段印象 + 少量聚合量（每步由累積器確定性重算）。
-    # 兩者都固定大小，取代舊的無上限成長 travel_memory list。詳見 docs/MEMORY_zh-TW.md。
-    short_term_memory: dict[str, Any] = field(default_factory=dict)
-    long_term_memory: dict[str, Any] = field(default_factory=dict)
-    summary_source: str = "template"     # trip_summary 來源："template"（模板）或 "llm"（gemma 摘要）
+    # === API & memory（單一旅次記憶；不再分長短期）===
+    # memory：一段 running 的旅次印象 ``summary`` + 少量確定性聚合量（每步由累積器重算）。
+    # 1 step=1 分鐘，長短期區分無意義，故合併為單一 memory。詳見 docs/MEMORY_zh-TW.md。
+    # 規則式核心：summary 用模板每步重算；LLM 核心：summary 只在「重新決策」時由 LLM 重寫一次。
+    memory: dict[str, Any] = field(default_factory=dict)
+    summary_source: str = "template"     # summary 來源："template"（模板）或 "llm"（小模型摘要）
     api_status: str = "not_sent"
     warning_message: str = ""
 
@@ -371,24 +374,20 @@ class VehicleAgent:
             "active_mode": self.active_mode,
             "vehicle_type": self.vehicle_type,
             "environment": self.build_environment_payload(),
-            "short_term_memory": self.short_term_memory,
-            "long_term_memory": self.long_term_memory,
+            "memory": self.memory,
         }
 
     # ------------------------------------------------------------------
     # 旅次記憶更新（取代 GAML build_memory_entry + append）
     # ------------------------------------------------------------------
-    def update_memory(self, cycle: int, step_minutes: int, cfg: MemoryConfig,
-                      llm_summary_mode: bool = False) -> None:
-        """以「上一步」覆蓋 STM、以累積器確定性重算 LTM（每步呼叫一次）。
+    def update_memory(self, cycle: int, step_minutes: int, cfg: MemoryConfig) -> None:
+        """以累積器確定性重算**單一 memory**（每步呼叫一次；只給事件車）。
 
-        模擬人類旅次記憶：上一刻記得清楚（STM），整趟只留一段模糊印象（LTM）。
-        STM 與 LTM 的結構化欄位全程確定性（不呼叫 LLM、不含隨機），維持同 seed 同軌跡。
-
-        ``llm_summary_mode``：
-        - False（預設）：`trip_summary` 用確定性模板生成（方式 A），來源標 "template"。
-        - True：`trip_summary` **只由 LLM 摘要填**（engine `_maybe_llm_summaries`）；本方法不套模板，
-          保留上一次的 LLM 摘要，若尚未生成過則**留空**（來源標 "pending"），等門檻觸發才填。
+        記憶不再分長短期：一段 running 的旅次印象 ``summary`` + 當下印象 + 少量聚合量，
+        全程確定性（不含隨機），維持同 seed 同軌跡。``summary`` 的來源：
+        - 來源已是 "llm"（該 agent 重新決策時被 LLM 重寫過）→ **保留** LLM 摘要，不用模板覆蓋；
+          僅在 LLM 摘要尚為空時退回模板，確保記憶永遠有內容。
+        - 否則（規則式核心 / 尚未經 LLM 摘要）→ 用確定性模板每步重算，來源標 "template"。
         """
         feel = _traffic_feel(self.congestion_proxy, self.is_crowded, cfg)
         where = _where_label(self.current_town, self.current_road_name, self.current_road_id)
@@ -397,17 +396,6 @@ class VehicleAgent:
             and self.distance_to_destination < self._prev_distance - 1e-6
         )
         arrived = self.route_status == RouteStatus.ARRIVED
-
-        # --- STM：上一步的人類化印象（每步覆蓋）---
-        self.short_term_memory = {
-            "step": cycle,
-            "where": where,
-            "traffic_feel": feel,
-            "mode_used": self.active_mode,
-            "moved": _moved_label(self.distance_moved_last_step, cfg),
-            "getting_closer": bool(closer),
-            "remaining": _km_label(self.distance_to_destination, cfg.distance_decimals),
-        }
 
         # --- 滾動更新累積器 ---
         if self._start_cycle is None:
@@ -422,19 +410,25 @@ class VehicleAgent:
         self._prev_mode = self.active_mode
         self._prev_distance = self.distance_to_destination
 
-        # --- LTM：把整趟壓縮成一段印象 + 少量聚合量（固定大小）---
         elapsed_steps = cycle - self._start_cycle + 1
         avg_proxy = self._smoothness_sum / max(self._smoothness_n, 1)
-        if llm_summary_mode:
-            # 只給 LLM 摘要：保留上一次 LLM 結果，沒生成過就留空（等門檻觸發）
-            summary = self.long_term_memory.get("trip_summary", "")
-            if self.summary_source != "llm":
-                self.summary_source = "pending"
+        template = self._compose_summary(elapsed_steps, step_minutes, avg_proxy, closer, arrived, cfg)
+        if self.summary_source == "llm":
+            summary = self.memory.get("summary", "") or template   # 保留 LLM 摘要；空才退模板
         else:
-            summary = self._compose_summary(elapsed_steps, step_minutes, avg_proxy, closer, arrived, cfg)
+            summary = template
             self.summary_source = "template"
-        self.long_term_memory = {
-            "trip_summary": summary,
+
+        # --- 單一 memory：旅次印象 summary + 當下印象 + 聚合量（固定大小）---
+        self.memory = {
+            "summary": summary,
+            "step": cycle,
+            "where": where,
+            "traffic_feel": feel,
+            "mode_used": self.active_mode,
+            "moved": _moved_label(self.distance_moved_last_step, cfg),
+            "getting_closer": bool(closer),
+            "remaining": _km_label(self.distance_to_destination, cfg.distance_decimals),
             "elapsed": f"約 {elapsed_steps * step_minutes} 分鐘（{elapsed_steps} 步）",
             "congested_spots": list(self._congested_spots),
             "mode_switches": self._mode_switch_count,
@@ -443,17 +437,17 @@ class VehicleAgent:
 
     def memory_facts(self) -> dict[str, Any]:
         """給 LLM 摘要器的結構化事實（只給事實，不含模板那句）。"""
-        ltm = self.long_term_memory
+        mem = self.memory
         return {
             "agent_id": self.agent_id,
             "origin_town": self.origin_town,
             "destination_town": self.destination_town,
             "active_mode": self.active_mode,
             "route_status": str(self.route_status),
-            "overall_smoothness": ltm.get("overall_smoothness", ""),
-            "congested_spots": ltm.get("congested_spots", []),
-            "mode_switches": ltm.get("mode_switches", 0),
-            "elapsed": ltm.get("elapsed", ""),
+            "overall_smoothness": mem.get("overall_smoothness", ""),
+            "congested_spots": mem.get("congested_spots", []),
+            "mode_switches": mem.get("mode_switches", 0),
+            "elapsed": mem.get("elapsed", ""),
             "traffic_here": self.traffic_here,
             "road_ahead": self.road_ahead,
         }

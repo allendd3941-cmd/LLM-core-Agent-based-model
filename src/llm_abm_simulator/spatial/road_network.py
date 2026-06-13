@@ -113,20 +113,22 @@ class RoadNetwork:
 # 載入 / 建立路網
 # ---------------------------------------------------------------------------
 def load_road_network(cfg: config.SimulationConfig | None = None) -> RoadNetwork:
-    """依三層 fallback 取得路網。"""
+    """依三層 fallback 取得路網（路網路徑由目前場景決定）。"""
     cfg = cfg or config.DEFAULT_CONFIG
+    from .. import scenarios
+    graphml_path = scenarios.active().road_graphml
 
-    if config.ROAD_GRAPHML.exists():
-        logger.info("讀取 bundle 路網: %s", config.ROAD_GRAPHML)
+    if graphml_path.exists():
+        logger.info("讀取 bundle 路網: %s", graphml_path)
         try:
-            return _from_graphml(config.ROAD_GRAPHML)
+            return _from_graphml(graphml_path)
         except Exception as e:  # noqa: BLE001
             logger.warning("bundle 路網讀取失敗（%s），改用其他來源", e)
 
     if cfg.allow_osm_download:
         try:
             graph = build_osm_graph()
-            save_graphml(graph, config.ROAD_GRAPHML)
+            save_graphml(graph, graphml_path)
             return _wrap(graph)
         except Exception as e:  # noqa: BLE001
             logger.warning("OSM 下載失敗（%s），改用 synthetic 路網", e)

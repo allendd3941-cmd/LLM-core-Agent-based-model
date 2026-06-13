@@ -38,7 +38,7 @@ strategy by an LLM — all visualised live on an interactive map.
 ## Quick start (with `uv`)
 
 This project uses [`uv`](https://docs.astral.sh/uv/). One command installs everything; the demo
-runs in **Mock mode by default and needs no LLM/GPU**.
+runs with the **rule-based decision core by default and needs no LLM/GPU**.
 
 ```bash
 # 1. install dependencies (creates .venv from pyproject.toml)
@@ -85,8 +85,9 @@ OLLAMA_MODE=/api/generate
 OLLAMA_MODEL=gpt-oss:20b
 ```
 
-Start the demo as above, then toggle **決策模式 → LLM** in the control panel. The decision source
-indicator shows whether LLM or Mock is actually in use (it auto-falls back to Mock if the LLM errors).
+Start the demo as above, then toggle **決策核心 → LLM** in the control panel. The decision-core
+indicator shows whether the LLM or the rule-based core is actually in use (it auto-falls back to the
+rule-based core if the LLM errors).
 
 ---
 
@@ -95,11 +96,11 @@ indicator shows whether LLM or Mock is actually in use (it auto-falls back to Mo
 | Action | What you see |
 | --- | --- |
 | **Start / pause / step / reset / speed** | Drive the simulation forward; reproducible per seed. |
-| **Agent-count slider** | Scale the number of vehicles live. |
-| **Mock ⇄ LLM toggle** | Switch the decision source at runtime (LLM auto-fallbacks to Mock). |
-| **Click a vehicle** | Inspect panel: live state, **persona background** (age/occupation/attitudes…), **short- & long-term memory**, and the **LLM's reason** for its current behavioural mode. |
-| **Map** | Roads colour by congestion (incl. minor roads carrying flow); overlapping agents fan out so all are visible; stadium marked as the destination. |
-| **Charts** | Congestion trend, arrival progress, and **cumulative** behavioural-mode distribution. |
+| **Event-car / background-traffic sliders** | Scale event vehicles and **ambient everyday traffic** (gravity-OD, rule-based) live. |
+| **Rule ⇄ LLM core toggle** | Switch the event cars' decision core at runtime (LLM auto-fallbacks to the rule-based core). Ambient cars are always rule-based. |
+| **Click a vehicle** | Inspect panel: live state, **persona background** (age/occupation/attitudes…), the single **trip memory**, and the **LLM's reason** for its current behavioural mode. |
+| **Map** | Roads colour by congestion (incl. minor roads carrying flow); event cars are state-coloured icons, **ambient cars are faded grey dots**; overlapping agents fan out; stadium marked as the destination. |
+| **Charts** | Live congestion/arrival/mode charts; post-run **two-layer analysis** — event KPIs + a network-layer (volume, LOS, Top-N bottlenecks, event load share) like a traffic-bureau assessment. |
 | **Decision-output viewer** | Browse the raw per-step decision-making output (with each agent's `reason`). |
 | **👤 Regenerate personas** | Re-roll the agent persona pool on demand. |
 
@@ -116,19 +117,22 @@ flowchart TD
     UI["Web demo (Leaflet + Chart.js)"] <-->|WebSocket| WS["web/ session"]
     WS --> ENG["SimulationEngine (owns state)"]
     ENG --> SPA["spatial/ : OSM graph · weighted routing · congestion"]
-    ENG --> DEC["decisions/ : Mock rules ── or ── LLM adapter"]
-    DEC -.in-process.-> PIPE["llm_server pipeline<br/>persona → perception → decision"]
-    PIPE --> OLLAMA["Ollama local LLM"]
+    ENG --> DEC["decisions/ : rule-based core ── or ── LLM adapter (event cars)"]
+    DEC -.in-process.-> PIPE["llm_server pipeline<br/>persona + deterministic perception → decision (LLM)"]
+    PIPE --> OLLAMA["Ollama / vLLM local LLM"]
+    ENG --> AMB["mobility/ : gravity demand · ambient background traffic"]
     ENG --> PERC["perception features (qualitative, spatial)"]
-    ENG --> MEM["STM / LTM trip memory"]
+    ENG --> MEM["single trip memory"]
 ```
 
 **Per simulation step:** perceive (speed/congestion/neighbours) → decide behavioural mode
-(Mock or LLM) → move along the weighted-shortest path (reroute if stuck in congestion) →
-recompute road flow/congestion → update metrics, memory, and the live snapshot streamed to the UI.
+(rule-based or LLM core; ambient cars always rule-based) → move along the weighted-shortest path
+(reroute if stuck in congestion; respawn arrived ambient cars) → recompute road flow/congestion
+(event + ambient) → update metrics (event KPIs + network layer), memory, and the live snapshot.
 
 The decision pipeline is reached **in-process**: `decisions/llm_adapter.py` calls the `llm_server`
-functions (`agent_profile` → `perception` → `decision_making`) directly, which in turn call Ollama.
+functions directly. `perception` is a **deterministic template (no LLM)**; only `agent_profile` and
+`decision_making` call Ollama (the latter with a structured-output schema).
 There is no separate decision server and no HTTP hop (the project originated as a GAMA + FastAPI
 prototype; that path has since been removed in favour of the in-process pipeline).
 
@@ -149,13 +153,15 @@ qualitative labels (tunable thresholds, all in `config/simulation.toml`):
 
 See [`docs/ENVIRONMENT_zh-TW.md`](docs/ENVIRONMENT_zh-TW.md).
 
-### 2. Human-like two-tier trip memory
-Replaces an unbounded list of raw per-step snapshots with fixed-size, qualitative memory:
+### 2. Human-like single trip memory
+Replaces an unbounded list of raw per-step snapshots with one fixed-size, qualitative `memory`
+(no long/short split — at 1 step = 1 minute the distinction is meaningless):
 
-- **Short-term:** the previous step as a human impression (where, traffic feel, getting closer…).
-- **Long-term:** the whole trip compressed into a one-sentence `trip_summary` plus a few aggregates
-  (places jammed, strategy switches, overall smoothness). Built by deterministic rolling
-  accumulators (template summary, reproducible) or, optionally, by a small LLM summariser.
+- A running one-sentence **`summary`** plus the current impression (where, traffic feel, getting
+  closer…) and trip aggregates (places jammed, strategy switches, overall smoothness).
+- Built by deterministic rolling accumulators (template summary, reproducible). With the **LLM core**,
+  the `summary` is rewritten by a small LLM **when the car re-decides** (freshest exactly when it matters).
+  Ambient background cars keep no memory.
 
 See [`docs/MEMORY_zh-TW.md`](docs/MEMORY_zh-TW.md).
 
@@ -190,6 +196,8 @@ fallback). Sections include:
 | `[active_modes.*]` | the five behavioural modes' weights & routing flags |
 | `[roads]` / `[highway_specs]` | congestion model, per-OSM-class speed/capacity |
 | `[ui]` | front-end slider ranges (also the back-end clamps — single source of truth) |
+| `[scaling]` / `[llm_budget]` | event-triggered batching, concurrency, and token-budget-driven batch sizing |
+| `[signals]` | traffic-light stop-wait (enabled / cycle / yellow; points from `data/tainan_signals.json`) |
 | `[reproducibility]` | random seed |
 
 ---
@@ -228,6 +236,8 @@ LLM_abm_model/
 - [`docs/ENVIRONMENT_zh-TW.md`](docs/ENVIRONMENT_zh-TW.md) — spatial perception design.
 - [`docs/MEMORY_zh-TW.md`](docs/MEMORY_zh-TW.md) — short-/long-term memory design.
 - [`docs/ACTIVE_MODES_zh-TW.md`](docs/ACTIVE_MODES_zh-TW.md) — the five behavioural modes & routing.
+- [`docs/DEMAND_zh-TW.md`](docs/DEMAND_zh-TW.md) — gravity-model origin demand (decoupled from persona).
+- [`docs/DEMO_FEATURES_zh-TW.md`](docs/DEMO_FEATURES_zh-TW.md) — LLM model selector, post-sim analytics, pause-to-chat.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/DATA.md`](docs/DATA.md) — system & data notes.
 
 ---

@@ -177,7 +177,7 @@ class LLMDecisionPolicy:
             else:
                 agent_profile = profile_pool.ensure_and_slice(self.cfg.nb_agents, config.PROFILE_CONFIG.pool_size)
 
-            perception = run_perception(payload, output=True)
+            perception = run_perception(payload)  # 確定性模板，不再呼叫 LLM、不落檔
             return run_decision_making(agent_profile, perception, output=True)
         except Exception as e:  # noqa: BLE001  pipeline 內可能丟各種錯，一律降級
             logger.warning("in-process LLM pipeline 執行失敗：%s", e)

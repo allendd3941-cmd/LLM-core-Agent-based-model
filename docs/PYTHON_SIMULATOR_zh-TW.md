@@ -2,8 +2,9 @@
 
 本模組以純 Python 完整取代原專案中由 **GAMA** 承擔的交通 Agent-Based Model 模擬責任，
 並提供一個 localhost 互動式 web demo（Leaflet 地圖 + Chart.js 圖表 + WebSocket 即時更新），
-作為**互動式研究 demo** 展示。LLM pipeline（`llm_server` 的 agent_profile / perception /
-decision_making + prompt/schema）由模擬器以 adapter **在本進程直接呼叫**（不經 HTTP）。
+作為**互動式研究 demo** 展示。LLM pipeline（`llm_server` 的 agent_profile / decision_making
++ prompt/schema）由模擬器以 adapter **在本進程直接呼叫**（不經 HTTP）；`perception` 已改為
+**確定性模板（不呼叫 LLM）**，故每批只剩 decision_making 一次 LLM 呼叫（見 `docs/CHANGES_LLM_PIPELINE_zh-TW.md`）。
 
 - 套件原始碼：`src/llm_abm_simulator/`
 - 前端：`simulation_web/frontend/`
@@ -25,13 +26,17 @@ decision_making + prompt/schema）由模擬器以 adapter **在本進程直接�
 | `[movement]` | agent 速度（`default_desired_speed_kmh` / `default_speed_car_kmh` / `default_speed_moto_kmh`）與預設路徑權重 |
 | `[active_modes.*]` | 五種 active_mode 各自的數值權重與路徑策略（詳見 [`ACTIVE_MODES_zh-TW.md`](ACTIVE_MODES_zh-TW.md)）|
 | `[roads]` | 車流→壅塞估計與權重、視覺化門檻 |
-| `[llm]` | `use_llm`（LLM 決策一律在進程內直呼 pipeline） |
-| `[memory]` | 旅次記憶 STM/LTM 質性門檻（見 `docs/MEMORY_zh-TW.md`） |
+| `[llm]` | `use_llm`＝事件車決策核心：false 規則式（預設）/ true LLM；背景車一律規則式（見 `docs/DEMO_FEATURES_zh-TW.md`）|
+| `[memory]` | 單一旅次記憶 memory 的質性門檻（不再分長短期；見 `docs/MEMORY_zh-TW.md`） |
 | `[perception_context]` | 送 LLM 的環境感知：熱點/前方路況取樣（見 `docs/ENVIRONMENT_zh-TW.md`） |
-| `[summary]` | 長期記憶 trip_summary 的 LLM 摘要（`use_llm_summary` / `summary_model` / 頻率；見 `docs/MEMORY_zh-TW.md`）|
+| `[summary]` | 單一 memory 的後備摘要模型（`summary_model`；LLM 摘要時機＝重決策時，見 `docs/MEMORY_zh-TW.md`）|
 | `[profile]` | agent persona 池大小（`pool_size`；見下方「Persona 池」）|
 | `[reproducibility]` | `seed`（同 seed → 同軌跡）|
 | `[network]` | OSM 下載開關、合成路網大小 |
+| `[demand]` | 事件車出生地由**重力模型**依人口+距離衰減分配（`beta`/`decay`；人口來源 `data/gis/town_population.csv`，見 `docs/DEMAND_zh-TW.md`）|
+| `[ambient]` | 背景常態交通流（`enabled`/`count`/`respawn`；雙邊重力 OD、規則式、納入路網層交評，見 `docs/AMBIENT_zh-TW.md`）|
+| `[signals]` | 紅綠燈號誌停等（`enabled` / `cycle_s` / `yellow_s`；號誌點位由 `data/tainan_signals.json` 提供，見 `spatial/signals.py`）|
+| `[llm_budget]` | LLM token 預算，依此動態切批避免 prompt 溢位（見 `docs/CHANGES_LLM_PIPELINE_zh-TW.md`、`calibrate.py`）|
 | `[ui]` | 前端 slider 範圍（速度 / agent 數）；**同時驅動後端 clamp 與前端 slider**，是兩者的單一來源 |
 | `[highway_specs.*]` | 各 OSM 路型的速限/車道/容量 |
 
@@ -97,7 +102,8 @@ $env:PYTHONPATH = "src"; uvicorn llm_abm_simulator.web.app:app --port 8080
 | ▶ 開始 / ⏸ 暫停 / ⏭ 單步 / 🔄 重設 | 模擬生命週期 |
 | 速度滑桿 | 0.5× ~ 5× 播放速度 |
 | Agent 數量 | 重設前可調（5~80）|
-| Mock / LLM 切換 | 切換決策來源 |
+| 規則式 / LLM 核心切換 | 切換事件車決策核心（背景車一律規則式）|
+| 背景常態車流 slider | 調整背景車數（0＝關閉；見 `docs/AMBIENT_zh-TW.md`）|
 
 地圖會顯示：臺南市行政區界、主要道路（依壅塞即時上色：綠→黃→橘→紅）、
 車輛 agent（汽車較大、機車較小；抵達轉綠）、紅色目的地球場標記。
@@ -107,9 +113,10 @@ $env:PYTHONPATH = "src"; uvicorn llm_abm_simulator.web.app:app --port 8080
 
 ## 4. 啟用 LLM 決策模式（可選，需 Ollama）
 
-LLM 模式會跑既有的 LLM pipeline（`run_agent_profile` → `run_perception` →
-`run_decision_making`）取得每個 agent 的起點 / active_mode / 車種。**需要 Ollama 在跑**
-（模型見 `.env`）。
+LLM 模式跑 pipeline（`run_agent_profile` → `run_perception`【確定性模板，非 LLM】→
+`run_decision_making`）取得每個 agent 的 active_mode / 車種。每批僅 `run_decision_making`
+一次 LLM 呼叫。**需要 Ollama 在跑**（模型見 `.env`）。
+> 出生地**不**由 persona 決定，而是由重力模型依人口+距離衰減分配（見 `docs/DEMAND_zh-TW.md`）。
 
 LLM 決策**一律在模擬器進程內直接呼叫** `llm_server` 的 pipeline 函式（in-process），
 省掉 HTTP round-trip 與一層 JSON 序列化，單機 demo 最乾淨、延遲最低、好除錯。
@@ -270,7 +277,7 @@ tests/simulator/           pytest
 | ROADLINK 路網（本專案無此檔）| `spatial/road_network.py`：OSM bundle / 合成 fallback |
 | `as_edge_graph` / `path_between` / `with_weights` 動態權重 / crowded recompute | `spatial/routing.py` + 引擎 |
 | road 欄位（speed_car/moto, lanes, capacity, flow, congestion_proxy, weight…）| `domain/road.py` |
-| vehicle 欄位與 active_mode 偏好、旅次記憶（STM/LTM，見 `docs/MEMORY_zh-TW.md`）、route_status… | `domain/agent.py` |
+| vehicle 欄位與 active_mode 偏好、`role`、單一旅次記憶 memory（見 `docs/MEMORY_zh-TW.md`）、route_status… | `domain/agent.py` |
 | perceive（速限/missing cap/crowded factor/感知半徑/鄰近數/距離/抵達/重算）| `simulation/engine.py` |
 | congestion 指標、mode/status 分佈、per-cycle | `simulation/metrics.py` |
 | init/step payload 契約（in-process 直呼 llm_server pipeline）、LLM fallback | `decisions/llm_adapter.py` + `response_parser.py` |

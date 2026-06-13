@@ -28,3 +28,36 @@ OLLAMA_MODE = os.getenv("OLLAMA_MODE", "/api/generate")
 LLM_BACKEND = os.getenv("LLM_BACKEND", "ollama")          # "ollama" | "vllm"
 VLLM_URL = os.getenv("VLLM_URL", "http://127.0.0.1:8001")  # vLLM server（vllm serve --port 8001）
 VLLM_MODEL = os.getenv("VLLM_MODEL", "")                   # vLLM 用的 HF 模型名
+
+# --- runtime 可變的「目前選用」狀態（前端可即時覆寫；上面的 .env 值為啟動預設）---
+# 整套 LLM 用途（agent_profile / decision_making / memory_summary）都讀這裡的目前模型。
+OLLAMA_NUM_CTX: int | None = None   # ollama 呼叫帶的 context 長度（None＝用 ollama 預設）
+
+
+def set_runtime_llm(backend: str | None = None, model: str | None = None,
+                    num_ctx: int | None = None) -> None:
+    """前端選模型時呼叫：即時切換後端/模型/context（llm_client 在呼叫時讀這些值）。"""
+    global LLM_BACKEND, OLLAMA_MODEL, VLLM_MODEL, OLLAMA_NUM_CTX
+    if backend in ("ollama", "vllm"):
+        LLM_BACKEND = backend
+    if model:
+        if LLM_BACKEND == "vllm":
+            VLLM_MODEL = model
+        else:
+            OLLAMA_MODEL = model
+    if num_ctx is not None:
+        OLLAMA_NUM_CTX = num_ctx
+
+
+def current_model() -> str:
+    """目前後端實際使用的模型名（整套 LLM 用途共用，含 memory_summary）。"""
+    return VLLM_MODEL if LLM_BACKEND == "vllm" else OLLAMA_MODEL
+
+
+def ollama_base_url() -> str:
+    """從 OLLAMA_URL 推出 scheme://host（給 /api/tags 等列模型用）。"""
+    from urllib.parse import urlsplit
+    p = urlsplit(OLLAMA_URL)
+    if p.scheme and p.netloc:
+        return f"{p.scheme}://{p.netloc}"
+    return "http://127.0.0.1:11434"

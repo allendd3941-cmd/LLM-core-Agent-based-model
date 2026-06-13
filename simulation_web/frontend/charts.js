@@ -86,7 +86,112 @@ const TrafficCharts = (() => {
       c.data.datasets.forEach((d) => (d.data = []));
       c.update();
     });
+    // 隱藏並清掉分析圖（reset 時舊分析不該殘留）
+    const card = document.getElementById("analysis-card");
+    if (card) card.style.display = "none";
+    [arrivalChart, travelChart, odChart, volumeChart].forEach((c) => { if (c) c.destroy(); });
+    arrivalChart = travelChart = odChart = volumeChart = null;
   }
 
-  return { init, update, reset };
+  // ===== 模擬後交通分析（收到 type:analysis 時呼叫）=====
+  let arrivalChart = null, travelChart = null, odChart = null, volumeChart = null;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function histogram(values, nbins) {
+    if (!values.length) return { labels: [], counts: [] };
+    const max = Math.max(...values), min = Math.min(...values);
+    const span = Math.max(1, max - min);
+    const w = Math.ceil(span / nbins) || 1;
+    const counts = new Array(nbins).fill(0);
+    values.forEach((v) => {
+      const i = Math.min(nbins - 1, Math.floor((v - min) / w));
+      counts[i]++;
+    });
+    const labels = counts.map((_, i) => `${min + i * w}-${min + (i + 1) * w}`);
+    return { labels, counts };
+  }
+
+  function renderAnalysis(data) {
+    const card = document.getElementById("analysis-card");
+    if (card) card.style.display = "";
+    const s = data.summary || {};
+    const sum = document.getElementById("analysis-summary");
+    if (sum) sum.innerHTML =
+      `<div class="row"><span>抵達率</span><b>${s.arrived}/${s.total_agents}（${s.arrival_pct}%）</b></div>`
+      + `<div class="row"><span>平均旅行時間</span><b>${s.avg_travel_min} 分</b></div>`
+      + `<div class="row"><span>號誌停等總次數</span><b>${s.total_signal_stops}</b></div>`;
+
+    const labels = data.cycles || [];
+    arrivalChart && arrivalChart.destroy();
+    arrivalChart = new Chart(document.getElementById("chart-arrival"), {
+      type: "line",
+      data: { labels, datasets: [
+        { label: "累積抵達", data: data.cumulative_arrived || [], borderColor: "#00c853", backgroundColor: "rgba(0,200,83,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "每步抵達率", data: data.arrival_rate || [], borderColor: "#ffb300", tension: .3, pointRadius: 0, yAxisID: "y1" },
+      ] },
+      options: { ...lineOpts(), scales: { ...lineOpts().scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
+    });
+
+    const h = histogram(data.travel_time_minutes || [], 12);
+    travelChart && travelChart.destroy();
+    travelChart = new Chart(document.getElementById("chart-traveltime"), {
+      type: "bar",
+      data: { labels: h.labels, datasets: [{ label: "agent 數", data: h.counts, backgroundColor: "#3fb6ff" }] },
+      options: { responsive: true, animation: false, plugins: { legend: { display: false } },
+        scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true } } },
+    });
+
+    const od = data.od_actual || [];
+    const expShare = Object.fromEntries((data.od_expected_share || []).map((r) => [r[0], r[1]]));
+    const total = (data.summary && data.summary.total_agents) || 1;
+    odChart && odChart.destroy();
+    odChart = new Chart(document.getElementById("chart-od"), {
+      type: "bar",
+      data: { labels: od.map((r) => r[0]), datasets: [
+        { label: "實際", data: od.map((r) => r[1]), backgroundColor: "#3fb6ff" },
+        { label: "重力期望", data: od.map((r) => Math.round((expShare[r[0]] || 0) * total)), backgroundColor: "rgba(255,179,0,.7)" },
+      ] },
+      options: { responsive: true, animation: false, plugins: { legend: { labels: { boxWidth: 12 } } },
+        scales: { x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 60 } }, y: { grid: { color: GRID }, beginAtZero: true } } },
+    });
+
+    renderNetwork(data.network || {}, labels);
+  }
+
+  // ===== 路網層（事件車＋背景車，交通局視角）=====
+  function renderNetwork(net, labels) {
+    const los = net.los || {};
+    const ns = document.getElementById("network-summary");
+    if (ns) ns.innerHTML =
+      `<div class="row"><span>背景常態車流</span><b>${net.ambient_count || 0} 台</b></div>`
+      + `<div class="row"><span>服務水準 LOS（平均 / 尖峰）</span><b>${los.mean_grade || "—"} / ${los.peak_grade || "—"}</b></div>`
+      + `<div class="row"><span>平均 / 尖峰壅塞</span><b>${(los.mean_congestion || 0).toFixed(2)} / ${(los.peak_congestion || 0).toFixed(2)}</b></div>`
+      + `<div class="row"><span>路網負載占比（事件 / 背景）</span><b>${net.event_load_share || 0}% / ${net.ambient_load_share || 0}%</b></div>`;
+
+    const vopts = lineOpts();
+    volumeChart && volumeChart.destroy();
+    volumeChart = new Chart(document.getElementById("chart-volume"), {
+      type: "line",
+      data: { labels, datasets: [
+        { label: "事件車", data: net.volume_event || [], borderColor: "#3fb6ff", backgroundColor: "rgba(63,182,255,.35)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "背景車", data: net.volume_ambient || [], borderColor: "#8a93a6", backgroundColor: "rgba(138,147,166,.35)", fill: true, tension: .3, pointRadius: 0 },
+      ] },
+      options: { ...vopts, scales: { ...vopts.scales, y: { ...vopts.scales.y, stacked: true } } },
+    });
+
+    const bt = document.getElementById("bottleneck-table");
+    const rows = net.bottlenecks || [];
+    if (bt) bt.innerHTML = rows.length
+      ? `<table><thead><tr><th>路段</th><th>V/C</th><th>LOS</th><th>尖峰車流/容量</th></tr></thead><tbody>`
+        + rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.vc}</td>`
+          + `<td class="los los-${r.los}">${r.los}</td><td>${r.peak_flow}/${r.capacity}</td></tr>`).join("")
+        + `</tbody></table>`
+      : `<p class="muted">無瓶頸資料（無背景車或路網未壅塞）。</p>`;
+  }
+
+  return { init, update, reset, renderAnalysis };
 })();

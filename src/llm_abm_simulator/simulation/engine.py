@@ -20,14 +20,17 @@ import math
 from typing import Any
 
 from .. import config
+from .. import scenarios
 from ..config import SimulationConfig
 from ..domain import agent as agent_mod
 from ..domain.agent import VehicleAgent
 from ..domain.events import RouteStatus
 from ..domain.state import AgentSnapshot, RoadSnapshot, SimulationState
+from ..decisions import registry as core_registry
 from ..decisions.base import DecisionPolicy
 from ..decisions.llm_adapter import LLMDecisionPolicy
 from ..decisions.mock_policy import MockDecisionPolicy
+from ..mobility import demand as demand_mod
 from ..spatial import gis_loader, geojson, routing
 from ..spatial import signals as signals_mod
 from ..spatial.road_network import RoadNetwork, load_road_network
@@ -65,13 +68,21 @@ class SimulationEngine:
         self._stadium_xy: tuple[float, float] = (0.0, 0.0)
         self._stadium_latlng: tuple[float, float] = (0.0, 0.0)
         self._dest_node: str | None = None
+        self._dest_town: str = self.cfg.destination_town_name  # 由場景覆寫（initialize 時設）
         self._available_towns: list[str] = []
         self._prev_avg_congestion: float | None = None   # 上一步全市平均壅塞（算 trend 用）
+        self._avoid_circles: list[tuple[float, float, float]] = []   # NL 介入：避讓區 (x,y,radius_m)
 
-        # 決策來源
-        self._mock = MockDecisionPolicy(self.cfg, self.rng)
+        # 背景常態車流（ambient）與「路網層」交通評估累積器
+        self._ambient_count: int = 0
+        self._road_peak: dict[str, dict[str, Any]] = {}   # road_id → {name, peak_proxy, peak_flow}
+        self._event_vehsteps: int = 0                     # 事件車「車·步」累積（路網負載占比用）
+        self._ambient_vehsteps: int = 0                   # 背景車「車·步」累積
+
+        # 決策核心（可選；見 decisions/registry.py）：規則式（rule）/ LLM 認知核心（llm）
+        self._mock = MockDecisionPolicy(self.cfg, self.rng)   # 規則式核心（背景車流也用它）
         self._llm = LLMDecisionPolicy(self.cfg)
-        self.last_decision_source = "mock"
+        self.last_decision_source = "rule"
 
         self.running = False
         self.is_initialized = False
@@ -86,19 +97,31 @@ class SimulationEngine:
         stadium_pt, self._stadium_latlng = gis_loader.load_stadium_point()
         self._stadium_xy = (stadium_pt.x, stadium_pt.y)
 
+        self._dest_town = scenarios.active().dest_town or self.cfg.destination_town_name
+        self._avoid_circles = []   # 每次初始化清掉介入
         self.network = load_road_network(self.cfg)
         self.signals = signals_mod.load_signal_system()
         self._dest_node = self.network.nearest_node(*self._stadium_xy)
 
+        self._road_peak = {}
+        self._event_vehsteps = 0
+        self._ambient_vehsteps = 0
+
         self._build_agents()
         self._initial_decisions()
+        # 事件車出生地解耦：用重力模型（人口+距離衰減）覆寫出生地；停用/無人口資料則保留既有指派。
+        demand_mod.assign_origin_towns(self.agents, self.towns, self._stadium_xy,
+                                       self.rng, config.DEMAND_CONFIG)
+        # 背景常態車流：用雙邊重力 OD 生成不指定事件終點的常態車流（一律規則式、無記憶）。
+        self._build_ambient_agents()
         for agent in self.agents:
             self._place_agent(agent)
 
         self.recorder.init_csv()
         self.scheduler.reset()
         self.is_initialized = True
-        logger.info("初始化完成：%d agents，目的地節點 %s", len(self.agents), self._dest_node)
+        logger.info("初始化完成：%d 事件車 + %d 背景車，事件目的地節點 %s",
+                    len(self.agents) - self._ambient_count, self._ambient_count, self._dest_node)
 
     def _build_agents(self) -> None:
         self.agents = [
@@ -125,7 +148,7 @@ class SimulationEngine:
                 assignments = {}
         if not assignments:
             assignments = self._mock.initialize_agents(self.agents, self._available_towns)
-            self.last_decision_source = "mock"
+            self.last_decision_source = "rule"
 
         for agent in self.agents:
             a = assignments.get(agent.agent_id)
@@ -136,7 +159,7 @@ class SimulationEngine:
             agent.apply_vehicle_type(a.vehicle_type)
             if a.active_mode:
                 agent.apply_active_mode(a.active_mode)   # 套用 mode 的數值 + 路徑策略
-            agent.api_status = "init_response_applied" if self.last_decision_source == "llm" else "mock"
+            agent.api_status = "init_response_applied" if self.last_decision_source == "llm" else "rule"
 
         # LLM 模式（不分事件觸發）：persona 池為「出生地 / name / 車種」的單一真實來源，
         # 確定性覆寫之（初始 active_mode 維持上面的規則式或 LLM init 結果）。
@@ -152,7 +175,11 @@ class SimulationEngine:
                 logger.warning("persona 池不可用（Ollama？），沿用既有人物")
 
     def _place_agent(self, agent: VehicleAgent) -> None:
-        """把 agent 放到起點行政區內的路網節點，計算到球場的初始路徑。"""
+        """把 agent 放到起點行政區內的路網節點，計算到目的地的初始路徑。
+
+        事件車（role=event）：目的地＝事件地點（球場）。
+        背景車（role=ambient）：目的地＝其 destination_town 內的隨機節點（不指定事件終點）。
+        """
         assert self.network is not None
         town = self._town_by_name(agent.origin_town)
         if town is not None:
@@ -160,12 +187,18 @@ class SimulationEngine:
         else:
             origin_node = self.network.nearest_node(*self._stadium_xy)
 
+        if agent.role == "ambient":
+            dtown = self._town_by_name(agent.destination_town)
+            dest_node = (self.network.random_node_in_town(dtown, self.rng)
+                         if dtown is not None else self._dest_node)
+        else:
+            agent.destination_town = self._dest_town
+            dest_node = self._dest_node
+
         agent.current_node = origin_node
-        agent.destination_node = self._dest_node
+        agent.destination_node = dest_node
         agent.x, agent.y = self.network.node_xy(origin_node)
-        agent.destination_town = self.cfg.destination_town_name
-        path = routing.find_path(self.network, origin_node, self._dest_node,
-                                 agent.routing_strategy(), seed=self.cfg.seed)
+        path = self._route(origin_node, dest_node, agent.routing_strategy())
         agent.current_path = path
         agent.path_index = 0
         agent.edge_progress = 0.0
@@ -174,6 +207,74 @@ class SimulationEngine:
         else:
             agent.route_status = RouteStatus.ARRIVED if path else RouteStatus.ERROR
         self._refresh_agent_perception(agent, pre_move=True)
+
+    # ==================================================================
+    # 背景常態車流（ambient）
+    # ==================================================================
+    def _event_agents(self) -> list[VehicleAgent]:
+        return [a for a in self.agents if a.role == "event"]
+
+    def _ambient_agents(self) -> list[VehicleAgent]:
+        return [a for a in self.agents if a.role == "ambient"]
+
+    def _build_ambient_agents(self) -> None:
+        """依雙邊重力 OD 生成背景常態車流，append 到 self.agents（尚未 place）。
+
+        無人口資料（sample_od_pairs 回 None）→ 自動停用背景車流。背景車一律 role=ambient、
+        汽機車隨機（seeded），其餘參數同預設；決策一律走規則式核心、不存記憶。
+        """
+        n = config.effective_ambient_count()
+        if n <= 0:
+            self._ambient_count = 0
+            return
+        pairs = demand_mod.sample_od_pairs(self.towns, n, self.rng, config.DEMAND_CONFIG)
+        if not pairs:
+            logger.warning("無人口資料，背景常態車流停用（fallback）。")
+            self._ambient_count = 0
+            return
+        for i, (origin, dest) in enumerate(pairs):
+            a = VehicleAgent.from_config(f"ambient_{i + 1:04d}", self.cfg)
+            a.role = "ambient"
+            a.profile_name = f"背景車{i + 1:04d}"
+            a.origin_town = origin
+            a.destination_town = dest
+            a.apply_vehicle_type(self.rng.choice(config.VEHICLE_TYPES))
+            a.apply_active_mode(self.rng.choice(config.ACTIVE_MODES))
+            a.api_status = "ambient"
+            self.agents.append(a)
+        self._ambient_count = len(pairs)
+        logger.info("背景常態車流：生成 %d 台（雙邊重力 OD，規則式核心）", self._ambient_count)
+
+    def _respawn_arrived_ambient(self) -> None:
+        """背景車抵達 → 從目前位置以重力抽新目的地、重新規劃（維持穩態背景負載）。
+
+        不 teleport：以目前所在節點為新起點、依距離衰減抽新目的地（像真實駕駛完成一趟再啟程）。
+        關閉 respawn 時抵達即停（不重生）。
+        """
+        if not config.AMBIENT_CONFIG.respawn or self.network is None:
+            return
+        for a in self._ambient_agents():
+            if a.route_status != RouteStatus.ARRIVED or not a.current_node:
+                continue
+            dest = demand_mod.sample_dest_town(self.towns, (a.x, a.y), self.rng, config.DEMAND_CONFIG)
+            dtown = self._town_by_name(dest) if dest else None
+            dnode = (self.network.random_node_in_town(dtown, self.rng)
+                     if dtown is not None else self._dest_node)
+            path = self._route(a.current_node, dnode, a.routing_strategy())
+            if len(path) <= 1:
+                continue
+            a.origin_town = a.current_town or a.origin_town
+            a.destination_town = dest or a.destination_town
+            a.destination_node = dnode
+            a.current_path, a.path_index, a.edge_progress = path, 0, 0.0
+            a.route_status = RouteStatus.MOVING
+            a.arrival_cycle = None
+
+    def _dest_xy(self, agent: VehicleAgent) -> tuple[float, float]:
+        """agent 自己的目的地座標（事件車＝球場節點；背景車＝其目的地節點）。"""
+        if agent.destination_node and self.network is not None:
+            return self.network.node_xy(agent.destination_node)
+        return self._stadium_xy
 
     # ==================================================================
     # 單步（對齊 GAML 每 cycle reflex）
@@ -193,60 +294,74 @@ class SimulationEngine:
         env = self._environment_summary(cycle)
         self._apply_step_decisions(env, cycle)
 
-        # 3. 感知速度 + 移動（壅塞時重算路徑）
+        # 3. 感知速度 + 移動（壅塞時重算路徑）；背景車抵達即以新 OD 重生（穩態背景流）
         for agent in self.agents:
             self._perceive_speed(agent)
             self._move_agent(agent)
+        self._respawn_arrived_ambient()
 
-        # 4. 重算道路 flow / congestion / weight
+        # 4. 重算道路 flow / congestion / weight（含背景車 → 路網層負載 + 瓶頸累積）
         self._recompute_flows()
 
         # 5. 移動後感知快照（供 memory / 輸出）
         for agent in self.agents:
             self._refresh_agent_perception(agent, pre_move=False)
 
-        # 6. 指標 + 分佈
+        # 6. 指標 + 分佈（事件 KPI 只算事件車；路網層壅塞/流量含背景車）
+        event_agents = self._event_agents()
+        ambient_agents = self._ambient_agents()
         env = self._environment_summary(cycle)
-        mode_dist, status_dist = metrics.distributions(self.agents)
+        # 抵達週期只記一次（供旅行時間分析；只給事件車）
+        for a in event_agents:
+            if a.route_status == RouteStatus.ARRIVED and a.arrival_cycle is None:
+                a.arrival_cycle = cycle
+        env["signal_waiting"] = sum(1 for a in event_agents if a.waiting_at_signal)
+        env["event_on_network"] = sum(1 for a in event_agents if a.route_status == RouteStatus.MOVING)
+        env["ambient_on_network"] = sum(1 for a in ambient_agents if a.route_status == RouteStatus.MOVING)
+        self._event_vehsteps += env["event_on_network"]
+        self._ambient_vehsteps += env["ambient_on_network"]
+        mode_dist, status_dist = metrics.distributions(event_agents)
         self.recorder.record_cycle(cycle, env, mode_dist, status_dist)
         # 記下本步全市平均壅塞，供「下一步」算 congestion_trend
         self._prev_avg_congestion = env["average_congestion_proxy"]
 
-        # 7. memory + CSV
-        llm_summary = config.SUMMARY_CONFIG.use_llm_summary
-        for agent in self.agents:
-            agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG,
-                                llm_summary_mode=llm_summary)
-        self._maybe_llm_summaries(cycle)
+        # 7. memory（只給事件車；LLM 核心的摘要已於決策時重寫）+ CSV
+        for agent in event_agents:
+            agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
         self.recorder.append_agent_rows(cycle, self.agents)
         self.recorder.append_road_rows(cycle, self.network.all_roads())
 
         return self._snapshot(cycle, env, mode_dist, status_dist)
 
-    def _maybe_llm_summaries(self, cycle: int) -> None:
-        """開啟 [summary] 時，每 N 步或有人抵達就用小模型批次重算 trip_summary。
+    def _summarize_memory(self, agents: list[VehicleAgent]) -> None:
+        """用小模型批次把這批 agent 的單一 ``memory.summary`` 重寫一次。
 
-        失敗（匯入/呼叫/解析）一律保留各 agent 既有的模板摘要，不中斷模擬。
+        只在它們「重新決策」時呼叫（見 `_apply_step_decisions`）——記憶恰好在做決定的當下最新，
+        也省 LLM（不每步、不對全車）。失敗（匯入/呼叫/解析）一律保留既有摘要/模板，不中斷模擬。
+        整套統一：摘要也用前端所選的模型（current_model）；取不到才退回 [summary].summary_model。
         """
-        sc = config.SUMMARY_CONFIG
-        if not sc.use_llm_summary or not self.agents:
-            return
-        just_arrived = any(a.route_status == RouteStatus.ARRIVED for a in self.agents)
-        if cycle % sc.summary_every_n_steps != 0 and not just_arrived:
+        if not agents:
             return
         try:
             from llm_server.memory_summary import run_memory_summary
         except ImportError as e:
-            logger.warning("memory_summary 匯入失敗，改用模板摘要：%s", e)
+            logger.warning("memory_summary 匯入失敗，沿用模板摘要：%s", e)
             return
-        facts = [a.memory_facts() for a in self.agents if a.long_term_memory]
-        summaries = run_memory_summary(facts, sc.summary_model)
+        facts = [a.memory_facts() for a in agents if a.memory]
+        if not facts:
+            return
+        try:
+            from llm_server import llm_config as _lc
+            model = _lc.current_model() or config.SUMMARY_CONFIG.summary_model
+        except ImportError:
+            model = config.SUMMARY_CONFIG.summary_model
+        summaries = run_memory_summary(facts, model)
         if not summaries:
             return
-        for a in self.agents:
+        for a in agents:
             s = summaries.get(a.agent_id)
             if s:
-                a.long_term_memory["trip_summary"] = s
+                a.memory["summary"] = s
                 a.summary_source = "llm"
 
     def _llm_environment(self, env: dict[str, Any]) -> dict[str, Any]:
@@ -266,38 +381,50 @@ class SimulationEngine:
         }
 
     def _apply_step_decisions(self, env: dict[str, Any], cycle: int) -> None:
-        """每步決策。詳見 docs/SCALING_zh-TW.md。
+        """每步決策。詳見 docs/SCALING_zh-TW.md、docs/AMBIENT_zh-TW.md。
 
-        - mock 模式：每步對全部 agent 決策（便宜、確定性，不變）。
-        - LLM 模式 + 事件觸發（預設）：只對「踩到壅塞/前方塞」的 agent 重決，分批並行。
-        - LLM 模式 + 關閉事件觸發：退回「每步對全部 agent 決策」的舊行為。
+        - 背景車（ambient）：一律規則式核心（便宜、無 LLM、無記憶）。
+        - 事件車 + 規則式核心：每步對全部事件車決策（便宜、確定性）。
+        - 事件車 + LLM 核心 + 事件觸發（預設）：只對「踩到壅塞/前方塞」的事件車重決，分批並行；
+          重決前順手用 LLM 重寫其記憶 summary（記憶在做決定的當下最新）。
+        - 事件車 + LLM 核心 + 關閉事件觸發：退回「每步對全部事件車決策」的舊行為。
         """
         sc = config.SCALING_CONFIG
+        event_agents = self._event_agents()
+        ambient_agents = self._ambient_agents()
+
+        # 背景車一律規則式核心（不吃 LLM、不存記憶）
+        if ambient_agents:
+            self._apply_decisions(self._mock.decide_step(ambient_agents, env, cycle))
 
         if not self.cfg.use_llm:
-            self.last_decision_source = "mock"
-            self._apply_decisions(self._mock.decide_step(self.agents, env, cycle))
+            self.last_decision_source = "rule"
+            self._apply_decisions(self._mock.decide_step(event_agents, env, cycle))
             return
 
-        if not sc.event_triggered_decisions:  # 舊行為：每步決策全部
-            decisions = self._llm.decide_step(self.agents, self._llm_environment(env), cycle)
+        if not sc.event_triggered_decisions:  # 舊行為：每步決策全部事件車
+            if event_agents:
+                self._summarize_memory(event_agents)
+            decisions = self._llm.decide_step(event_agents, self._llm_environment(env), cycle)
             if decisions and self._llm.last_call_ok:
                 self.last_decision_source = "llm"
             else:
-                decisions = self._mock.decide_step(self.agents, env, cycle)
-                self.last_decision_source = "mock"
+                decisions = self._mock.decide_step(event_agents, env, cycle)
+                self.last_decision_source = "rule"
             self._apply_decisions(decisions)
             return
 
-        # 事件觸發：只決策觸發的 agent（順暢的車維持現有 mode）
+        # 事件觸發：只決策觸發的事件車（順暢的車維持現有 mode）
         self.last_decision_source = "llm"
-        triggered = self._triggered_agents(cycle)
+        triggered = self._triggered_agents(cycle, event_agents)
         if not triggered:
             return  # 沒人觸發 → 不呼叫 LLM
-        n_batches = math.ceil(len(triggered) / sc.batch_size)
-        logger.info("step %d · LLM 重決 %d 台（壅塞觸發）→ %d 批 ×%d 並行",
-                    cycle, len(triggered), n_batches, min(sc.concurrency, n_batches))
-        self._apply_decisions(self._llm_decide_batched(triggered, self._llm_environment(env), cycle))
+        self._summarize_memory(triggered)   # 重決前先把記憶 summary 用 LLM 重寫一次
+        bsize = self._budget_batch_size(triggered, sc.batch_size)  # 依 token 預算動態壓低批量
+        n_batches = math.ceil(len(triggered) / bsize)
+        logger.info("step %d · LLM 重決 %d 台（壅塞觸發）→ %d 批 ×%d 並行（batch≤%d）",
+                    cycle, len(triggered), n_batches, min(sc.concurrency, n_batches), bsize)
+        self._apply_decisions(self._llm_decide_batched(triggered, self._llm_environment(env), cycle, bsize))
 
     def _apply_decisions(self, decisions: dict[str, Any]) -> None:
         """依 agent_id 順序套用決策（確定性，與批次回來的順序無關）。"""
@@ -312,12 +439,12 @@ class SimulationEngine:
             if d.reason:
                 agent.decision_reason = d.reason
 
-    def _triggered_agents(self, cycle: int) -> list[VehicleAgent]:
-        """回傳本步「需要重決」的 agent：壅塞訊號上升緣 + 過了 cooldown。"""
+    def _triggered_agents(self, cycle: int, agents: list[VehicleAgent]) -> list[VehicleAgent]:
+        """回傳本步「需要重決」的 agent：壅塞訊號上升緣 + 過了 cooldown（只在傳入的事件車中找）。"""
         sc = config.SCALING_CONFIG
         thr = self.cfg.crowded_road_threshold
         out: list[VehicleAgent] = []
-        for a in self.agents:
+        for a in agents:
             if a.route_status in (RouteStatus.ARRIVED, RouteStatus.ERROR):
                 a._prev_congestion_signal = False
                 continue
@@ -329,11 +456,40 @@ class SimulationEngine:
             a._prev_congestion_signal = signal
         return out
 
+    def _budget_batch_size(self, agents: list[VehicleAgent], hard_cap: int) -> int:
+        """依 [llm_budget] token 預算反推「安全批量」：保證每批 decision prompt 不超過 max_model_len。
+
+        每批輸入 ≈ prompt_overhead + batch×(每 agent status+persona tokens)。
+        可用於 agent 的 token = max_model_len − reserve_output − prompt_overhead。
+        per-agent token 由「實際 status JSON + persona JSON 字元數 ÷ chars_per_token」估得（取樣前幾個）。
+        回傳 min(hard_cap, 預算可容納量)，至少 1。
+        """
+        b = config.LLM_BUDGET
+        if not agents:
+            return hard_cap
+        max_len = config.effective_max_model_len()  # runtime 選模型可覆寫
+        avail = max_len - b.reserve_output_tokens - b.prompt_overhead_tokens
+        if avail <= 0:
+            return 1
+        import json as _json
+        from ..decisions import profile_pool
+        pool = profile_pool.load_pool()
+        persona_chars = (sum(len(_json.dumps(p, ensure_ascii=False)) for p in pool) / len(pool)) if pool else 320.0
+        sample = agents[: min(len(agents), 5)]
+        status_chars = sum(len(_json.dumps(a.build_api_payload(), ensure_ascii=False)) for a in sample) / len(sample)
+        per_agent_tok = max(1.0, (persona_chars + status_chars) / b.chars_per_token)
+        fit = int(avail // per_agent_tok)
+        return max(1, min(hard_cap, fit))
+
     def _llm_decide_batched(self, agents: list[VehicleAgent], env: dict[str, Any],
-                            cycle: int) -> dict[str, Any]:
-        """把觸發的 agent 分批、並行送 LLM（同步等齊再回傳合併決策）。"""
+                            cycle: int, batch_size: int | None = None) -> dict[str, Any]:
+        """把觸發的 agent 分批、並行送 LLM（同步等齊再回傳合併決策）。
+
+        batch_size 預設由 [llm_budget] token 預算決定（呼叫端算好傳入）；未給則退回 [scaling].batch_size。
+        """
         sc = config.SCALING_CONFIG
-        batches = [agents[i:i + sc.batch_size] for i in range(0, len(agents), sc.batch_size)]
+        bsize = batch_size or self._budget_batch_size(agents, sc.batch_size)
+        batches = [agents[i:i + bsize] for i in range(0, len(agents), bsize)]
         merged: dict[str, Any] = {}
         if len(batches) <= 1:
             merged.update(self._llm.decide_step(batches[0], env, cycle) if batches else {})
@@ -378,10 +534,7 @@ class SimulationEngine:
 
         # 壅塞 → 重算路徑（避開壅塞）；tolerate_congestion 的 recompute_on_crowded=False 不重算
         if agent.is_crowded and agent.recompute_on_crowded and agent.current_node and agent.destination_node:
-            new_path = routing.find_path(
-                self.network, agent.current_node, agent.destination_node,
-                agent.routing_strategy(), seed=self.cfg.seed,
-            )
+            new_path = self._route(agent.current_node, agent.destination_node, agent.routing_strategy())
             if len(new_path) > 1:
                 agent.current_path = new_path
                 agent.path_index = 0
@@ -397,10 +550,11 @@ class SimulationEngine:
         self._advance_along_path(agent, remaining)
         agent.distance_moved_last_step = math.hypot(agent.x - before[0], agent.y - before[1])
 
-        # 抵達判定：到達目的地節點（路徑走完）即視為抵達——球場 point 與最近路網節點之間
-        # 有固定偏移，無法以對球場 point 的直線距離歸零，故以「抵達 target node」為準
-        # （對齊 GAML 的 goto target node）。或直線距離已在門檻內。
-        dist = math.hypot(agent.x - self._stadium_xy[0], agent.y - self._stadium_xy[1])
+        # 抵達判定：到達目的地節點（路徑走完）即視為抵達——目的地 point 與最近路網節點之間
+        # 有固定偏移，無法以對 point 的直線距離歸零，故以「抵達 target node」為準
+        # （對齊 GAML 的 goto target node）。或直線距離已在門檻內。背景車用自己的目的地。
+        dx, dy = self._dest_xy(agent)
+        dist = math.hypot(agent.x - dx, agent.y - dy)
         path_done = agent.path_index >= len(agent.current_path) - 1
         if path_done or dist < self.cfg.arrival_distance_threshold_m:
             agent.route_status = RouteStatus.ARRIVED
@@ -469,6 +623,16 @@ class SimulationEngine:
             if road is not None:
                 road.update_flow(flow, self.cfg.capacity_fallback_vehicle_count,
                                  self.cfg.flow_weight_multiplier)
+                # 累積整趟每條路的尖峰壅塞（供「路網層」Top-N 瓶頸路段分析；含背景車）
+                rec = self._road_peak.get(road.road_id)
+                if rec is None or road.congestion_proxy > rec["peak_proxy"]:
+                    self._road_peak[road.road_id] = {
+                        "road_id": road.road_id,
+                        "name": road.road_name or road.road_id,
+                        "peak_proxy": round(road.congestion_proxy, 4),
+                        "peak_flow": int(road.current_flow),
+                        "capacity": round(road.capacity, 1),
+                    }
 
     # ==================================================================
     # 感知快照輔助
@@ -492,9 +656,8 @@ class SimulationEngine:
         agent.congestion_proxy = road.congestion_proxy if road else 0.0
         agent.next_road_id = road.road_id if road else "unknown"
         agent.current_town = self._town_of_point(agent.x, agent.y)
-        agent.distance_to_destination = math.hypot(
-            agent.x - self._stadium_xy[0], agent.y - self._stadium_xy[1]
-        )
+        dx, dy = self._dest_xy(agent)
+        agent.distance_to_destination = math.hypot(agent.x - dx, agent.y - dy)
         agent.nearby_agent_count = self._count_nearby(agent)
         # 送 LLM 的環境感知質性標籤（腳下壅塞 / 速度感 / 前方路況）
         self._refresh_env_labels(agent, road)
@@ -576,6 +739,7 @@ class SimulationEngine:
     def _environment_summary(self, cycle: int) -> dict[str, Any]:
         assert self.network is not None
         env = metrics.overall_environment(self.network.all_roads(), self.cfg, len(self.agents))
+        env["destination_town"] = self._dest_town
         env["cycle"] = cycle
         env["elapsed_minutes"] = cycle * self.cfg.step_minutes
         # 讓 LLM 看懂「塞在哪、變好還變壞」：壅塞趨勢 + 行政區級熱點（全域只送一份）
@@ -642,9 +806,10 @@ class SimulationEngine:
                 origin_town=a.origin_town, destination_town=a.destination_town,
                 current_town=a.current_town, current_road_id=a.current_road_id,
                 waiting_at_signal=a.waiting_at_signal,
-                trip_summary=a.long_term_memory.get("trip_summary", ""),
+                trip_summary=a.memory.get("summary", ""),
                 summary_source=a.summary_source,
                 decision_reason=a.decision_reason,
+                role=a.role,
             ))
         # 只送有流量的道路（前端據此即時上色），避免每步送數萬條。
         # 附幾何座標：前端對「非主要道路底圖沒有的路」也能疊畫出壅塞。
@@ -668,6 +833,8 @@ class SimulationEngine:
                 "active_road_count": env["active_road_count"],
                 "crowded_road_count": env["crowded_road_count"],
                 "average_congestion_proxy": env["average_congestion_proxy"],
+                "ambient_count": self._ambient_count,
+                "event_count": len(self.agents) - self._ambient_count,
                 "history": self.recorder.history,
             },
             mode_distribution=mode_dist, status_distribution=status_dist,
@@ -717,6 +884,13 @@ class SimulationEngine:
             "towns_geojson": gis_loader.load_towns_geojson(),
             "roads_geojson": geojson.roads_to_geojson(self.network, only_major=True),
             "signals": self.signals.phase_payload(),
+            "scenario": {
+                "active": scenarios._ACTIVE_KEY,
+                "name": scenarios.active().name,
+                "list": scenarios.all_summaries(),
+                "center": [scenarios.active().center_lat, scenarios.active().center_lng],
+                "zoom": scenarios.active().zoom,
+            },
             "stadium": {"lat": self._stadium_latlng[0], "lng": self._stadium_latlng[1]},
             "agent_profiles": self._load_agent_profiles(),
             "config": {
@@ -724,9 +898,189 @@ class SimulationEngine:
                 "step_minutes": self.cfg.step_minutes,
                 "nb_agents": self.cfg.nb_agents,
                 "decision_source": self.last_decision_source,
+                "decision_cores": core_registry.summaries(),
+                "current_core": "llm" if self.cfg.use_llm else "rule",
+                "ambient": {
+                    "enabled": config.AMBIENT_CONFIG.enabled,
+                    "count": config.effective_ambient_count(),
+                    "active": self._ambient_count,
+                    "max": config.AMBIENT_CONFIG.max_count,
+                },
                 "ui": config.UI_CONFIG.to_payload(),
+                "llm": self._llm_init_info(),
             },
         }
+
+    def _route(self, origin: str, dest: str, strategy: dict) -> list[str]:
+        """統一的路徑規劃入口：套用 NL 介入的避讓區（_avoid_circles）。"""
+        return routing.find_path(self.network, origin, dest, strategy, seed=self.cfg.seed,
+                                 avoid_circles=self._avoid_circles or None)
+
+    # ==================================================================
+    # NL 介入（受限動作集：避讓區 / 需求突增）
+    # ==================================================================
+    def apply_intervention(self, action: str, town: str = "", count: int = 0) -> str:
+        """套用一個受限介入動作；回傳人類可讀的結果摘要。"""
+        if action == "avoid_area":
+            t = self._town_by_name(town)
+            if t is None or t.centroid_metric is None:
+                return f"找不到區域「{town}」，未套用。"
+            self._avoid_circles.append((t.centroid_metric.x, t.centroid_metric.y, 2500.0))
+            rerouted = 0
+            for a in self.agents:
+                if a.route_status == RouteStatus.MOVING and a.current_node and a.destination_node:
+                    p = self._route(a.current_node, a.destination_node, a.routing_strategy())
+                    if len(p) > 1:
+                        a.current_path, a.path_index, a.edge_progress = p, 0, 0.0
+                        rerouted += 1
+            logger.info("介入：避開 %s，%d 台重算路徑", town, rerouted)
+            return f"已設定避開「{town}」一帶，{rerouted} 台車重新規劃路線。"
+        if action == "demand_surge":
+            n = max(1, min(int(count or 0), 1000))
+            base = len(self.agents)
+            new: list[VehicleAgent] = []
+            for i in range(n):
+                ag = VehicleAgent.from_config(f"surge_{base + i + 1:04d}", self.cfg)
+                ag.origin_town = town or (self._available_towns[self.rng.randrange(len(self._available_towns))]
+                                          if self._available_towns else self.cfg.default_origin_town)
+                self._place_agent(ag)
+                new.append(ag)
+            self.agents.extend(new)
+            logger.info("介入：新增 %d 台車（來自 %s）", n, town or "各區")
+            return f"已新增 {n} 台車{('（來自' + town + '）') if town else ''}，加入模擬。"
+        return f"未識別的介入動作：{action}"
+
+    def clear_interventions(self) -> str:
+        """清除所有避讓區並讓移動中的車重新規劃（新增的車不移除）。"""
+        if not self._avoid_circles:
+            return "目前沒有作用中的避讓區。"
+        self._avoid_circles = []
+        for a in self.agents:
+            if a.route_status == RouteStatus.MOVING and a.current_node and a.destination_node:
+                p = self._route(a.current_node, a.destination_node, a.routing_strategy())
+                if len(p) > 1:
+                    a.current_path, a.path_index, a.edge_progress = p, 0, 0.0
+        return "已清除避讓區，車輛恢復正常規劃。"
+
+    def snapshot_now(self) -> SimulationState:
+        """不前進、直接產生當前狀態快照（介入後即時更新前端用）。"""
+        cyc = self.scheduler.cycle
+        env = self._environment_summary(cyc)
+        mode_dist, status_dist = metrics.distributions(self._event_agents())
+        return self._snapshot(cyc, env, mode_dist, status_dist)
+
+    def chat_context(self) -> str:
+        """把當前模擬狀態組成精簡文字，供「暫停對話查詢」的 LLM 回答（唯讀）。"""
+        cyc = self.scheduler.cycle
+        env = self._llm_environment(self._environment_summary(cyc))
+        event = self._event_agents()
+        _, status = metrics.distributions(event)
+        hotspots = env.get("congestion_hotspots") or []
+        hs = "、".join(f"{h['town']}（{h['level']}，{h['crowded_roads']}條壅塞）" for h in hotspots) or "無"
+        waiting = sum(1 for a in event if a.waiting_at_signal)
+        return "\n".join([
+            f"模擬時間：第 {cyc} 步（約 {cyc * self.cfg.step_minutes} 分）",
+            f"事件車 {len(event)}：已抵達 {status.get('arrived', 0)}，移動中 {status.get('moving', 0)}",
+            f"背景常態車流：{self._ambient_count} 台（規則式核心，造成路網基礎負載）",
+            f"整體交通（含背景車）：{env.get('overall_traffic') or '未知'}；壅塞趨勢：{env.get('congestion_trend')}",
+            f"壅塞熱點：{hs}",
+            f"目前事件車等紅燈：{waiting} 車",
+            f"事件目的地：{self._dest_town}（{scenarios.active().name}）",
+        ])
+
+    def build_analysis(self) -> dict[str, Any]:
+        """模擬後的交通分析資料（chart-ready）。供前端「分析」面板。空歷史回最小結構。
+
+        兩層（像交通局做大型活動交評）：
+        - **事件層**（只算事件車）：抵達曲線 / 旅行時間 / OD vs 重力期望 / 號誌停等。
+        - **路網層**（事件車＋背景車全部）：總車流量隨時間（事件/背景）、服務水準 LOS、
+          Top-N 瓶頸路段、事件車佔路網負載比（邊際負載）。詳見 docs/AMBIENT_zh-TW.md。
+        """
+        from collections import Counter
+        hist = self.recorder.history
+        cycles = [h["cycle"] for h in hist]
+        cum_arrived = [h.get("arrived", 0) for h in hist]
+        # 每步新抵達數（cumulative 的差分）= 抵達率
+        rate = [cum_arrived[0] if cum_arrived else 0]
+        for i in range(1, len(cum_arrived)):
+            rate.append(max(0, cum_arrived[i] - cum_arrived[i - 1]))
+        sm = self.cfg.step_minutes
+        event = self._event_agents()
+        travel_min = [a.arrival_cycle * sm for a in event if a.arrival_cycle is not None]
+        od_actual = Counter(a.origin_town for a in event if a.origin_town).most_common(12)
+        od_expected = demand_mod.expected_distribution(self.towns, self._stadium_xy,
+                                                       config.DEMAND_CONFIG, 12)
+        total = len(event)
+        arrived = len(travel_min)
+        return {
+            "cycles": cycles,
+            "elapsed_minutes": [h["elapsed_minutes"] for h in hist],
+            "cumulative_arrived": cum_arrived,
+            "arrival_rate": rate,
+            "avg_congestion": [h.get("average_congestion_proxy", 0) for h in hist],
+            "crowded_road_count": [h.get("crowded_road_count", 0) for h in hist],
+            "signal_waiting": [h.get("signal_waiting", 0) for h in hist],
+            "travel_time_minutes": travel_min,
+            "od_actual": od_actual,
+            "od_expected_share": od_expected,
+            "summary": {
+                "total_agents": total,
+                "arrived": arrived,
+                "arrival_pct": round(100.0 * arrived / total, 1) if total else 0.0,
+                "avg_travel_min": round(sum(travel_min) / arrived, 1) if arrived else 0.0,
+                "total_signal_stops": sum(h.get("signal_waiting", 0) for h in hist),
+            },
+            "network": self._network_analysis(hist),
+        }
+
+    @staticmethod
+    def _los_grade(proxy: float) -> str:
+        """壅塞 proxy → 服務水準 LOS 等級（A 最順、F 壅塞；運輸界常用 V/C 對應的概念粗映射）。"""
+        for thr, g in ((0.2, "A"), (0.4, "B"), (0.6, "C"), (0.75, "D"), (0.9, "E")):
+            if proxy < thr:
+                return g
+        return "F"
+
+    def _network_analysis(self, hist: list[dict[str, Any]]) -> dict[str, Any]:
+        """路網層交通評估（事件車＋背景車全部）：總量、LOS、瓶頸、事件邊際負載。"""
+        vol_event = [h.get("event_on_network", 0) for h in hist]
+        vol_ambient = [h.get("ambient_on_network", 0) for h in hist]
+        congs = [h.get("average_congestion_proxy", 0.0) for h in hist]
+        mean_c = round(sum(congs) / len(congs), 4) if congs else 0.0
+        peak_c = round(max(congs), 4) if congs else 0.0
+        # Top-N 瓶頸路段（整趟尖峰壅塞，含背景車負載）
+        rows = sorted(self._road_peak.values(), key=lambda r: r["peak_proxy"], reverse=True)[:10]
+        bottlenecks = [{
+            "name": r["name"],
+            "peak_proxy": r["peak_proxy"],
+            "los": self._los_grade(r["peak_proxy"]),
+            "peak_flow": r["peak_flow"],
+            "capacity": r["capacity"],
+            "vc": round(r["peak_flow"] / r["capacity"], 2) if r["capacity"] else 0.0,
+        } for r in rows]
+        tot_veh = self._event_vehsteps + self._ambient_vehsteps
+        return {
+            "ambient_count": self._ambient_count,
+            "volume_event": vol_event,
+            "volume_ambient": vol_ambient,
+            "los": {"mean_congestion": mean_c, "peak_congestion": peak_c,
+                    "mean_grade": self._los_grade(mean_c), "peak_grade": self._los_grade(peak_c)},
+            "bottlenecks": bottlenecks,
+            "event_load_share": round(100.0 * self._event_vehsteps / tot_veh, 1) if tot_veh else 0.0,
+            "ambient_load_share": round(100.0 * self._ambient_vehsteps / tot_veh, 1) if tot_veh else 0.0,
+        }
+
+    def _llm_init_info(self) -> dict[str, Any]:
+        """給前端模型選擇器的初始資料：目前後端/模型 + vLLM 候選登錄表。"""
+        try:
+            from llm_server import llm_config, model_registry
+            return {
+                "backend": llm_config.LLM_BACKEND,
+                "current_model": llm_config.current_model(),
+                "vllm_models": model_registry.VLLM_MODELS,
+            }
+        except ImportError:
+            return {"backend": "ollama", "current_model": "", "vllm_models": []}
 
     def _load_agent_profiles(self) -> dict[str, Any]:
         """回傳 {name: {identity, traits}} 供前端 inspect（以 identity.name 對應 profile_name）。

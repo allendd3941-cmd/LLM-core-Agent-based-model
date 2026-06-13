@@ -23,6 +23,7 @@ class Town:
     town_eng: str = ""
     county_id: str = ""
     county_code: str = ""
+    population: float = 0.0             # 人口（供重力模型需求生成加權；0＝無資料）
 
     # 公尺投影座標（EPSG:3826）下的幾何與形心；距離/點落區判斷皆用此座標系。
     geometry_metric: BaseGeometry | None = None

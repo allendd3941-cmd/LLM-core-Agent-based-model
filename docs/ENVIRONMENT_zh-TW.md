@@ -8,7 +8,8 @@
 - `src/llm_abm_simulator/domain/agent.py`（`build_environment_payload` 組裝、質性標籤常數與 helper）
 - `src/llm_abm_simulator/config.py` 的 `PerceptionContextConfig`（可調參數）
 - `config/simulation.toml` 的 `[perception_context]`（使用者調整入口）
-- `src/llm_server/prompts/perception_prompt.txt` / `decision_making_prompt.txt`（LLM 端說明與決策提示）
+- `src/llm_server/perception.py`（**確定性模板**：把結構化環境組成感知文字，不再呼叫 LLM）
+- `src/llm_server/prompts/decision_making_prompt.txt`（decision LLM 端說明與決策提示）
 
 ---
 
@@ -128,7 +129,7 @@ speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩�
   `congestion_trend / congestion_hotspots`。
 - 送 LLM：`agent.build_environment_payload()` 組裝每車質性環境；全域環境先經
   `engine._llm_environment()` 瘦身成質性版才放進 `_build_step_payload`（裸統計留給 recorder/前端）。
-  perception → decision 兩個 prompt 已同步更新欄位說明與決策提示。
+  `perception.py` 確定性把這些欄位組成感知文字（不呼叫 LLM），再交給 `decision_making` 的 prompt。
 - **確定性**：全為規則運算，不含隨機、不呼叫 LLM，維持「同 seed → 同軌跡」。
 - **與實際路徑選擇的關係（重要）**：本文件的環境資訊只影響 **LLM 選哪個 active_mode**。
   真正的改道仍由 `simulation/engine.py` 的「踩到壅塞路才重算」（`is_crowded`）觸發、由

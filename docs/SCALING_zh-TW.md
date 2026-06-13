@@ -14,7 +14,9 @@
 ## 1. 後端 adapter（✅ 已實作）
 
 `llm_server/llm_client.py` 把「怎麼把 prompt 送出去」集中成單一入口 `generate()`，
-4 個呼叫點（perception / decision_making / agent_profile / memory_summary）共用，**prompt 內容不變**。
+3 個 LLM 呼叫點（decision_making / agent_profile / memory_summary）共用。
+> 註：`perception` 已改為**確定性模板**（不再呼叫 LLM），故每批只剩 **decision_making** 一次 LLM 呼叫。
+> `generate()` 另支援 `fmt`（結構化輸出 JSON schema：Ollama `format` / vLLM `guided_json`）。詳見 `docs/CHANGES_LLM_PIPELINE_zh-TW.md`。
 
 | 後端 | 端點 | 用途 |
 |---|---|---|
@@ -58,8 +60,9 @@ uv run --python .vllm-env vllm serve <HF模型> \
 | 順暢巡航 / 已抵達 | ❌ |
 
 - **cooldown / 遲滯**：同車觸發一次後 `cooldown_steps` 步內或同一壅塞 episode 內不重複觸發（避免卡長龍狂叫）。
-- **初始 mode = 規則式預設**（mock）：開場不對 1000 台一次決策；LLM 在第一次觸發才介入。
-- **mock 模式不變**：mock 便宜且確定性，維持「每步決策」；觸發機制只套用在 LLM 模式。
+- **初始 mode = 規則式核心預設**：開場不對 1000 台一次決策；LLM 在第一次觸發才介入。觸發時順手用 LLM 重寫該車記憶 summary（見 `docs/MEMORY_zh-TW.md`）。
+- **規則式核心不變**：規則式便宜且確定性，維持「每步決策」；事件觸發機制只套用在 LLM 核心。
+- **背景常態車流（ambient）**：一律規則式核心、每步決策、不吃 LLM、不存記憶；不進事件觸發、不算事件 KPI（只造成路網層負載）。見 `docs/AMBIENT_zh-TW.md`。
 
 > 待你確認：對「整趟都沒遇到壅塞」的車，LLM 要不要至少決策一次/週期性決策？見文末。
 
@@ -88,10 +91,17 @@ engine.step()：
 ```toml
 [scaling]
 cooldown_steps = 5      # 同車觸發後幾步內不重複觸發
-batch_size = 30         # B：每批最多幾個 agent（吃 context 預算）
+batch_size = 30         # B：每批最多幾個 agent（**上限**；實際會被 [llm_budget] 的 token 預算再壓低）
 concurrency = 4         # C：同時並行幾批（搭配後端真並行上限）
+
+[llm_budget]            # 依 token 預算動態切批，保證 decision prompt 不超過 max_model_len
+max_model_len = 8192    # 對齊 vLLM --max-model-len
+reserve_output_tokens = 1024
+prompt_overhead_tokens = 800
+chars_per_token = 2.0   # 字元→token 粗估比；用 `python -m llm_abm_simulator.calibrate` 量更準
 ```
 （後端連線 `LLM_BACKEND` / `VLLM_URL` 在 `.env`；門檻沿用 `[perception]` 的 `crowded_road_threshold`、`[memory]` 的 `feel_congested_proxy`。）
+> 實際每批量＝`min([scaling].batch_size, 由 [llm_budget] 反推的安全批量)`，引擎每步 INFO 日誌會印出採用值。
 
 ---
 
@@ -106,7 +116,7 @@ concurrency = 4         # C：同時並行幾批（搭配後端真並行上限�
 
 > **實作備註**：
 > - **init persona 指派**改成確定性（`profile_pool.assign_to_agents`，agent i ← pool[i]），
->   開場不呼叫 LLM 決策；初始 active_mode 用規則式（mock）。Ollama 不可用時 fallback mock 人物。
+>   開場不呼叫 LLM 決策；初始 active_mode 用規則式核心。Ollama 不可用時 fallback 規則式人物指派。
 > - **批次決策**只送該批 agent 的 persona（`profile_pool.personas_json`），與 agents_status 對齊。
 > - **安全開關** `[scaling].event_triggered_decisions=false` 可一鍵退回「每步決策全部」舊行為。
 > - **已知小限制**：並行批次同時寫 `output/*_output_N.txt` 時，pipeline 內的全域 `count` 有競爭，

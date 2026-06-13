@@ -1,8 +1,10 @@
-"""mock_policy.py — 確定性 mock 決策（無需 LLM）。
+"""mock_policy.py — 規則式（rule-based）決策核心（無需 LLM）。
 
-提供 demo 預設的即時決策；同一個 seed 必產生相同結果（可重現）。
-規則沿用既有 simulation_web mock 的精神，但所有隨機都走注入的 RNG。
-init 階段為每個 agent 指派名稱/車種/起點/初始 mode；step 階段依壅塞與距離選 active_mode。
+這是兩個可選決策核心之一（另一個是 LLM 認知核心，見 llm_adapter.py；登錄於 registry.py）。
+提供 demo 預設的即時決策，並作為 paper 的對照基線（baseline）；同一個 seed 必產生相同結果（可重現）。
+背景常態車流（ambient）也一律由本核心驅動（不吃 LLM、不存記憶）。
+所有隨機都走注入的 RNG。init 階段指派名稱/車種/起點/初始 mode；step 階段依壅塞與距離選 active_mode。
+核心 key（``name``）為 ``"rule"``，會成為 engine.last_decision_source 並下發前端顯示。
 """
 
 from __future__ import annotations
@@ -23,9 +25,9 @@ _NAME_POOL = (
 
 
 class MockDecisionPolicy:
-    """規則式決策來源。"""
+    """規則式（rule-based）決策來源。"""
 
-    name = "mock"
+    name = "rule"
 
     def __init__(self, cfg: SimulationConfig, rng: random.Random) -> None:
         self.cfg = cfg

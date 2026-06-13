@@ -97,11 +97,13 @@ def load_signal_system(cfg: config.SignalConfig | None = None) -> SignalSystem:
     cfg = cfg or config.SIGNAL_CONFIG
     if not cfg.enabled:
         return SignalSystem({}, cfg.cycle_s, cfg.yellow_s, enabled=False)
-    if not SIGNALS_JSON.exists():
-        logger.info("找不到 %s，號誌系統停用（行為同無號誌）。可執行 build_signals 產生。", SIGNALS_JSON)
+    from .. import scenarios
+    path = scenarios.active().signals_json
+    if not path.exists():
+        logger.info("找不到 %s，號誌系統停用（行為同無號誌）。可執行 build_signals 產生。", path)
         return SignalSystem({}, cfg.cycle_s, cfg.yellow_s, enabled=False)
     try:
-        data = json.loads(SIGNALS_JSON.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("號誌 artifact 載入失敗（%s），停用號誌系統", e)
         return SignalSystem({}, cfg.cycle_s, cfg.yellow_s, enabled=False)

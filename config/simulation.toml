@@ -14,7 +14,7 @@
 
 # ----- 模擬時間 -----
 [time]
-max_steps = 36          # 總週期數（GAML max_steps）
+max_steps = 60          # 總週期數（GAML max_steps）
 step_minutes = 1        # 每週期代表幾分鐘（GAML step_minutes）
 
 # ----- agent 規模與起訖 -----
@@ -27,7 +27,7 @@ county_name = "臺南市"
 # ----- 感知 / 移動 / 抵達 -----
 [perception]
 perception_radius_m = 300.0             # 感知半徑（公尺）
-arrival_distance_threshold_m = 0     # 抵達判定容差（公尺）
+arrival_distance_threshold_m = 100     # 抵達判定容差（公尺）
 crowded_speed_factor = 0.55             # 壅塞時速度乘數（越小降越多）
 missing_road_speed_cap_kmh = 60.0       # 無速限資料路段的速度上限
 crowded_road_threshold = 0.3            # congestion_proxy ≥ 此值視為壅塞 / 觸發重算路徑
@@ -109,14 +109,17 @@ flow_weight_multiplier = 2.0             # flow 對動態權重的放大係數
 road_flow_high_threshold = 8             # 視覺化：紅色門檻
 road_flow_medium_threshold = 3           # 視覺化：橘色門檻
 
-# ----- LLM 決策來源 -----
-# LLM 決策一律在本進程直呼 llm_server pipeline（run_perception / run_decision_making）；
-# 不經 server.py，不需另開 port。仍需 Ollama 服務（perception/decision 內部會連）。
+# ----- 決策核心（事件車）-----
+# 兩個可選決策核心（前端可切換；登錄於 decisions/registry.py）：
+#   規則式（rule）：確定性啟發式核心，零 LLM 成本、作對照基線。
+#   LLM 認知核心（llm）：本進程直呼 llm_server pipeline（run_perception / run_decision_making），需 Ollama/vLLM。
+# 注意：背景常態車流（[ambient]）一律走規則式核心，不受此設定影響。
 [llm]
-use_llm = false              # 預設 mock；前端可切換
+use_llm = false              # false＝規則式核心（預設）；true＝LLM 核心；前端可切換
 
-# ----- 旅次記憶（STM 上一步 / LTM 壓縮印象）-----
-# 把每步的量化感知轉成「人類印象」質性標籤時用的門檻。詳見 docs/MEMORY_zh-TW.md。
+# ----- 旅次記憶（單一 memory；不再分長短期）-----
+# 記憶已合併為單一 memory（1 step=1 分鐘，長短期區分無意義）。這裡是把每步量化感知轉成
+# 「人類印象」質性標籤時用的門檻。詳見 docs/MEMORY_zh-TW.md。
 # 標籤文字（順暢/普通/壅塞…）是設計常數、與 prompt 語意綁定，定義在 domain/agent.py。
 [memory]
 feel_congested_proxy = 0.6   # 當步 congestion_proxy ≥ 此值（或被判定壅塞）→「壅塞」
@@ -125,7 +128,7 @@ moved_stalled_m = 50.0       # 每步移動 < 此值 →「停滯」
 moved_slow_m = 200.0         # 每步移動 < 此值 →「緩慢」；否則「前進中」
 smoothness_rough_proxy = 0.6 # 整趟平均 congestion_proxy ≥ 此值 →「不順」
 smoothness_mid_proxy = 0.3   # ≥ 此值 →「中等」；否則「順暢」
-congested_spots_max = 5      # LTM 中最多保留幾個塞過的地點
+congested_spots_max = 5      # 記憶中最多保留幾個塞過的地點
 distance_decimals = 1        # remaining 距離顯示小數位數
 
 # ----- 送 LLM 的環境感知（全域熱點 / 每車前方路況）-----
@@ -137,19 +140,20 @@ lookahead_distance_m = 500  # 每車 road_ahead 沿路徑往前看的距離（�
 speed_free_ratio = 0.8       # speed/速限 ≥ 此值 →「自由流」
 speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩行」
 
-# ----- 長期記憶 trip_summary 的 LLM 摘要 -----
-# 關閉 → 用確定性模板（現狀）；開啟 → 由 gemma 等小模型批次摘要。詳見 docs/MEMORY_zh-TW.md。
-# 失敗一律 fallback 回模板，不中斷。摘要不影響模擬物理（同 seed 同軌跡仍成立）。
+# ----- 單一 memory 的 LLM 摘要 -----
+# 記憶摘要（summary）的時機已固定為「事件車重新決策時」由 LLM 重寫一次（見 engine._summarize_memory）：
+#   規則式核心 → summary 用確定性模板每步重算；
+#   LLM 核心   → summary 在該車重決策時由 LLM 重寫（記憶在做決定的當下最新、也省 LLM），其餘沿用。
+# 失敗一律 fallback 回模板，不中斷。摘要不影響模擬物理（同 seed 同軌跡仍成立）。詳見 docs/MEMORY_zh-TW.md。
+# （已移除 use_llm_summary / summary_every_n_steps：摘要時機改為「重決策時」，不再每 N 步。）
 [summary]
-use_llm_summary = true         # 開關
-summary_model = "llama3.1:8b"    # 摘要模型 tag（請對齊 `ollama list`，可能是 gemma3n:e2b）
-summary_every_n_steps = 2       # 每幾步重算；抵達時也會補算
+summary_model = "llama3.1:8b"    # 後備摘要模型 tag（整套 LLM 一般共用前端所選模型；取不到才用這個）
 
 # ----- agent persona 池 -----
 # persona 生成一次、存成穩定池檔；調整 agent 數只是「取池裡前 n 個」，不會一直重生/覆寫。
 # agent 數超過 pool_size 才自動補生；要整批換人用前端「重新生成人物」按鈕。
 [profile]
-pool_size = 100               # persona 池目標大小
+pool_size = 20000               # persona 池目標大小
 
 # ----- 規模化（LLM 決策的事件觸發 + 並行批次）-----
 # 純事件觸發：LLM 模式下只在踩到壅塞/前方塞時才重決 active_mode；順暢的車維持規則式初始 mode。
@@ -157,8 +161,40 @@ pool_size = 100               # persona 池目標大小
 [scaling]
 event_triggered_decisions = true   # 關閉＝退回「每步對全部 agent 決策」舊行為
 cooldown_steps = 5                 # 同車觸發後幾步內不重複觸發
-batch_size = 30                    # 每批最多幾個 agent
+batch_size = 30                    # 每批最多幾個 agent（上限；實際會被 [llm_budget] 的 token 預算再壓低）
 concurrency = 4                    # 同時並行幾批
+
+# ----- LLM token 預算（依預算動態切批，避免 prompt 溢位 vLLM context）-----
+# 每批 decision prompt ≈ prompt_overhead + batch×(每 agent status+persona) + 輸出。
+# 引擎據此反推「安全 batch」（不超過 [scaling].batch_size），讓 prompt 不超過 max_model_len。
+# 用 `python -m llm_abm_simulator.calibrate` 量你的實際 token 並取得建議值。詳見 docs/CHANGES_LLM_PIPELINE_zh-TW.md。
+[llm_budget]
+max_model_len = 8192          # 對齊 vLLM --max-model-len：單次請求 prompt+輸出 token 上限
+reserve_output_tokens = 1024  # 為輸出保留的 token
+prompt_overhead_tokens = 800  # 模板+全域等固定開銷估計（token）
+chars_per_token = 2.0         # 中英混 JSON「字元→token」粗估比（保守）
+
+# ----- 事件需求生成（出生地由重力模型依人口+距離衰減分配）-----
+# 生產約束重力模型：T_i ∝ 人口_i × f(到場館距離)。取代「由 persona residential_location 決定出生地」。
+# 人口來源：data/gis/town_population.csv。enabled=false 或無人口資料 → 回退既有出生地指派。
+# beta 越大越集中在近場館的區；前端之後會做成 slider。詳見 docs/DEMAND_zh-TW.md。
+[demand]
+enabled = true       # 是否用重力模型決定出生地
+beta = 0.08          # 距離衰減係數（exp(−beta·d_km)）
+decay = "exp"        # "exp" 指數 / "power" 冪次（d_km^(−beta)）
+min_distance_km = 0.5  # 距離下限，避免場館同區距離→0 權重爆掉
+
+# ----- 背景常態交通流（ambient）-----
+# 在「去事件地點的事件車流」之外，注入不指定事件終點的常態背景車，讓路網有真實基礎負載
+# （事件車感知到的壅塞才有意義）。起訖以雙邊重力 OD（鄉鎮對；起點∝人口、終點∝人口×距離衰減，
+# 沿用 [demand].beta/decay）抽樣，一律走規則式核心、不存記憶，抵達後換新 OD 重生 → 穩態背景負載。
+# 最終分析會把背景＋事件車一起納入「路網層」交評。前端 slider 可即時調整數量（0＝關閉）。
+# 無人口資料（data/gis/town_population.csv 全 0）→ 自動停用。詳見 docs/AMBIENT_zh-TW.md。
+[ambient]
+enabled = true       # 是否注入背景常態車流
+count = 40           # 穩態背景車數（前端 slider 可在 0..max_count 覆寫）；初始化要為每台算路徑，越大開場越久
+respawn = true       # 抵達後以新 OD 重生，維持穩態（false＝抵達即停）
+max_count = 600      # 前端/介入可設的背景車上限（保護效能；數百台時開場/重設較久）
 
 # ----- 可重現性 -----
 [reproducibility]

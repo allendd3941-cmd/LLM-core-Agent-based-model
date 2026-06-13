@@ -38,6 +38,7 @@
         case "init":
           TrafficMap.setInit(msg);
           TrafficUI.applyInitConfig(msg.config);
+          TrafficUI.setScenarios(msg.scenario);
           TrafficUI.setProfiles(msg.agent_profiles || {});
           TrafficUI.refreshDecisionSteps();
           TrafficCharts.reset();
@@ -48,6 +49,13 @@
           TrafficMap.updateSignalPhase((msg.elapsed_minutes || 0) * 60);
           TrafficUI.updateStats(msg);
           TrafficCharts.update(msg);
+          break;
+        case "analysis":
+          TrafficCharts.renderAnalysis(msg);
+          TrafficUI.activateTab("analysis");
+          break;
+        case "chat":
+          TrafficUI.appendChat("bot", msg.text);
           break;
         case "status":
           TrafficUI.toast(msg.message);

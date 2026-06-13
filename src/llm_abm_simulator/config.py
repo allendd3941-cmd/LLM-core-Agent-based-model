@@ -35,6 +35,7 @@ CONFIG_TOML = PROJECT_ROOT / "config" / "simulation.toml"   # 使用者可編輯
 TOWN_SHP = GIS_DIR / "TOWN_MOI_1140318_3826.shp"
 STADIUM_SHP = GIS_DIR / "亞太棒球場_point.shp"
 STUDY_AREA_SHP = GIS_DIR / "亞太棒球場_研究範圍.shp"
+TOWN_POPULATION_CSV = GIS_DIR / "town_population.csv"   # 各區人口（重力模型需求生成；近似值可替換）
 ROAD_GRAPHML = DATA_DIR / "tainan_roads.graphml"   # bundle 的真實 OSM 路網（重現用）
 
 # CRS：TOWN_MOI 與球場 point 皆為 EPSG:3826（TWD97 TM Taiwan，公尺）。
@@ -174,15 +175,16 @@ class PerceptionContextConfig:
 
 @dataclass(frozen=True)
 class SummaryConfig:
-    """長期記憶 trip_summary 的 LLM 摘要設定（對應 TOML ``[summary]``）。
+    """單一旅次記憶 ``summary`` 的 LLM 摘要設定（對應 TOML ``[summary]``）。
 
-    關閉時用 domain/agent.py 的模板生成（確定性）；開啟時由 llm_server/memory_summary.py
-    呼叫 Ollama 上的 summary_model 批次生成。失敗一律 fallback 回模板。詳見 docs/MEMORY_zh-TW.md。
+    記憶已合併為**單一 memory**（不再分長短期；1 step=1 分鐘，長短期區分無意義）。
+    規則式核心：summary 用 domain/agent.py 的確定性模板每步重算。
+    LLM 核心：summary **只在該 agent「重新決策」時**由 llm_server/memory_summary.py 重寫一次
+    （見 engine `_summarize_memory`），其餘時間沿用上次摘要/模板；失敗 fallback 回模板。
+    這裡只保留「取不到前端所選模型時的後備摘要模型」。詳見 docs/MEMORY_zh-TW.md。
     """
 
-    use_llm_summary: bool = False        # 開關：關 → 模板（現狀）；開 → gemma 摘要
-    summary_model: str = "gemma4:e2b"    # 摘要模型 tag（請對齊 `ollama list`）
-    summary_every_n_steps: int = 5       # 每幾步重算一次；抵達時也會補算
+    summary_model: str = "gemma4:e2b"    # 後備摘要模型 tag（整套 LLM 一般共用前端所選模型）
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,53 @@ class ScalingConfig:
     cooldown_steps: int = 5                  # 同車觸發後幾步內不重複觸發（去抖動）
     batch_size: int = 30                     # B：每批最多幾個 agent（吃 context 預算）
     concurrency: int = 4                     # C：同時並行幾批（搭配後端真並行上限）
+
+
+@dataclass(frozen=True)
+class LLMBudgetConfig:
+    """LLM token 預算（對應 TOML ``[llm_budget]``）。用來「依 token 預算動態切批」，避免 prompt 溢位。
+
+    每批 decision prompt ≈ prompt_overhead + batch×(每 agent 約 status+persona tokens) + 輸出。
+    引擎依此反推「安全 batch size」（不超過 [scaling].batch_size 上限），讓 prompt 不超過 max_model_len。
+    對齊 vLLM ``--max-model-len``。詳見 calibrate.py 與 docs/CHANGES_LLM_PIPELINE_zh-TW.md。
+    """
+
+    max_model_len: int = 8192          # 對齊 vLLM --max-model-len：單次請求 prompt+輸出 token 上限
+    reserve_output_tokens: int = 1024  # 為輸出保留的 token（結構化輸出後可估得更準）
+    prompt_overhead_tokens: int = 800  # 模板+全域等固定開銷估計（token）
+    chars_per_token: float = 2.0       # 中英混 JSON 的「字元→token」粗估比（保守；校準可量更準）
+
+
+@dataclass(frozen=True)
+class DemandConfig:
+    """事件需求生成（出生地分配）設定（對應 TOML ``[demand]``）。詳見 mobility/demand.py、docs/DEMAND_zh-TW.md。
+
+    用「生產約束重力模型」把 agent 出生地依各區人口 + 對場館的距離衰減分配（取代由 persona
+    residential_location 決定出生地）。``enabled=False`` 或無人口資料 → 回退到既有出生地指派。
+    """
+
+    enabled: bool = True
+    beta: float = 0.08          # 距離衰減係數（越大越偏好近場館的區）；decay=exp 時用於 exp(−beta·d_km)
+    decay: str = "exp"          # "exp"（指數）或 "power"（冪次 d_km^(−beta)）
+    min_distance_km: float = 0.5  # 距離下限（避免場館同區 d→0 造成權重爆掉）
+
+
+@dataclass(frozen=True)
+class AmbientConfig:
+    """背景常態交通流設定（對應 TOML ``[ambient]``）。詳見 mobility/demand.py、docs/AMBIENT_zh-TW.md。
+
+    在「去事件地點（球場）的事件車流」之外，注入一批**不指定事件終點的常態背景車流**，
+    讓路網有真實的基礎負載（事件車感知到的壅塞才有意義，digital twin 更可信）。
+    背景車：起訖以**雙邊重力模型**（鄉鎮對；起點 ∝ 人口、終點 ∝ 人口×距離衰減）抽樣，
+    一律走**規則式核心**（不吃 LLM、不存記憶），抵達後換新 OD 重生 → 維持穩態背景負載。
+    最終交通分析會把背景＋事件車流一起納入「路網層」評估（像交通局做交評）。
+    無人口資料（population 全 0）→ 自動停用背景車流（fallback）。
+    """
+
+    enabled: bool = True
+    count: int = 40              # 穩態背景車數（前端可調）；初始化要為每台算一次路徑，數量越大開場越久
+    respawn: bool = True         # 抵達後以新 OD 重生，維持穩態（關閉＝抵達即停）
+    max_count: int = 600         # 前端/介入可設的上限（保護效能；數百台時開場/重設會較久）
 
 
 @dataclass(frozen=True)
@@ -329,7 +378,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals", "llm_budget", "demand", "ambient"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -363,10 +412,7 @@ def _build_perception_context(raw: dict[str, Any]) -> PerceptionContextConfig:
 def _build_summary_config(raw: dict[str, Any]) -> SummaryConfig:
     overrides = {k: v for k, v in raw.get("summary", {}).items()
                  if k in {f.name for f in fields(SummaryConfig)}}
-    sc = dataclasses.replace(SummaryConfig(), **overrides)
-    if sc.summary_every_n_steps < 1:
-        raise ValueError("設定檔 [summary].summary_every_n_steps 必須 ≥ 1")
-    return sc
+    return dataclasses.replace(SummaryConfig(), **overrides)
 
 
 def _build_profile_config(raw: dict[str, Any]) -> ProfileConfig:
@@ -385,6 +431,39 @@ def _build_scaling_config(raw: dict[str, Any]) -> ScalingConfig:
     if sc.cooldown_steps < 0 or sc.batch_size < 1 or sc.concurrency < 1:
         raise ValueError("設定檔 [scaling]：cooldown_steps≥0、batch_size≥1、concurrency≥1")
     return sc
+
+
+def _build_demand_config(raw: dict[str, Any]) -> DemandConfig:
+    overrides = {k: v for k, v in raw.get("demand", {}).items()
+                 if k in {f.name for f in fields(DemandConfig)}}
+    d = dataclasses.replace(DemandConfig(), **overrides)
+    if d.decay not in ("exp", "power"):
+        raise ValueError("設定檔 [demand].decay 必須為 'exp' 或 'power'")
+    if d.beta < 0 or d.min_distance_km <= 0:
+        raise ValueError("設定檔 [demand].beta 不可為負、min_distance_km 必須為正")
+    return d
+
+
+def _build_ambient_config(raw: dict[str, Any]) -> AmbientConfig:
+    overrides = {k: v for k, v in raw.get("ambient", {}).items()
+                 if k in {f.name for f in fields(AmbientConfig)}}
+    a = dataclasses.replace(AmbientConfig(), **overrides)
+    if a.count < 0 or a.max_count < 0:
+        raise ValueError("設定檔 [ambient].count / max_count 不可為負")
+    return a
+
+
+def _build_llm_budget_config(raw: dict[str, Any]) -> LLMBudgetConfig:
+    overrides = {k: v for k, v in raw.get("llm_budget", {}).items()
+                 if k in {f.name for f in fields(LLMBudgetConfig)}}
+    b = dataclasses.replace(LLMBudgetConfig(), **overrides)
+    if b.max_model_len <= 0 or b.chars_per_token <= 0:
+        raise ValueError("設定檔 [llm_budget].max_model_len / chars_per_token 必須為正數")
+    if b.reserve_output_tokens < 0 or b.prompt_overhead_tokens < 0:
+        raise ValueError("設定檔 [llm_budget].reserve_output_tokens / prompt_overhead_tokens 不可為負")
+    if b.reserve_output_tokens + b.prompt_overhead_tokens >= b.max_model_len:
+        raise ValueError("設定檔 [llm_budget]：reserve_output_tokens + prompt_overhead_tokens 必須 < max_model_len")
+    return b
 
 
 def _build_signal_config(raw: dict[str, Any]) -> SignalConfig:
@@ -446,6 +525,39 @@ PERCEPTION_CONTEXT = _build_perception_context(_RAW)
 SUMMARY_CONFIG = _build_summary_config(_RAW)
 PROFILE_CONFIG = _build_profile_config(_RAW)
 SCALING_CONFIG = _build_scaling_config(_RAW)
+DEMAND_CONFIG = _build_demand_config(_RAW)
+AMBIENT_CONFIG = _build_ambient_config(_RAW)
+LLM_BUDGET = _build_llm_budget_config(_RAW)
 SIGNAL_CONFIG = _build_signal_config(_RAW)
 HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)
 ACTIVE_MODE_PROFILES = _build_active_mode_profiles(_RAW)
+
+# runtime 可覆寫的 max_model_len（前端選模型時依該模型 context 設定；None＝用 [llm_budget] 值）
+_RUNTIME_MAX_MODEL_LEN: int | None = None
+
+
+def set_runtime_max_model_len(n: int | None) -> None:
+    global _RUNTIME_MAX_MODEL_LEN
+    _RUNTIME_MAX_MODEL_LEN = n
+
+
+def effective_max_model_len() -> int:
+    """token 預算切批用的有效 max_model_len（runtime 覆寫優先，否則 [llm_budget]）。"""
+    return _RUNTIME_MAX_MODEL_LEN or LLM_BUDGET.max_model_len
+
+
+# runtime 可覆寫的背景車數（前端 slider / NL 介入調整；None＝用 [ambient].count）
+_RUNTIME_AMBIENT_COUNT: int | None = None
+
+
+def set_runtime_ambient_count(n: int | None) -> None:
+    global _RUNTIME_AMBIENT_COUNT
+    _RUNTIME_AMBIENT_COUNT = n
+
+
+def effective_ambient_count() -> int:
+    """有效背景車數：停用→0；runtime 覆寫優先，否則 [ambient].count，clamp 到 max_count。"""
+    if not AMBIENT_CONFIG.enabled:
+        return 0
+    n = AMBIENT_CONFIG.count if _RUNTIME_AMBIENT_COUNT is None else _RUNTIME_AMBIENT_COUNT
+    return max(0, min(int(n), AMBIENT_CONFIG.max_count))

@@ -115,6 +115,9 @@ class MetricsRecorder:
             "average_congestion_proxy": env["average_congestion_proxy"],
             "arrived": status_dist.get("arrived", 0),
             "moving": status_dist.get("moving", 0),
+            "signal_waiting": env.get("signal_waiting", 0),
+            "event_on_network": env.get("event_on_network", 0),     # 事件車在網路上的台數（路網層）
+            "ambient_on_network": env.get("ambient_on_network", 0),  # 背景車在網路上的台數（路網層）
             "mode_distribution": mode_dist,
             "status_distribution": status_dist,
         }
