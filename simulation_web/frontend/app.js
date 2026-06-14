@@ -92,6 +92,7 @@
           TrafficUI.applyInitConfig(msg.config);
           TrafficUI.setScenarios(msg.scenario);
           TrafficUI.setProfiles(msg.agent_profiles || {});
+          TrafficUI.resetDecisions();   // 重設清掉決策歷史，不吃上次模擬
           TrafficCharts.reset();
           endBusy();
           TrafficUI.setRunState("idle");
@@ -102,7 +103,7 @@
           TrafficMap.updateAgents(msg.agents);
           TrafficMap.updateSignalPhase((msg.elapsed_minutes || 0) * 60);
           TrafficUI.updateStats(msg);
-          TrafficUI.updateDecisions(msg.decisions, msg.decision_health);
+          TrafficUI.updateDecisions(msg.decisions, msg.decision_health, msg.cycle);
           TrafficCharts.update(msg);
           endBusy();
           TrafficUI.setRunState("running", msg.cycle);

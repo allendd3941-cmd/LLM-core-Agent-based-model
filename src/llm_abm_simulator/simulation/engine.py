@@ -72,6 +72,8 @@ class SimulationEngine:
         self._available_towns: list[str] = []
         self._prev_avg_congestion: float | None = None   # 上一步全市平均壅塞（算 trend 用）
         self._avoid_circles: list[tuple[float, float, float]] = []   # NL 介入：避讓區 (x,y,radius_m)
+        self._egress_declared_cycle: int | None = None   # 散場宣告的週期（None＝尚在進場/停留階段）
+        self._persona_residence: dict[str, str] = {}     # persona name → 居住區（散場 destination=residence 用）
 
         # 背景常態車流（ambient）與「路網層」交通評估累積器
         self._ambient_count: int = 0
@@ -127,6 +129,8 @@ class SimulationEngine:
                                        self.rng, config.DEMAND_CONFIG)
         # 背景常態車流：用雙邊重力 OD 生成不指定事件終點的常態車流（一律規則式、無記憶）。
         self._build_ambient_agents()
+        self._egress_declared_cycle = None          # 散場尚未宣告
+        self._build_persona_residence()             # 散場 destination=residence：name→居住區（一次建表）
         for agent in self.agents:
             self._place_agent(agent)
         self._assign_departures()   # 事件車分批出發（時空需求）；window=0 → 全部 cycle 0 出發
@@ -253,6 +257,8 @@ class SimulationEngine:
         else:
             agent.destination_town = self._dest_town
             dest_node = self._dest_node
+            agent.phase = "ingress"
+            self._assign_home(agent, origin_node)   # 散場目的地（居住地 / 出生地）
 
         agent.current_node = origin_node
         agent.destination_node = dest_node
@@ -266,6 +272,86 @@ class SimulationEngine:
         else:
             agent.route_status = RouteStatus.ARRIVED if path else RouteStatus.ERROR
         self._refresh_agent_perception(agent, pre_move=True)
+
+    # ==================================================================
+    # 散場（egress）：居住地指派 / 階段推進
+    # ==================================================================
+    def _build_persona_residence(self) -> None:
+        """建 persona name → 居住區 對照（散場 destination="residence" 用）。
+        讀 persona 池的 ``identity.residential_location``，正規化到實際行政區；對不到的略過
+        （之後改用人口加權後備）。destination="origin" 時不需要、直接略過。"""
+        self._persona_residence = {}
+        if config.EGRESS_CONFIG.destination != "residence":
+            return
+        from ..decisions import profile_pool, response_parser
+        towns = self._available_towns
+        for p in profile_pool.load_pool():
+            ident = p.get("identity") or {}
+            name = str(ident.get("name") or "").strip()
+            res = ident.get("residential_location")
+            if not name or res is None:
+                continue
+            t = response_parser.normalize_town_name(res, towns, "")
+            if t:
+                self._persona_residence[name] = t
+
+    def _assign_home(self, agent: VehicleAgent, origin_node: str) -> None:
+        """設定事件車的散場目的地（home_town / home_node）。
+        - destination="origin"：回出生地（來回程，home_node＝出生節點）。
+        - destination="residence"：persona 居住地 → 對不到/規則式車則人口加權抽一個居住區。"""
+        if config.EGRESS_CONFIG.destination == "origin":
+            agent.home_town = agent.origin_town
+            agent.home_node = origin_node
+            return
+        town = self._persona_residence.get(agent.profile_name)
+        if not town:
+            town = demand_mod.sample_residence(self.towns, self.rng) or agent.origin_town
+        agent.home_town = town
+        agent.home_node = (self._node_in_town(town)
+                           if self._town_by_name(town) is not None else origin_node)
+
+    def declare_egress(self) -> str:
+        """宣告散場開始（操作者驅動）：已抵達/停留的事件車將在視窗內依 profile 陸續離場回家。"""
+        if self._egress_declared_cycle is not None:
+            return "散場已宣告，車輛陸續離場中。"
+        self._egress_declared_cycle = self.scheduler.cycle
+        dwell = sum(1 for a in self._event_agents() if a.phase == "dwell")
+        logger.info("宣告散場 @ cycle %d：%d 台停留中車輛將陸續離場", self.scheduler.cycle, dwell)
+        return f"已宣告散場（第 {self.scheduler.cycle} 步）：{dwell} 台已抵達車將陸續離場返家。"
+
+    def _handle_egress(self, cycle: int) -> None:
+        """散場排程 + 啟動：宣告後，停留中的事件車在視窗內依 profile 錯開離場、改往家、重算路徑。"""
+        if self._egress_declared_cycle is None:
+            return
+        eg = config.EGRESS_CONFIG
+        window = max(0, round(eg.window_minutes / max(1, self.cfg.step_minutes)))
+        declared = self._egress_declared_cycle
+        for a in self._event_agents():
+            if a.phase != "dwell":
+                continue
+            if a.egress_cycle is None:                       # 首次：分派錯開的離場週期
+                base = max(declared, a.arrival_cycle if a.arrival_cycle is not None else declared)
+                if window <= 0:
+                    a.egress_cycle = base
+                else:
+                    u = self.rng.random()
+                    if eg.profile == "peak":
+                        u = u * u                            # 一窩蜂：集中在最前面
+                    elif eg.profile == "gradual":
+                        u = 1.0 - (1.0 - u) * (1.0 - u)      # 拖長：偏後段
+                    a.egress_cycle = base + int(round(u * window))
+            if cycle >= a.egress_cycle and a.home_node:      # 到點 → 開始散場
+                path = self._route(a.current_node, a.home_node, a.routing_strategy())
+                if len(path) > 1:
+                    a.begin_egress_leg(cycle)
+                    a.phase = "egress"
+                    a.destination_town = a.home_town
+                    a.destination_node = a.home_node
+                    a.current_path, a.path_index, a.edge_progress = path, 0, 0.0
+                    a.route_status = RouteStatus.MOVING
+                else:                                        # 已在家節點/無路 → 視為返家
+                    a.phase = "home"
+                    a.egress_arrival_cycle = cycle
 
     # ==================================================================
     # 背景常態車流（ambient）
@@ -376,6 +462,7 @@ class SimulationEngine:
         cycle = self.scheduler.advance()
         self._elapsed_seconds = cycle * self.cfg.step_minutes * 60.0  # 號誌相位基準時間
         self._activate_due_departures(cycle)   # 分批出發：到 departure_cycle 的事件車進場
+        self._handle_egress(cycle)             # 散場：宣告後停留車陸續離場回家（改往 home_node）
 
         # 1. 感知快照（用上一步遺留的道路壅塞；尚未進場的車跳過）
         if self.cfg.nearby_mode == "grid":
@@ -410,10 +497,18 @@ class SimulationEngine:
         event_agents = self._event_agents()
         ambient_agents = self._ambient_agents()
         env = self._environment_summary(cycle)
-        # 抵達週期只記一次（供旅行時間分析；只給事件車）
+        # 階段推進（只給事件車）：進場抵達→停留(dwell)；散場抵達→返家(home)。週期各記一次。
         for a in event_agents:
-            if a.route_status == RouteStatus.ARRIVED and a.arrival_cycle is None:
-                a.arrival_cycle = cycle
+            if a.route_status != RouteStatus.ARRIVED:
+                continue
+            if a.phase == "ingress":
+                a.phase = "dwell"
+                if a.arrival_cycle is None:
+                    a.arrival_cycle = cycle
+            elif a.phase == "egress":
+                a.phase = "home"
+                if a.egress_arrival_cycle is None:
+                    a.egress_arrival_cycle = cycle
         env["signal_waiting"] = sum(1 for a in event_agents if a.waiting_at_signal)
         env["event_on_network"] = sum(1 for a in event_agents if a.route_status == RouteStatus.MOVING)
         env["ambient_on_network"] = sum(1 for a in ambient_agents if a.route_status == RouteStatus.MOVING)
@@ -1014,6 +1109,7 @@ class SimulationEngine:
                 summary_source=a.summary_source,
                 decision_reason=a.decision_reason,
                 role=a.role,
+                phase=a.phase,
                 last_decision_cycle=a.last_decision_cycle,
             ))
         # 只送有流量的道路（前端據此即時上色），避免每步送數萬條。
@@ -1040,6 +1136,9 @@ class SimulationEngine:
                 "average_congestion_proxy": env["average_congestion_proxy"],
                 "ambient_count": self._ambient_count,
                 "event_count": len(self.agents) - self._ambient_count,
+                "arrived_event": sum(1 for a in self.agents if a.role == "event" and a.arrival_cycle is not None),
+                "returned_home": sum(1 for a in self.agents if a.role == "event" and a.phase == "home"),
+                "egress_declared": self._egress_declared_cycle is not None,
                 "history": self.recorder.history,
             },
             mode_distribution=mode_dist, status_distribution=status_dist,
@@ -1257,6 +1356,47 @@ class SimulationEngine:
                 "total_signal_stops": sum(h.get("signal_waiting", 0) for h in hist),
             },
             "network": self._network_analysis(hist),
+            "egress": self._egress_analysis(cycles),
+        }
+
+    def _egress_analysis(self, cycles: list[int]) -> dict[str, Any]:
+        """散場層分析（只在已宣告散場時有資料）：疏散曲線 / 每步離場 / 散場旅時 / 散場 OD / 清場時間。"""
+        from collections import Counter
+        event = self._event_agents()
+        sm = self.cfg.step_minutes
+        declared = self._egress_declared_cycle
+        if declared is None or not cycles:
+            return {"enabled": False}
+        home_cycles = [a.egress_arrival_cycle for a in event if a.egress_arrival_cycle is not None]
+        cum_home = [sum(1 for c in home_cycles if c <= cyc) for cyc in cycles]
+        start_counter = Counter(a.egress_start_cycle for a in event if a.egress_start_cycle is not None)
+        departures = [start_counter.get(c, 0) for c in cycles]
+        travel = [(a.egress_arrival_cycle - a.egress_start_cycle) * sm for a in event
+                  if a.egress_arrival_cycle is not None and a.egress_start_cycle is not None]
+        od = Counter(a.home_town for a in event if a.phase in ("egress", "home") and a.home_town).most_common(12)
+        reached = sum(1 for a in event if a.arrival_cycle is not None)
+        returned = len(home_cycles)
+        clearance_min = None
+        if reached:
+            target = 0.9 * reached
+            for cyc, c in zip(cycles, cum_home):
+                if c >= target:
+                    clearance_min = (cyc - declared) * sm
+                    break
+        return {
+            "enabled": True,
+            "declared_cycle": declared,
+            "cumulative_home": cum_home,
+            "departures": departures,
+            "travel_time_minutes": travel,
+            "od": od,
+            "summary": {
+                "reached_stadium": reached,
+                "returned_home": returned,
+                "return_pct": round(100.0 * returned / reached, 1) if reached else 0.0,
+                "avg_egress_travel_min": round(sum(travel) / len(travel), 1) if travel else 0.0,
+                "clearance_min": clearance_min,
+            },
         }
 
     @staticmethod

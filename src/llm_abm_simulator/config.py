@@ -287,6 +287,23 @@ class DepartureConfig:
 
 
 @dataclass(frozen=True)
+class EgressConfig:
+    """散場（egress）疏運評估設定（對應 TOML ``[egress]``）。詳見 docs/EGRESS_zh-TW.md。
+
+    單次模擬分兩階段：進場（origin→球場，現行行為）+ 散場（球場→回家）。**手動觸發**：
+    操作者按「宣告散場」後，已抵達（停留中）的事件車在 ``window_minutes`` 視窗內依 ``profile``
+    錯開離場，回到 ``destination`` 指定的家；非同步、可重現（seeded）。
+    ``destination``：``residence``＝回居住地（persona residential_location 正規化；對不到/規則式車
+    則人口加權抽一個居住區）；``origin``＝回進場出生地（單純來回程）。
+    背景常態車流不分階段。
+    """
+
+    destination: str = "residence"   # residence（回居住地）| origin（回出生地，來回程）
+    window_minutes: int = 5          # 散場錯開視窗（分鐘）：宣告散場後車輛在此視窗內陸續離場
+    profile: str = "peak"            # peak（一窩蜂，最前面密集）| uniform（均勻）| gradual（拖長）
+
+
+@dataclass(frozen=True)
 class SignalConfig:
     """紅綠燈號誌系統設定（對應 TOML ``[signals]``）。詳見 spatial/signals.py。
 
@@ -404,7 +421,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals", "llm_budget", "demand", "ambient", "departure"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals", "llm_budget", "demand", "ambient", "departure", "egress"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -507,6 +524,19 @@ def _build_llm_budget_config(raw: dict[str, Any]) -> LLMBudgetConfig:
     return b
 
 
+def _build_egress_config(raw: dict[str, Any]) -> EgressConfig:
+    overrides = {k: v for k, v in raw.get("egress", {}).items()
+                 if k in {f.name for f in fields(EgressConfig)}}
+    e = dataclasses.replace(EgressConfig(), **overrides)
+    if e.destination not in ("residence", "origin"):
+        raise ValueError("設定檔 [egress].destination 必須為 'residence' 或 'origin'")
+    if e.window_minutes < 0:
+        raise ValueError("設定檔 [egress].window_minutes 不可為負")
+    if e.profile not in ("peak", "uniform", "gradual"):
+        raise ValueError("設定檔 [egress].profile 必須為 'peak' / 'uniform' / 'gradual'")
+    return e
+
+
 def _build_signal_config(raw: dict[str, Any]) -> SignalConfig:
     overrides = {k: v for k, v in raw.get("signals", {}).items()
                  if k in {f.name for f in fields(SignalConfig)}}
@@ -575,6 +605,7 @@ SCALING_CONFIG = _build_scaling_config(_RAW)
 DEMAND_CONFIG = _build_demand_config(_RAW)
 AMBIENT_CONFIG = _build_ambient_config(_RAW)
 DEPARTURE_CONFIG = _build_departure_config(_RAW)
+EGRESS_CONFIG = _build_egress_config(_RAW)
 LLM_BUDGET = _build_llm_budget_config(_RAW)
 SIGNAL_CONFIG = _build_signal_config(_RAW)
 HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)

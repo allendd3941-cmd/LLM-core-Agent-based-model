@@ -150,6 +150,15 @@ class VehicleAgent:
     next_road_id: str = "calculating"
     departure_cycle: int = 0             # 進場（開始移動）的週期；分批出發用，0＝開場即出發
 
+    # === 散場（egress）階段（詳見 docs/EGRESS_zh-TW.md）===
+    # phase：ingress（往球場）→ dwell（抵達球場停留）→ egress（往家）→ home（已返家）。
+    phase: str = "ingress"
+    home_node: str | None = None         # 散場目的地節點（出生時設：居住地或出生地）
+    home_town: str = ""                  # 散場目的地行政區（顯示/分析用）
+    egress_cycle: int | None = None      # 排定的離場週期（宣告散場後錯開分派）
+    egress_start_cycle: int | None = None  # 散場那一腿開始移動的週期（量散場旅時）
+    egress_arrival_cycle: int | None = None  # 散場抵達家的週期
+
     # === 路網位置（公尺座標 EPSG:3826）===
     x: float = 0.0
     y: float = 0.0
@@ -436,6 +445,19 @@ class VehicleAgent:
             "mode_switches": self._mode_switch_count,
             "overall_smoothness": _smoothness_label(avg_proxy, cfg),
         }
+
+    def begin_egress_leg(self, cycle: int) -> None:
+        """切到散場時重置記憶累積器，讓散場那一腿的旅次摘要/旅時獨立量測（新的一段旅程）。"""
+        self._start_cycle = None
+        self._prev_distance = None
+        self._prev_mode = ""
+        self._mode_switch_count = 0
+        self._congested_spots = []
+        self._smoothness_sum = 0.0
+        self._smoothness_n = 0
+        self.memory = {}
+        self.summary_source = "template"
+        self.egress_start_cycle = cycle
 
     def memory_facts(self) -> dict[str, Any]:
         """給 LLM 摘要器的結構化事實（只給事實，不含模板那句）。"""

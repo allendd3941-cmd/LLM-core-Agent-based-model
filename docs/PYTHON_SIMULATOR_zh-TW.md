@@ -36,6 +36,7 @@
 | `[demand]` | 事件車出生地由**重力模型**依人口+距離衰減分配（`beta`/`decay`；人口來源 `data/gis/town_population.csv`，見 `docs/DEMAND_zh-TW.md`）|
 | `[ambient]` | 背景常態交通流（`enabled`/`count`/`respawn`；雙邊重力 OD、規則式、納入路網層交評，見 `docs/AMBIENT_zh-TW.md`）|
 | `[departure]` | 事件車分批出發（`window_minutes`/`profile`；時空需求，`window_minutes=0`＝全部同時出發＝舊行為，見 `docs/DEMO_FEATURES_zh-TW.md` §17）|
+| `[egress]` | 散場疏運評估（`destination` residence/origin、`window_minutes`、`profile` peak/uniform/gradual；前端「宣告散場」手動觸發，見 `docs/EGRESS_zh-TW.md`）|
 | `[signals]` | 紅綠燈號誌停等（`enabled` / `cycle_s` / `yellow_s`；號誌點位由 `data/tainan_signals.json` 提供，見 `spatial/signals.py`）|
 | `[llm_budget]` | LLM token 預算，依此動態切批避免 prompt 溢位（見 `docs/CHANGES_LLM_PIPELINE_zh-TW.md`、`calibrate.py`）|
 | `[ui]` | 前端 slider 範圍（速度 / agent 數 / **週期數 `steps_*` / 每週期分鐘 `step_minutes_options`**）+ 大規模渲染門檻（`render_individual_max` / `agent_min_zoom`）；**同時驅動後端 clamp 與前端 slider** |

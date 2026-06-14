@@ -219,6 +219,16 @@ ESRI 號誌點 snap 到最近路網節點；**方向相位**（bearing mod 180 �
 
 ---
 
+## 11.5 散場（egress）兩階段疏運評估（`docs/EGRESS_zh-TW.md`）
+單次模擬涵蓋**進場 + 散場**兩個尖峰。事件車有 `phase`：ingress→dwell（抵達球場停留）→egress→home（返家）。
+- **手動觸發（event-based）**：前端「宣告散場」→ `engine.declare_egress()`；停留車在 `[egress].window_minutes` 內依
+  `profile`（**peak 一窩蜂**預設）錯開離場，重算路徑往**家**（seeded、可重現）。
+- **散場終點＝居住地**（`destination="residence"`）：LLM persona 的 residential_location 正規化；對不到/規則式車用
+  **`sample_residence`（∝人口）**後備 → 散場 OD ＝人口加權疏散分布。`begin_egress_leg` 重置記憶累積器（獨立量散場旅時）。
+- **散場層分析**（`_egress_analysis`）：疏散曲線、散場旅時分布、返家 OD、**清場時間（到 90% 返家的分鐘數＝頭號指標）**；
+  路網層 LOS/V·C/瓶頸本就含散場車流，可與進場對照。`max_steps` 須涵蓋兩階段。
+- code：`engine._assign_home`/`_handle_egress`/`_egress_analysis`、`agent.phase`、`demand.sample_residence`、`websocket.declare_egress`。
+
 ## 12. 兩層交通分析（交通局視角；`engine.build_analysis`/`_network_analysis`，含公式）
 
 ### ① 事件層（只算 `role=="event"`）

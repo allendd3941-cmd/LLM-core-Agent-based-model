@@ -62,6 +62,9 @@ const TrafficUI = (() => {
     const regen = $("btn-regen-profiles");
     if (regen) regen.onclick = (e) => { markBtnBusy(e.currentTarget); send("regenerate_profiles"); };
 
+    const egbtn = $("btn-egress");
+    if (egbtn) egbtn.onclick = () => send("declare_egress");   // 宣告散場（事件驅動）
+
     const ep = $("btn-edit-prompts");
     if (ep) ep.onclick = openPrompts;
     const pc = $("prompt-close");
@@ -291,14 +294,30 @@ const TrafficUI = (() => {
   }
 
   function updateStats(state) {
+    const m = state.metrics || {};
     $("m-cycle").textContent = `${state.cycle} / ${state.max_steps}`;
     $("m-elapsed").textContent = `${state.elapsed_minutes} 分`;
     $("m-source").textContent = CORE_LABEL[state.decision_source] || state.decision_source;
-    $("m-arrived").textContent = state.status_distribution.arrived || 0;
+    $("m-arrived").textContent = m.arrived_event != null ? m.arrived_event : (state.status_distribution.arrived || 0);
+    $("m-home").textContent = m.returned_home || 0;
     $("m-pending").textContent = (state.status_distribution && state.status_distribution.created) || 0;
-    $("m-ambient").textContent = (state.metrics && state.metrics.ambient_count) || 0;
-    $("m-crowded").textContent = state.metrics.crowded_road_count;
-    $("m-avgcong").textContent = Number(state.metrics.average_congestion_proxy).toFixed(2);
+    $("m-ambient").textContent = m.ambient_count || 0;
+    $("m-crowded").textContent = m.crowded_road_count;
+    $("m-avgcong").textContent = Number(m.average_congestion_proxy).toFixed(2);
+    updatePhase(!!m.egress_declared);
+  }
+
+  // 活動階段（進場 / 散場）+ 宣告散場按鈕狀態
+  function updatePhase(declared) {
+    const pi = $("phase-ingress"), pe = $("phase-egress"), b = $("btn-egress");
+    if (pi) pi.classList.toggle("active", !declared);
+    if (pe) pe.classList.toggle("active", declared);
+    if (b) {
+      b.disabled = declared;
+      b.innerHTML = declared
+        ? '<i class="ti ti-door-exit" aria-hidden="true"></i> 散場進行中'
+        : '<i class="ti ti-door-exit" aria-hidden="true"></i> 宣告散場開始';
+    }
   }
 
   function inspectAgent(a) {
@@ -362,7 +381,8 @@ const TrafficUI = (() => {
   function setProfiles(p) { profiles = p || {}; }
 
   // ---- 決策日誌（即時，走 WebSocket）----
-  function updateDecisions(decisions, health) {
+  // 逐步累積決策歷史（全程保留；reset 由 resetDecisions 清掉，不吃上次模擬）
+  function updateDecisions(decisions, health, cycle) {
     decisions = decisions || [];
     health = health || {};
     const h = $("decision-health");
@@ -373,15 +393,26 @@ const TrafficUI = (() => {
           + ` · fallback <b>${health.fallback || 0}</b>（fallback 多＝LLM 解析有問題）`;
     }
     const box = $("decision-output");
-    if (!box) return;
-    if (!decisions.length) {
-      box.innerHTML = `<span class="muted">${health.source === "rule"
-        ? "規則式核心：無 LLM 決策。" : "本步無事件車重決（無壅塞觸發）。"}</span>`;
-      return;
-    }
-    box.innerHTML = decisions.map((d) =>
-      `<div class="dec-row"><b>${escapeHtml(d.name)}</b> → <span class="dec-mode">${escapeHtml(d.mode)}</span>`
-      + `<p class="dec-reason">${escapeHtml(d.reason || "")}</p></div>`).join("");
+    if (!box || !decisions.length) return;   // 本步無重決 → 保留歷史、不覆蓋
+    if (!box.querySelector(".dec-step")) box.innerHTML = "";   // 首筆：清掉初始 placeholder
+    const block = document.createElement("div");
+    block.className = "dec-step";
+    block.innerHTML =
+      `<div class="dec-step-h">第 ${cycle != null ? cycle : "?"} 步 · 重決 ${decisions.length} 台</div>`
+      + decisions.map((d) =>
+        `<div class="dec-row"><b>${escapeHtml(d.name)}</b> → <span class="dec-mode">${escapeHtml(d.mode)}</span>`
+        + `<p class="dec-reason">${escapeHtml(d.reason || "")}</p></div>`).join("");
+    box.appendChild(block);
+    while (box.children.length > 500) box.removeChild(box.firstChild);  // 安全上限（一場通常幾十步）
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // 重設時清掉決策歷史（避免吃到上次模擬的資料）
+  function resetDecisions() {
+    const box = $("decision-output");
+    if (box) box.innerHTML = `<span class="muted dec-placeholder">尚無決策（LLM 壅塞觸發時記錄，逐步累積）。</span>`;
+    const h = $("decision-health");
+    if (h) h.innerHTML = "";
   }
 
   function escapeHtml(s) {
@@ -591,6 +622,6 @@ const TrafficUI = (() => {
   }
 
   return { bind, applyInitConfig, updateStats, inspectAgent, setProfiles,
-           updateDecisions, toast, setConnected, appendChat, setScenarios, activateTab,
+           updateDecisions, resetDecisions, toast, setConnected, appendChat, setScenarios, activateTab,
            log, setBusyBar, setRunState, clearBtnBusy, expandDock };
 })();

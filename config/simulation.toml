@@ -117,7 +117,7 @@ road_flow_medium_threshold = 3           # 視覺化：橘色門檻
 #   LLM 認知核心（llm）：本進程直呼 llm_server pipeline（run_perception / run_decision_making），需 Ollama/vLLM。
 # 注意：背景常態車流（[ambient]）一律走規則式核心，不受此設定影響。
 [llm]
-use_llm = false              # false＝規則式核心（預設）；true＝LLM 核心；前端可切換
+use_llm = true               # true＝LLM 核心（demo 預設；前端規則式按鈕已暗掉）。規則式仍是 LLM 失敗時的自動 fallback、背景車核心、paper baseline
 
 # ----- 旅次記憶（單一 memory；不再分長短期）-----
 # 記憶已合併為單一 memory（1 step=1 分鐘，長短期區分無意義）。這裡是把每步量化感知轉成
@@ -208,6 +208,15 @@ max_count = 100000      # 前端/介入可設的背景車上限（保護效能�
 [departure]
 window_minutes = 0      # 出發視窗（分鐘）；0＝全部同時出發
 profile = "uniform"     # uniform（均勻）/ front_loaded（早到多）/ peak（接近開賽尖峰多）
+
+# ----- 散場（egress）疏運評估 -----
+# 單次模擬：進場（origin→球場）+ 散場（球場→回家）。手動觸發：前端按「宣告散場」後，
+# 已抵達的事件車在 window_minutes 內依 profile 錯開離場、回 destination 指定的家（seeded、可重現）。
+# 散場分析：疏散曲線、散場旅時、散場 OD、清場時間、進場 vs 散場對照。詳見 docs/EGRESS_zh-TW.md。
+[egress]
+destination = "residence"   # residence（回居住地；persona→對不到/規則式車則人口加權抽）| origin（回出生地，來回程）
+window_minutes = 5          # 宣告散場後的錯開視窗（分鐘）
+profile = "peak"            # peak（一窩蜂，最前面密集，最貼近真實散場洪峰）| uniform | gradual
 
 # ----- 可重現性 -----
 [reproducibility]

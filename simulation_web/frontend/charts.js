@@ -89,12 +89,15 @@ const TrafficCharts = (() => {
     // 隱藏並清掉分析圖（reset 時舊分析不該殘留）
     const card = document.getElementById("analysis-card");
     if (card) card.style.display = "none";
-    [arrivalChart, travelChart, odChart, volumeChart].forEach((c) => { if (c) c.destroy(); });
+    [arrivalChart, travelChart, odChart, volumeChart, egressChart, egressTravelChart, egressOdChart]
+      .forEach((c) => { if (c) c.destroy(); });
     arrivalChart = travelChart = odChart = volumeChart = null;
+    egressChart = egressTravelChart = egressOdChart = null;
   }
 
   // ===== 模擬後交通分析（收到 type:analysis 時呼叫）=====
   let arrivalChart = null, travelChart = null, odChart = null, volumeChart = null;
+  let egressChart = null, egressTravelChart = null, egressOdChart = null;
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
@@ -161,6 +164,48 @@ const TrafficCharts = (() => {
     });
 
     renderNetwork(data.network || {}, labels);
+    renderEgress(data.egress || {}, labels);
+  }
+
+  // ===== 散場層（宣告散場後）=====
+  function renderEgress(eg, labels) {
+    const sum = document.getElementById("egress-summary");
+    if (!eg.enabled) {
+      if (sum) sum.innerHTML = `<div class="row"><span>散場</span><b>尚未宣告（按「宣告散場」後產生）</b></div>`;
+      [egressChart, egressTravelChart, egressOdChart].forEach((c) => { if (c) c.destroy(); });
+      egressChart = egressTravelChart = egressOdChart = null;
+      return;
+    }
+    const s = eg.summary || {};
+    if (sum) sum.innerHTML =
+      `<div class="row"><span>返家率</span><b>${s.returned_home}/${s.reached_stadium}（${s.return_pct}%）</b></div>`
+      + `<div class="row"><span>平均散場旅時</span><b>${s.avg_egress_travel_min} 分</b></div>`
+      + `<div class="row"><span>清場時間（90% 返家）</span><b>${s.clearance_min != null ? s.clearance_min + " 分" : "未達 90%"}</b></div>`;
+    egressChart && egressChart.destroy();
+    egressChart = new Chart(document.getElementById("chart-egress"), {
+      type: "line",
+      data: { labels, datasets: [
+        { label: "累積返家", data: eg.cumulative_home || [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "每步離場", data: eg.departures || [], borderColor: "#FF8A3D", tension: .3, pointRadius: 0, yAxisID: "y1" },
+      ] },
+      options: { ...lineOpts(), scales: { ...lineOpts().scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
+    });
+    const h = histogram(eg.travel_time_minutes || [], 12);
+    egressTravelChart && egressTravelChart.destroy();
+    egressTravelChart = new Chart(document.getElementById("chart-egress-travel"), {
+      type: "bar",
+      data: { labels: h.labels, datasets: [{ label: "agent 數", data: h.counts, backgroundColor: "#FF8A3D" }] },
+      options: { responsive: true, animation: false, plugins: { legend: { display: false } },
+        scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true } } },
+    });
+    const od = eg.od || [];
+    egressOdChart && egressOdChart.destroy();
+    egressOdChart = new Chart(document.getElementById("chart-egress-od"), {
+      type: "bar",
+      data: { labels: od.map((r) => r[0]), datasets: [{ label: "返家數", data: od.map((r) => r[1]), backgroundColor: "#2FD17A" }] },
+      options: { responsive: true, animation: false, plugins: { legend: { display: false } },
+        scales: { x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 60 } }, y: { grid: { color: GRID }, beginAtZero: true } } },
+    });
   }
 
   // ===== 路網層（事件車＋背景車，交通局視角）=====

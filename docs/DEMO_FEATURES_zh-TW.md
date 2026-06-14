@@ -239,3 +239,14 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
   - 重新生成人物 hint → 「重生 persona 原型池」(完整見 `OVERVIEW §3.7`)。
   - 決策日誌 hint → 「LLM 壅塞觸發重決的車與原因 + 解析健康度」(完整見 §16;原始 JSON 仍寫 `output/`)。
   - Prompts 說明移除(功能見 §5)、場景/事件車/週期數等自明 hint 移除。
+
+## 19. 散場（egress）+ 前端再優化（P3+）
+
+- **散場疏運評估**（完整見 `EGRESS_zh-TW.md`）：左面板「活動階段」卡（進場 ▸ 散場 + **宣告散場開始**鈕,
+  `control{action:"declare_egress"}`）;停留車依 `[egress]` 錯開離場回**居住地**;KPI 加「已返家」;
+  分析面板加**③ 散場層**(疏散曲線/散場旅時/返家 OD/**清場時間**)。`charts.renderEgress`、`engine.declare_egress/_handle_egress/_egress_analysis`。
+- **規則式核心暗掉**：demo 預設 LLM(`[llm].use_llm=true`),前端規則式按鈕 `disabled` 變暗;規則式仍是 LLM 失敗 fallback、背景車核心、paper baseline(config 可跑)。
+- **決策日誌歷史化**：改成**逐步累積**(每步「第 N 步 · 重決 X 台」+ 該步重決車),可往上捲看整場;重設清空(不吃上次模擬)。`simulation.js updateDecisions/resetDecisions`(帶 cycle)。
+- **底部面板自適應**：對話/系統日誌/決策日誌內捲區改 flex 撐滿,隨拖動面板高度自適應(不再寫死 max-height)。
+- **地圖色調可開關**：右上小鈕(`ti-adjustments`)開/關色調面板,預設收起。`map.addAppearanceControl`(toggle)。
+- **滾輪縮放絲滑**：`zoomSnap:0` + 加大 `wheelPxPerZoomLevel` → 連續(小數)縮放、平滑。

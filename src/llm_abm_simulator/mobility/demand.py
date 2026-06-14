@@ -171,6 +171,22 @@ def sample_dest_town(towns: list["Town"], origin_xy: tuple[float, float],
     return pops[_weighted_index(cum, acc, rng)].town_name
 
 
+def sample_residence(towns: list["Town"], rng) -> str | None:
+    """人口加權抽一個居住區（∝ population，與距離無關）。散場目的地（egress）的後備用：
+    persona 對不到行政區、或規則式車（無 persona）時,以此給一個合理的居住地。無人口資料回 None。"""
+    pops = [t for t in towns if t.population > 0]
+    if not pops:
+        return None
+    cum: list[float] = []
+    acc = 0.0
+    for t in pops:
+        acc += t.population
+        cum.append(acc)
+    if acc <= 0:
+        return None
+    return pops[_weighted_index(cum, acc, rng)].town_name
+
+
 def expected_distribution(towns: list["Town"], venue_xy: tuple[float, float],
                           cfg: "DemandConfig", top_k: int = 10) -> list[tuple[str, float]]:
     """回傳各區的期望來客占比（給前端/分析顯示），降冪取 top_k。無資料回 []。"""

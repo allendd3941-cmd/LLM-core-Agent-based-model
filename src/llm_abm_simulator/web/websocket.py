@@ -124,6 +124,11 @@ class SimulationSession:
             await self._regenerate_profiles()
         elif action == "set_scenario":
             await self._set_scenario(str(value or ""))
+        elif action == "declare_egress":
+            msg = await asyncio.to_thread(self.engine.declare_egress)
+            await self.status(msg)
+            if self.engine.is_initialized:
+                await self.send(self.engine.snapshot_now().to_message())
         else:
             logger.warning("未知控制指令: %s", action)
 

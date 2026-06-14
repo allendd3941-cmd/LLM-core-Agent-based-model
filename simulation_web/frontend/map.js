@@ -57,19 +57,21 @@ const TrafficMap = (() => {
     };
   }
 
-  // ---- 地圖色調微調控制（CSS filter 套在底圖圖磚層）----
+  // ---- 地圖色調微調控制（可開關；CSS filter 套在底圖圖磚層）----
   function addAppearanceControl() {
-    const tilecss = () => {};
     const Ctrl = L.Control.extend({
       options: { position: "topright" },
       onAdd() {
         const div = L.DomUtil.create("div", "map-appearance");
         div.innerHTML =
-          `<div class="ma-title"><i class="ti ti-adjustments" aria-hidden="true"></i> 地圖色調</div>`
+          `<button class="ma-toggle" id="ma-toggle" title="地圖色調" aria-label="地圖色調"><i class="ti ti-adjustments" aria-hidden="true"></i></button>`
+          + `<div class="ma-body" id="ma-body">`
+          + `<div class="ma-title"><i class="ti ti-adjustments" aria-hidden="true"></i> 地圖色調</div>`
           + `<label>亮度 <span id="ma-b-v">100%</span></label><input id="ma-bright" type="range" min="40" max="160" value="100">`
           + `<label>對比 <span id="ma-c-v">100%</span></label><input id="ma-contrast" type="range" min="40" max="160" value="100">`
           + `<label>飽和 <span id="ma-s-v">100%</span></label><input id="ma-sat" type="range" min="0" max="200" value="100">`
-          + `<button class="ma-reset" id="ma-reset">還原</button>`;
+          + `<button class="ma-reset" id="ma-reset">還原</button>`
+          + `</div>`;
         L.DomEvent.disableClickPropagation(div);
         L.DomEvent.disableScrollPropagation(div);
         setTimeout(() => bindAppearance(div), 0);
@@ -80,6 +82,10 @@ const TrafficMap = (() => {
   }
 
   function bindAppearance(div) {
+    const toggle = div.querySelector("#ma-toggle");
+    const body = div.querySelector("#ma-body");
+    body.style.display = "none";                       // 預設收起
+    toggle.onclick = () => { body.style.display = body.style.display === "none" ? "block" : "none"; };
     const b = div.querySelector("#ma-bright");
     const c = div.querySelector("#ma-contrast");
     const s = div.querySelector("#ma-sat");
@@ -96,7 +102,11 @@ const TrafficMap = (() => {
 
   function init(onSelect) {
     onAgentSelect = onSelect;
-    map = L.map("map", { zoomControl: true, preferCanvas: true }).setView([23.06, 120.23], 12);
+    // zoomSnap:0 → 允許小數縮放層級;放大 wheelPxPerZoomLevel → 滾輪連續、絲滑(不再一格一格跳)
+    map = L.map("map", {
+      zoomControl: true, preferCanvas: true,
+      zoomSnap: 0, zoomDelta: 0.5, wheelDebounceTime: 20, wheelPxPerZoomLevel: 140,
+    }).setView([23.06, 120.23], 12);
     const baseLayers = buildBaseLayers();
     baseLayers["暗色（CARTO Dark）"].addTo(map);     // 預設底圖
     L.control.layers(baseLayers, null, { position: "topright" }).addTo(map);

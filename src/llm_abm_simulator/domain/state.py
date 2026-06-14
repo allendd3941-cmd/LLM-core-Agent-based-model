@@ -34,6 +34,7 @@ class AgentSnapshot:
     summary_source: str = "template"  # summary 來源："template" | "llm"
     decision_reason: str = ""       # 本步選擇此 active_mode 的原因（前端顯示）
     role: str = "event"             # "event"（去事件地點）| "ambient"（背景常態車流）
+    phase: str = "ingress"          # 事件車階段：ingress（往球場）/dwell（停留）/egress（往家）/home（已返家）
     last_decision_cycle: int | None = None  # 上次重新決策的週期（inspect 顯示）
 
     def to_dict(self) -> dict[str, Any]:

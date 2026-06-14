@@ -55,6 +55,17 @@
   <main class="layout" id="layout">
     <!-- ── 左：控制面板 ── -->
     <aside class="panel panel-left">
+      <section class="card phase-card">
+        <h2><i class="ti ti-calendar-event" aria-hidden="true"></i> 活動階段</h2>
+        <div class="phase-flow">
+          <span class="phase-step active" id="phase-ingress"><i class="ti ti-building-stadium" aria-hidden="true"></i> 進場</span>
+          <i class="ti ti-arrow-right phase-arrow" aria-hidden="true"></i>
+          <span class="phase-step" id="phase-egress"><i class="ti ti-home" aria-hidden="true"></i> 散場</span>
+        </div>
+        <button id="btn-egress" class="btn btn-block btn-go"><i class="ti ti-door-exit" aria-hidden="true"></i> 宣告散場開始</button>
+        <p class="hint">事件車抵達球場後，按此宣告「比賽結束」→ 車輛陸續離場返家。</p>
+      </section>
+
       <section class="card">
         <h2><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i> 模擬設定</h2>
 
@@ -97,10 +108,10 @@
       <section class="card">
         <h2><i class="ti ti-brain" aria-hidden="true"></i> 決策核心</h2>
         <div class="seg" role="group" aria-label="決策核心">
-          <button id="mode-mock" class="seg-btn active"><i class="ti ti-settings-2" aria-hidden="true"></i> 規則式</button>
-          <button id="mode-llm" class="seg-btn"><i class="ti ti-sparkles" aria-hidden="true"></i> LLM</button>
+          <button id="mode-mock" class="seg-btn" disabled title="demo 預設 LLM；規則式為內部 fallback / paper baseline"><i class="ti ti-settings-2" aria-hidden="true"></i> 規則式</button>
+          <button id="mode-llm" class="seg-btn active"><i class="ti ti-sparkles" aria-hidden="true"></i> LLM</button>
         </div>
-        <p class="hint" id="mode-hint">規則式：確定性基線。LLM：依人格與感知決策。</p>
+        <p class="hint" id="mode-hint">LLM：依人格與感知決策（demo 預設）。規則式為內部 fallback／對照基線。</p>
 
         <div class="llm-only">
           <label class="field">
@@ -146,6 +157,7 @@
           <div class="kpi"><span>已歷時</span><b id="m-elapsed">0 分</b></div>
           <div class="kpi"><span>決策核心</span><b id="m-source">規則式</b></div>
           <div class="kpi"><span>事件已抵達</span><b id="m-arrived">0</b></div>
+          <div class="kpi"><span>已返家</span><b id="m-home">0</b></div>
           <div class="kpi"><span>未出發</span><b id="m-pending">0</b></div>
           <div class="kpi"><span>背景車</span><b id="m-ambient">0</b></div>
           <div class="kpi"><span>壅塞路段</span><b id="m-crowded">0</b></div>
@@ -210,6 +222,14 @@
               <div class="chart-grid">
                 <section class="chart-card"><h3 class="sub">路網車流量隨時間（事件 vs 背景，堆疊）</h3><div class="chart-box"><canvas id="chart-volume"></canvas></div></section>
                 <section class="chart-card chart-card-wide"><h3 class="sub">Top 瓶頸路段（整趟尖峰 V/C 與服務水準）</h3><div id="bottleneck-table" class="bottleneck-table"></div></section>
+              </div>
+
+              <h3 class="sub layer-tag">③ 散場層（宣告散場後才有資料）</h3>
+              <div id="egress-summary" class="analysis-summary"></div>
+              <div class="chart-grid">
+                <section class="chart-card"><h3 class="sub">疏散曲線（累積返家 / 每步離場）</h3><div class="chart-box"><canvas id="chart-egress"></canvas></div></section>
+                <section class="chart-card"><h3 class="sub">散場旅行時間分布（分鐘）</h3><div class="chart-box"><canvas id="chart-egress-travel"></canvas></div></section>
+                <section class="chart-card"><h3 class="sub">返家地分布（Top）</h3><div class="chart-box"><canvas id="chart-egress-od"></canvas></div></section>
               </div>
             </section>
             <p class="hint dock-empty" id="analysis-empty">模擬完成後（或按單步走到結束）會在此顯示交通分析圖。</p>

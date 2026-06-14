@@ -21,6 +21,7 @@
 | `SCALING_zh-TW.md` | LLM 規模化（事件觸發+批次）+ §6 引擎規模化優化（①③④⑤⑥⑦） |
 | `DEMAND_zh-TW.md` | 事件車出生地的重力模型（人口×距離衰減） |
 | `AMBIENT_zh-TW.md` | 背景常態車流（雙邊重力 OD）+ 兩層交通分析 |
+| `EGRESS_zh-TW.md` | 散場（egress）兩階段疏運評估（手動宣告散場、回居住地、清場時間） |
 | `MEMORY_zh-TW.md` | 單一旅次記憶（不分長短期；重決策時 LLM 摘要） |
 | `ENVIRONMENT_zh-TW.md` | 送 LLM 的環境感知（質性標籤、熱點、前方路況） |
 | `ACTIVE_MODES_zh-TW.md` | 五種 active_mode 的權重與路徑策略 |
@@ -125,6 +126,14 @@
 | **多底圖 + 色調微調** | 5 種免金鑰底圖（暗/淺/Voyager/OSM/衛星）+ 亮度/對比/飽和 sliders | `map.js buildBaseLayers/addAppearanceControl` |
 | **可調窗格大小** | 左面板↔地圖、地圖↔底部面板 可拖曳分隔條（CSS 變數 + localStorage 記憶 + 雙擊還原；拖動即重算地圖尺寸） | `simulation.js setupResizers`/`map.js resize` |
 - [doc] DEMO_FEATURES_zh-TW.md（P0–P3 全列；§18 為前端整體重設計）
+
+### 3.12 散場（egress）兩階段疏運評估
+- **定位**：單次模擬涵蓋**進場 + 散場**兩個尖峰。事件車 `phase`：ingress→dwell（球場停留）→egress→home（返家）。
+- **手動觸發（event-based）**：前端「宣告散場」→ 停留車在視窗內依 profile（peak 預設一窩蜂）錯開離場、回**居住地**
+  （persona→對不到/規則式車用人口加權 `sample_residence` 後備；散場 OD＝人口加權疏散）。
+- **散場層分析**：疏散曲線、散場旅時、返家 OD、**清場時間（90% 返家分鐘數）**；路網層自動含散場車流可與進場對照。
+- **設定**：`[egress].destination/window_minutes/profile`。規則式仍是 LLM 失敗 fallback；demo 預設 LLM（前端規則式按鈕已暗掉）。
+- [doc] EGRESS_zh-TW.md　[code] `engine._handle_egress`/`_egress_analysis`/`declare_egress`、`agent.phase`、`demand.sample_residence`
 
 ### 3.11 事件車分批出發（時空需求）
 - **定位**：事件車**陸續進場**而非全部 cycle 0 同時出發——加每台 `departure_cycle`，之前「尚未進場」
