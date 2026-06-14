@@ -63,6 +63,10 @@
 
 ## 2. 安裝
 
+> **建議主路徑（與 `README.md` 一致）**：用 [`uv`](https://docs.astral.sh/uv/) 一鍵建環境並安裝
+> （`pyproject.toml` 為依賴真實來源）：`uv sync`，啟動 `uv run uvicorn llm_abm_simulator.web.app:app --port 8080`。
+> 下方 venv + `requirements.txt` 為等價的傳統替代路徑。
+
 ```powershell
 # 專案根目錄
 python -m venv .venv
@@ -253,10 +257,12 @@ config/simulation.toml     使用者可編輯的參數檔（唯一真實來源�
 src/llm_abm_simulator/
   config.py            參數的型別化 schema + tomllib 載入器（程式碼預設值＝fallback）
   domain/              純資料模型：agent / road / town / state / events
-  spatial/             gis_loader / road_network / routing / geojson（geopandas+networkx）
-  decisions/           base / mock_policy / llm_adapter / response_parser
-  simulation/          engine / scheduler / metrics / scenario / random_seed
-  web/                 app(FastAPI) / websocket / schemas（薄層，不含模擬邏輯）
+  spatial/             gis_loader / road_network / routing / geojson / signals / build_*（geopandas+networkx）
+  mobility/            demand（事件車重力出生地 + 背景車雙端重力 OD）
+  decisions/           registry / base / mock_policy / llm_adapter / response_parser / profile_pool
+  simulation/          engine / scheduler / metrics / random_seed
+  web/                 app(FastAPI) / websocket（薄層，不含模擬邏輯）
+  scenarios.py         可抽換場景/圖層註冊
 simulation_web/frontend/   index.html / index.css / app.js / map.js / charts.js / simulation.js
 data/tainan_roads.graphml  bundle 的真實 OSM 路網
 tests/simulator/           pytest

@@ -44,9 +44,11 @@ the in-process pipeline described here.
 | `decision_making.py` | Build the decision prompt and call the LLM with a structured-output schema (`DECISION_SCHEMA`); returns each agent's active mode + `reason`. The only LLM call per batch. |
 | `memory_summary.py` | Optional small-model summariser for the long-term `trip_summary`. |
 | `json_utils.py` | Robust LLM-JSON salvage (handles trailing commas, fences, truncated arrays). |
-| `llm_config.py` | Ollama connection settings from `.env` (with localhost defaults). |
-| `prompts/`, `schemas/` | Prompt templates and Pydantic schemas. |
-| `RAG.py` | Lightweight TF-IDF retrieval — **currently disabled**; decision-making consumes the (already compact) perception output directly. |
+| `llm_client.py` | Unified Ollama/vLLM transport (`generate()`); structured output via Ollama `format` / vLLM `guided_json`. |
+| `llm_config.py` / `model_registry.py` | Backend/model connection settings from `.env`; vLLM candidate registry. |
+| `prompts/` | Prompt templates (system / decision-making / agent-profile / memory). |
+| `rag_store.py` | Lightweight TF-IDF retrieval — **opt-in** (toggled via `/api/rag`); when enabled, `decision_making` retrieves a few chunks per batch and injects them into the decision prompt. |
+| `sim_chat.py` / `sim_intervene.py` | Pause-time read-only Q&A; constrained NL intervention parsing. |
 
 ## Per-step data flow
 

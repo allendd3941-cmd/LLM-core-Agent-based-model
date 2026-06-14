@@ -84,7 +84,12 @@ const TrafficUI = (() => {
       b.onclick = () => { activateTab(b.dataset.tab); expandDock(); };
     });
     const dockToggle = $("btn-dock-toggle");
-    if (dockToggle) dockToggle.onclick = () => { const d = $("dock"); if (d) d.classList.toggle("collapsed"); };
+    if (dockToggle) dockToggle.onclick = () => {
+      const d = $("dock"); if (d) d.classList.toggle("collapsed");
+      const g = $("gutter-dock"); if (g && d) g.style.display = d.classList.contains("collapsed") ? "none" : "";
+      afterDockAnim();
+    };
+    setupResizers();
     const clearLog = $("btn-clear-log");
     if (clearLog) clearLog.onclick = () => { const b = $("system-log"); if (b) b.innerHTML = ""; };
 
@@ -426,7 +431,70 @@ const TrafficUI = (() => {
       : "待命";
   }
 
-  function expandDock() { const d = $("dock"); if (d) d.classList.remove("collapsed"); }
+  function expandDock() {
+    const d = $("dock"); if (d) d.classList.remove("collapsed");
+    const g = $("gutter-dock"); if (g) g.style.display = "";
+    afterDockAnim();
+  }
+
+  // 底部面板高度變動（收合/展開/切分頁）後，等 CSS 過場結束再讓地圖重算尺寸補滿圖磚。
+  function afterDockAnim() {
+    setTimeout(() => { if (window.TrafficMap && TrafficMap.resize) TrafficMap.resize(); }, 280);
+  }
+
+  // ===== 可拖曳窗格（左面板寬 / 底部面板高；localStorage 記憶、雙擊還原）=====
+  function setupResizers() {
+    const layout = $("layout");
+    if (!layout) return;
+    const dock = $("dock");
+    const gv = $("gutter-left");
+    const gh = $("gutter-dock");
+    const LW = "ui.leftW", DH = "ui.dockH";
+    const savedW = localStorage.getItem(LW);
+    if (savedW) layout.style.setProperty("--left-w", savedW);
+    const savedH = localStorage.getItem(DH);
+    if (savedH) layout.style.setProperty("--dock-h", savedH);
+
+    let raf = null;
+    const mapResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = null; if (window.TrafficMap && TrafficMap.resize) TrafficMap.resize(); });
+    };
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+
+    function bindGutter(gutter, varName, key, computeVal) {
+      if (!gutter) return;
+      gutter.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        try { gutter.setPointerCapture(e.pointerId); } catch (_) {}
+        gutter.classList.add("dragging");
+        const move = (ev) => { layout.style.setProperty(varName, computeVal(ev)); mapResize(); };
+        const up = () => {
+          gutter.classList.remove("dragging");
+          try { gutter.releasePointerCapture(e.pointerId); } catch (_) {}
+          gutter.removeEventListener("pointermove", move);
+          gutter.removeEventListener("pointerup", up);
+          const v = getComputedStyle(layout).getPropertyValue(varName).trim();
+          if (v) localStorage.setItem(key, v);
+          mapResize();
+        };
+        gutter.addEventListener("pointermove", move);
+        gutter.addEventListener("pointerup", up);
+      });
+      gutter.addEventListener("dblclick", () => {       // 雙擊還原預設
+        layout.style.removeProperty(varName);
+        localStorage.removeItem(key);
+        mapResize();
+      });
+    }
+
+    bindGutter(gv, "--left-w", LW, (ev) =>
+      clamp(ev.clientX - layout.getBoundingClientRect().left - 12, 240, 560) + "px");
+    bindGutter(gh, "--dock-h", DH, (ev) => {
+      const stage = dock.parentElement.getBoundingClientRect();
+      return clamp(stage.bottom - ev.clientY, 120, window.innerHeight * 0.7) + "px";
+    });
+  }
 
   // ===== 右側分頁 =====
   function activateTab(name) {

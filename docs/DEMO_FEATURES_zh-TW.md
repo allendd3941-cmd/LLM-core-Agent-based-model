@@ -104,9 +104,12 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 
 - 動作：`avoid_area(town)`（避開某區，車輛繞道重算）、`demand_surge(town,count)`（某區湧入 N 台）、`none`。
 - 解析 `llm_server/sim_intervene.py`：**關鍵字優先**（確定性、對受限指令最可靠），判不出才用 LLM。
-- 引擎：`apply_intervention` / `clear_interventions`（避讓區存 `_avoid_circles`，`routing.find_path` 的 `avoid_circles` 對圈內邊近乎封路）；`snapshot_now()` 不前進直接回快照供即時更新。
+- 引擎：`apply_intervention` / `clear_interventions`——`avoid_area` 在該區形心放**半徑 2500m 避讓圓**(`_avoid_circles`)，
+  移動中車重算路徑、圈內邊 **成本 ×25(近乎封路)**；`demand_surge` 新增 **clamp 1–1000** 台事件車(起點該區、終點球場)；`snapshot_now()` 不前進直接回快照供即時更新。
+- **只影響事件車**：避讓重算/湧入新增都針對事件車；**背景常態車流不受 NL 介入**。
 - 協定：`control{action:"intervene"|"clear_intervention", value}`，回 `chat` + `state_update`。
-- 安全：只有受限動作集，NL 不能亂改任何東西；新增的車不會被 clear 移除（避讓區會清）。
+- 安全：只有受限動作集，NL 不能亂改任何東西；新增的車不會被 clear 移除(避讓區會清)。
+- **模型來源**：介入與「暫停對話查詢」的 LLM 解析都用**前端模型選擇器所選的後端+模型**（`llm_client.generate` 不帶 model→用 runtime 值），整套 LLM 共用。
 
 ## 9. 網頁上傳自訂場景（P2 upload）
 
@@ -221,5 +224,10 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
 - **多底圖切換**:`L.control.layers` 原生控制(右上),免金鑰底圖:CARTO 暗(預設)/淺 Positron / Voyager 街道 /
   OSM / Esri 衛星;切底圖時道路、車流、號誌、行政區等疊加圖層自動保留。
 - **地圖色調微調**:地圖右上自訂控制,亮度 / 對比 / 飽和度 sliders(CSS `filter` 套在底圖圖磚層,不影響向量疊加)+ 還原。
-- 對應程式:`simulation_web/frontend/`(`index.html` 重排、`index.css` 依色票重寫、`map.js` 彩點+底圖+色調、
-  `simulation.js`+`app.js` 日誌/忙碌/心跳/收合);`charts.js` 圖表色對齊色票。
+- **可調窗格大小**:左控制面板↔地圖、地圖↔底部面板 之間各一條**可拖曳分隔條**(`#gutter-left`/`#gutter-dock`);
+  用 CSS 變數 `--left-w`(clamp 240–560px)/`--dock-h`(clamp 120px–70vh)驅動;`pointer` 事件(滑鼠+觸控)、
+  **localStorage 記住尺寸**、**雙擊分隔條還原預設**;拖動中/放開呼叫 `TrafficMap.resize()` 讓地圖補滿圖磚;底部面板收合時自動隱藏水平分隔條。
+- **地圖尺寸穩健**:`map.invalidateSize()` 於載入(200/900ms)、視窗縮放、收合/切分頁、`fitBounds` 前重算,避免彈性版面初始化早於版面導致的「下半部黑塊」。
+- 對應程式:`simulation_web/frontend/`(`index.html` 重排+分隔條、`index.css` 依色票重寫+`--left-w`/`--dock-h`+分隔條樣式、
+  `map.js` 彩點+底圖+色調+`resize()`、`simulation.js` 日誌/忙碌/心跳/收合/`setupResizers`、`app.js` 日誌/忙碌/心跳);`charts.js` 圖表色對齊色票。
+- 圖示字型 CDN 路徑修正:`@tabler/icons-webfont@2.47.0/tabler-icons.min.css`(該版 CSS 在套件根目錄,非 `dist/`)。

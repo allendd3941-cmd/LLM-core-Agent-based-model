@@ -29,4 +29,4 @@ uvicorn llm_abm_simulator.web.app:app --host 127.0.0.1 --port 8080
 | `frontend/charts.js`  | Chart.js 即時圖表 |
 | `frontend/simulation.js` | 控制面板 UI、狀態顯示、agent 檢視 |
 
-前端透過 `ws://<host>/ws` 與後端溝通，協定見 `src/llm_abm_simulator/web/schemas.py`。
+前端透過 `ws://<host>/ws` 與後端溝通，訊息主體（如 `state_update`）定義見 `src/llm_abm_simulator/domain/state.py`。

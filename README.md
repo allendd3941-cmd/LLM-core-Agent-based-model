@@ -21,9 +21,10 @@ strategy by an LLM — all visualised live on an interactive map.
   **ahead along their planned route** (`road_ahead`), **district-level congestion hotspots**, a
   city-wide trend, and qualitative local traffic — encoded in compact natural-language labels so
   an LLM can reason without blowing up its context window.
-- **Human-like trip memory.** Each agent keeps a two-tier memory: **short-term** (a vivid snapshot
-  of the previous step) and **long-term** (the whole trip compressed into one impression),
-  mirroring how a real driver remembers a journey.
+- **Human-like trip memory.** Each agent keeps a single fixed-size qualitative trip `memory` (a
+  running one-sentence impression plus trip aggregates) — no short/long split, since at 1 step =
+  1 minute the distinction is meaningless. With the LLM core the summary is rewritten by a small
+  model exactly when the car re-decides; ambient cars keep no memory. See `docs/MEMORY_zh-TW.md`.
 - **LLM-in-the-loop, with a deterministic fallback.** An LLM assigns each agent a behavioural mode
   (e.g. *avoid congestion*, *fastest*, *tolerate*); if the LLM is unavailable the system degrades
   gracefully to a deterministic rule-based policy — the demo never crashes on the show floor.
@@ -218,7 +219,8 @@ LLM_abm_model/
 │  │  ├─ web/                     #   FastAPI app + WebSocket session (thin)
 │  │  └─ config.py                #   typed config schema + TOML loader
 │  └─ llm_server/                 # LLM pipeline (persona / perception / decision / summary)
-│     ├─ prompts/  schemas/       #   prompt templates + Pydantic schemas
+│     ├─ prompts/                 #   prompt templates
+│     ├─ llm_client.py            #   unified Ollama/vLLM adapter (structured output)
 │     └─ json_utils.py            #   robust LLM-JSON salvage
 ├─ simulation_web/frontend/       # Web demo (index.html / map.js / charts.js / simulation.js / app.js)
 ├─ config/simulation.toml         # single source of truth for tunable parameters
@@ -234,6 +236,10 @@ LLM_abm_model/
 
 ## Documentation
 
+- [`docs/OVERVIEW_zh-TW.md`](docs/OVERVIEW_zh-TW.md) — single-entry design reference (features,
+  decisions, contributions vs infrastructure, honest limitations, reproducibility).
+- [`docs/PAPER_SYSTEM_DESIGN_zh-TW.md`](docs/PAPER_SYSTEM_DESIGN_zh-TW.md) — **for paper writing**:
+  full top-to-bottom system design with exact formulas, parameters, code refs, and paper-section mapping.
 - [`docs/PYTHON_SIMULATOR_zh-TW.md`](docs/PYTHON_SIMULATOR_zh-TW.md) — full guide: install, run,
   LLM mode, persona pool, Linux/SSH demo, architecture.
 - [`docs/ENVIRONMENT_zh-TW.md`](docs/ENVIRONMENT_zh-TW.md) — spatial perception design.
@@ -257,9 +263,11 @@ LLM_abm_model/
 
 ## Limitations & roadmap
 
-- **Decision scaling.** A single LLM call per step covers all agents, which limits agent count.
-  The path to city-scale (1000+ agents) is to **bucket decisions by qualitative state × persona
-  archetype** so LLM cost decouples from agent count — a planned core contribution.
+- **Decision scaling.** LLM decisions are **event-triggered** (only cars hitting congestion /
+  a jam ahead re-decide) and run in **token-budgeted parallel batches**, so LLM cost scales with
+  the number of *decision events* rather than agents × steps (see `docs/SCALING_zh-TW.md`). The
+  remaining lever toward larger scale is **bucketing/dedup of decisions by qualitative state ×
+  persona archetype** plus measuring the full scalability curve.
 - **Rerouting is reactive.** Agents reroute once *on* a congested road; `road_ahead` currently
   informs the LLM's mode choice rather than triggering anticipatory rerouting directly.
 - **Congestion slowdown is simplified** (binary factor), not a continuous speed–density relation.

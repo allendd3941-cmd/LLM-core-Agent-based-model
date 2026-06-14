@@ -15,6 +15,7 @@
 | 文件 | 內容 |
 |---|---|
 | **OVERVIEW_zh-TW.md**（本檔） | 全功能總覽 + 設計決策 + 貢獻/限制 + 可重現性 |
+| **PAPER_SYSTEM_DESIGN_zh-TW.md** | **寫 paper 用**：由大到小的完整系統設計細部展開（含確切公式/參數/程式碼對應 + 論文章節對應） |
 | `ARCHITECTURE.md` | 分層架構、每步資料流（mermaid）、決策核心路徑 |
 | `PYTHON_SIMULATOR_zh-TW.md` | 安裝/啟動、設定表、Persona 原型池、SSH/部署 |
 | `SCALING_zh-TW.md` | LLM 規模化（事件觸發+批次）+ §6 引擎規模化優化（①③④⑤⑥⑦） |
@@ -122,6 +123,7 @@
 | **系統日誌 + 忙碌動畫 + 執行心跳** | 任何操作有時間戳分級日誌；重操作有頂列進度條+按鈕 spinner（純前端，收到 init/state 解除）；心跳顯示在不在跑 | `app.js beginBusy/endBusy`/`simulation.js log/setRunState` |
 | **乾淨彩點 agent** | 移除 emoji 車圖，改狀態色圓點+車種大小（更專業） | `map.js upsertAgentDot` |
 | **多底圖 + 色調微調** | 5 種免金鑰底圖（暗/淺/Voyager/OSM/衛星）+ 亮度/對比/飽和 sliders | `map.js buildBaseLayers/addAppearanceControl` |
+| **可調窗格大小** | 左面板↔地圖、地圖↔底部面板 可拖曳分隔條（CSS 變數 + localStorage 記憶 + 雙擊還原；拖動即重算地圖尺寸） | `simulation.js setupResizers`/`map.js resize` |
 - [doc] DEMO_FEATURES_zh-TW.md（P0–P3 全列；§18 為前端整體重設計）
 
 ### 3.11 事件車分批出發（時空需求）

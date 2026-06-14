@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
   <!-- 圖示字型：Tabler outline（取代 UI emoji），失敗則只少了圖示、文字仍在 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css" />
 
   <!-- Leaflet 地圖 -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -133,6 +133,9 @@
       </section>
     </aside>
 
+    <!-- 可拖曳分隔條：調整左控制面板寬度（雙擊還原） -->
+    <div class="gutter gutter-v" id="gutter-left" title="拖曳調整寬度，雙擊還原"></div>
+
     <!-- ── 中：地圖（最大）＋ 底部資料面板 ── -->
     <section class="stage">
       <div class="map-wrap">
@@ -169,6 +172,9 @@
           <label class="lg-toggle" title="顯示/隱藏背景常態車流"><input id="toggle-ambient" type="checkbox" checked /> <i class="ti ti-car-4wd" aria-hidden="true"></i> 背景車流</label>
         </div>
       </div>
+
+      <!-- 可拖曳分隔條：調整底部面板高度（雙擊還原） -->
+      <div class="gutter gutter-h" id="gutter-dock" title="拖曳調整高度，雙擊還原"></div>
 
       <!-- 底部資料面板（可收合） -->
       <div class="dock" id="dock">

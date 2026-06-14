@@ -64,7 +64,7 @@ class SimulationState:
     max_steps: int
     running: bool
     finished: bool
-    decision_source: str                              # "mock" | "llm"
+    decision_source: str                              # "rule" | "llm"
     agents: list[AgentSnapshot] = field(default_factory=list)
     roads: list[RoadSnapshot] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)

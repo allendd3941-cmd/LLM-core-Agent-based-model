@@ -144,10 +144,10 @@ class UIConfig:
 
 @dataclass(frozen=True)
 class MemoryConfig:
-    """agent 旅次記憶（STM/LTM）的可調門檻（對應 TOML ``[memory]``）。
+    """agent 旅次記憶（單一 ``memory``）的可調門檻（對應 TOML ``[memory]``）。
 
     把每步的量化感知（congestion_proxy、移動距離、距離目的地）轉成「人類印象」的
-    質性標籤時所用的門檻；以及 LTM 壓縮時記幾個壅塞點。詳見 docs/MEMORY_zh-TW.md。
+    質性標籤時所用的門檻；以及壓縮記憶時記幾個壅塞點。詳見 docs/MEMORY_zh-TW.md。
     這裡只放「數值門檻」；質性標籤文字（順暢/普通/壅塞…）是設計常數，定義在
     domain/agent.py，與 prompt 語意綁定、不從 TOML 調整。
     """
@@ -164,7 +164,7 @@ class MemoryConfig:
     smoothness_rough_proxy: float = 0.6  # 平均 ≥ 此值 →「不順」
     smoothness_mid_proxy: float = 0.3    # 平均 ≥ 此值 →「中等」；否則「順暢」
 
-    # --- LTM 壓縮 ---
+    # --- 記憶壓縮 ---
     congested_spots_max: int = 5         # 記憶中最多保留幾個塞過的地點
     distance_decimals: int = 1           # remaining 距離顯示的小數位數
 

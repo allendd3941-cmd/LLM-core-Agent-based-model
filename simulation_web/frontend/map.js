@@ -111,7 +111,15 @@ const TrafficMap = (() => {
     map.on("zoomend moveend", scheduleReportView);
     map.on("zoomend", () => { if (lastRoads.length) updateRoads(lastRoads); });
     map.on("zoomend", () => { if (lastAgents.length) updateAgents(lastAgents); });  // zoom 後重套車點大小
+
+    // 彈性版面（地圖 + 底部面板）可能在地圖初始化後才長好 → 重算尺寸，避免下半部黑塊。
+    setTimeout(() => map.invalidateSize(), 200);
+    setTimeout(() => map.invalidateSize(), 900);
+    window.addEventListener("resize", () => map.invalidateSize());
   }
+
+  // 外部（收合底部面板 / 切分頁 / 視窗變動）呼叫，讓地圖重算尺寸補滿圖磚。
+  function resize() { if (map) map.invalidateSize(); }
 
   // 道路線寬依 zoom 縮放（細、半透明 → 不蓋住車）。
   function roadWeight() {
@@ -170,7 +178,7 @@ const TrafficMap = (() => {
 
     setSignals(data.signals);
 
-    try { map.fitBounds(townLayer.getBounds().pad(0.05)); } catch (e) {}
+    try { map.invalidateSize(); map.fitBounds(townLayer.getBounds().pad(0.05)); } catch (e) {}
   }
 
   // ---- 號誌：每路口兩條相位軸短桿 ----
@@ -344,5 +352,5 @@ const TrafficMap = (() => {
     });
   }
 
-  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient, setViewReporter };
+  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient, setViewReporter, resize };
 })();

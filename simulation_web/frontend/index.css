@@ -133,9 +133,20 @@ body {
 @keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
 /* ── 版面 ─────────────────────────────────────── */
-.layout { flex: 1; display: grid; grid-template-columns: 322px 1fr; gap: 12px; padding: 12px; min-height: 0; }
+.layout { flex: 1; display: grid; grid-template-columns: var(--left-w, 322px) 10px 1fr; gap: 0; padding: 12px; min-height: 0; }
 .panel { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 2px; }
-.stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+.stage { display: flex; flex-direction: column; gap: 0; min-width: 0; min-height: 0; }
+
+/* 可拖曳分隔條（調整左面板寬 / 底部面板高；雙擊還原） */
+.gutter { position: relative; flex: 0 0 auto; z-index: 6; touch-action: none; }
+.gutter-v { cursor: col-resize; }
+.gutter-h { height: 10px; cursor: row-resize; }
+.gutter::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: var(--border); border-radius: 2px; transition: background .14s; }
+.gutter-v::after { width: 2px; height: 30px; }
+.gutter-h::after { width: 30px; height: 2px; }
+.gutter:hover::after, .gutter.dragging::after { background: var(--accent); }
+.gutter.dragging { background: var(--accent-soft); }
 
 .card {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg);
@@ -275,7 +286,7 @@ select:hover, select:focus { border-color: var(--accent); outline: none; }
 
 /* ── 底部資料面板（dock） ─────────────────────── */
 .dock {
-  height: 304px; flex: 0 0 auto; display: flex; flex-direction: column;
+  height: var(--dock-h, 304px); flex: 0 0 auto; display: flex; flex-direction: column;
   background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg);
   box-shadow: var(--shadow); overflow: hidden; transition: height .25s ease;
 }
