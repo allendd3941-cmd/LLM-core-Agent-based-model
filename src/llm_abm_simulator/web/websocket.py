@@ -29,13 +29,15 @@ class SimulationSession:
         self.engine = SimulationEngine(self.cfg)
         self.speed_multiplier = 1.0
         self._run_task: asyncio.Task | None = None
+        self._send_lock = asyncio.Lock()   # 序列化送出：避免 run loop 與 set_view 快照並發 send 撞在一起
 
     # ------------------------------------------------------------------
     async def send(self, message: dict[str, Any]) -> None:
-        try:
-            await self.ws.send_json(message)
-        except (WebSocketDisconnect, RuntimeError):
-            pass
+        async with self._send_lock:   # 同一連線一次只送一個 frame（並發 send 會壞掉）
+            try:
+                await self.ws.send_json(message)
+            except (WebSocketDisconnect, RuntimeError):
+                pass
 
     async def status(self, message: str) -> None:
         await self.send({"type": "status", "message": message})
@@ -103,9 +105,17 @@ class SimulationSession:
         elif action == "set_ambient":
             await self._set_ambient(int(value) if value is not None else 0)
         elif action == "set_view":
-            # ⑥ 前端回報可視範圍（zoom + bounds），大規模時只送範圍內的車。高頻、同步、不回狀態。
+            # ⑥ 前端回報可視範圍（zoom + bounds）；存下後立即回推一張快照，讓 zoom/pan 即時顯示
+            # 範圍內的車，不必等慢的模擬步。高頻、不回狀態；snapshot 放到 thread 避免卡事件迴圈。
             v = value or {}
             self.engine.set_view(v.get("zoom", 0), v.get("bounds") or {})
+            if self.engine.is_initialized:
+                state = await asyncio.to_thread(self.engine.snapshot_now)
+                await self.send(state.to_message())
+        elif action == "set_max_steps":
+            await self._set_time(max_steps=int(value) if value is not None else None)
+        elif action == "set_step_minutes":
+            await self._set_time(step_minutes=int(value) if value is not None else None)
         elif action == "set_llm":
             await self._set_llm(value or {})
         elif action == "regenerate_profiles":
@@ -170,6 +180,22 @@ class SimulationSession:
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
         await self.status(f"agent 數設為 {n}")
+
+    async def _set_time(self, max_steps: int | None = None, step_minutes: int | None = None) -> None:
+        """設定「跑幾個週期 / 每週期幾分鐘」（比照 set_agents：進行中先擋，改了重新初始化）。"""
+        if self.engine.running or self.engine.scheduler.cycle > 0:
+            await self.status("模擬進行中無法變更時間設定，請先重設。")
+            return
+        ms = self.cfg.max_steps if max_steps is None else max(UI_CONFIG.steps_min, min(max_steps, UI_CONFIG.steps_max))
+        sm = self.cfg.step_minutes
+        if step_minutes is not None and step_minutes in UI_CONFIG.step_minutes_options:
+            sm = step_minutes   # 不在允許清單就忽略，沿用原值
+        self.cfg = dataclasses.replace(self.cfg, max_steps=ms, step_minutes=sm)
+        await self._stop_run_task()
+        self.engine = SimulationEngine(self.cfg)
+        await asyncio.to_thread(self.engine.initialize)
+        await self.send(self.engine.init_payload())
+        await self.status(f"已設定：{ms} 週期 × {sm} 分/週期")
 
     async def _set_ambient(self, n: int) -> None:
         """設定背景常態車數（runtime 覆寫 [ambient].count），重新初始化。模擬進行中先擋。"""

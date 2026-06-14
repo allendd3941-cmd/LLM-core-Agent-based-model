@@ -131,6 +131,11 @@ class UIConfig:
     # zoom < agent_min_zoom 時只送道路壅塞、不送車（見 engine._visible_agents）。
     render_individual_max: int = 1500
     agent_min_zoom: int = 14
+    # 時間控制（前端可調「跑幾個週期 / 每週期幾分鐘」；改了需重設，比照 set_agents）
+    steps_min: int = 6
+    steps_max: int = 240
+    steps_step: int = 6
+    step_minutes_options: tuple[int, ...] = (1, 2, 5, 10)
 
     def to_payload(self) -> dict[str, Any]:
         """給 engine.init_payload 下發前端（key 與前端 slider 屬性對應）。"""
@@ -268,6 +273,20 @@ class AmbientConfig:
 
 
 @dataclass(frozen=True)
+class DepartureConfig:
+    """事件車分批出發（時空需求）設定（對應 TOML ``[departure]``）。詳見 docs/DEMO_FEATURES_zh-TW.md。
+
+    真實事件是「陸續抵達」而非全部同時出發。每台事件車在 ``departure_cycle`` 之前「尚未進場」
+    （不移動、不算路網流量/壅塞、不顯示），到該步才開始跑。出發時間在 [0, 視窗] 內依 ``profile``
+    抽樣（seeded、可重現）。``window_minutes=0`` → 全部 cycle 0 出發（＝舊行為，向後相容）。
+    背景車流（ambient）不分批（本即穩態連續流）。
+    """
+
+    window_minutes: int = 0          # 出發視窗（分鐘）；0＝全部同時出發
+    profile: str = "uniform"         # uniform（均勻）/ front_loaded（早到多）/ peak（接近開賽尖峰多）
+
+
+@dataclass(frozen=True)
 class SignalConfig:
     """紅綠燈號誌系統設定（對應 TOML ``[signals]``）。詳見 spatial/signals.py。
 
@@ -385,7 +404,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals", "llm_budget", "demand", "ambient"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals", "llm_budget", "demand", "ambient", "departure"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -464,6 +483,17 @@ def _build_ambient_config(raw: dict[str, Any]) -> AmbientConfig:
     return a
 
 
+def _build_departure_config(raw: dict[str, Any]) -> DepartureConfig:
+    overrides = {k: v for k, v in raw.get("departure", {}).items()
+                 if k in {f.name for f in fields(DepartureConfig)}}
+    d = dataclasses.replace(DepartureConfig(), **overrides)
+    if d.window_minutes < 0:
+        raise ValueError("設定檔 [departure].window_minutes 不可為負")
+    if d.profile not in ("uniform", "front_loaded", "peak"):
+        raise ValueError("設定檔 [departure].profile 必須為 'uniform' / 'front_loaded' / 'peak'")
+    return d
+
+
 def _build_llm_budget_config(raw: dict[str, Any]) -> LLMBudgetConfig:
     overrides = {k: v for k, v in raw.get("llm_budget", {}).items()
                  if k in {f.name for f in fields(LLMBudgetConfig)}}
@@ -498,6 +528,10 @@ def _build_ui_config(raw: dict[str, Any]) -> UIConfig:
         raise ValueError("設定檔 [ui].speed_min 不可大於 speed_max")
     if ui.render_individual_max < 0 or ui.agent_min_zoom < 0:
         raise ValueError("設定檔 [ui].render_individual_max / agent_min_zoom 不可為負")
+    if ui.steps_min > ui.steps_max or ui.steps_min < 1:
+        raise ValueError("設定檔 [ui].steps_min 須 ≥1 且不可大於 steps_max")
+    if not ui.step_minutes_options:
+        raise ValueError("設定檔 [ui].step_minutes_options 不可為空")
     return ui
 
 
@@ -540,6 +574,7 @@ PROFILE_CONFIG = _build_profile_config(_RAW)
 SCALING_CONFIG = _build_scaling_config(_RAW)
 DEMAND_CONFIG = _build_demand_config(_RAW)
 AMBIENT_CONFIG = _build_ambient_config(_RAW)
+DEPARTURE_CONFIG = _build_departure_config(_RAW)
 LLM_BUDGET = _build_llm_budget_config(_RAW)
 SIGNAL_CONFIG = _build_signal_config(_RAW)
 HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)

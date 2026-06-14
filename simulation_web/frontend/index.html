@@ -63,6 +63,18 @@
           <p class="hint">不指定事件終點的常態背景車（雙邊重力 OD、一律規則式核心），造成路網基礎負載。0＝關閉。</p>
         </label>
 
+        <label class="field">
+          <span>週期數 <b id="steps-val">36</b></span>
+          <input id="steps" type="range" min="6" max="240" step="6" value="36" />
+          <p class="hint">總共跑幾個週期（改了需重設）。</p>
+        </label>
+
+        <label class="field">
+          <span>每週期分鐘</span>
+          <select id="step-minutes"></select>
+          <p class="hint">每個週期代表多少分鐘（改了需重設）。</p>
+        </label>
+
         <div class="field toggle">
           <span>決策核心 <em>（事件車）</em></span>
           <div class="seg">
@@ -107,6 +119,7 @@
           <div class="stat"><span>已歷時</span><b id="m-elapsed">0 分</b></div>
           <div class="stat"><span>決策核心</span><b id="m-source">規則式</b></div>
           <div class="stat"><span>事件已抵達</span><b id="m-arrived">0</b></div>
+          <div class="stat"><span>未出發</span><b id="m-pending">0</b></div>
           <div class="stat"><span>背景車</span><b id="m-ambient">0</b></div>
           <div class="stat"><span>壅塞路段</span><b id="m-crowded">0</b></div>
           <div class="stat"><span>平均壅塞</span><b id="m-avgcong">0.00</b></div>
@@ -120,13 +133,11 @@
       </section>
 
       <section class="card">
-        <h2>Decision 輸出</h2>
-        <div class="decision-bar">
-          <select id="decision-step" title="選擇要檢視的 step"></select>
-          <button id="decision-refresh" class="seg-btn" title="重新讀取 output 資料夾">重新整理</button>
-        </div>
-        <p class="hint">每個 step 的 decision-making 原始輸出（含 reason）。LLM 模式跑過才有。</p>
-        <pre id="decision-output" class="decision-output">尚未載入。</pre>
+        <h2>決策日誌（即時）</h2>
+        <div id="decision-health" class="hint"></div>
+        <p class="hint">LLM 核心壅塞觸發重決時：哪些車改了行為模式與原因 + 解析健康度（fallback 數＝解析出問題）。
+          原始 JSON 仍寫在 <code>output/</code> 供離線檢核。</p>
+        <div id="decision-output" class="decision-output">尚無決策（LLM 核心、壅塞觸發時才會重決）。</div>
       </section>
     </aside>
 

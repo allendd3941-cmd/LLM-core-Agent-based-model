@@ -120,9 +120,13 @@ body {
 .inspect .persona-trait p { margin: 2px 0 0; color: var(--text); line-height: 1.6; }
 
 /* Decision 輸出檢視 */
-.decision-bar { display: flex; gap: 6px; margin: 4px 0; }
-.decision-bar select { flex: 1; background: var(--card-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
-.decision-output { max-height: 240px; overflow: auto; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 11px; line-height: 1.5; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; }
+.decision-output { max-height: 240px; overflow: auto; background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 11px; line-height: 1.5; color: var(--text-dim); word-break: break-word; }
+.decision-output .muted { color: var(--text-dim); }
+.dec-row { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.dec-row:last-child { border-bottom: none; }
+.dec-row b { color: var(--text); }
+.dec-mode { color: #3fb6ff; font-weight: 600; }
+.dec-reason { margin: 2px 0 0; color: var(--text-dim); }
 
 /* ── Map ─────────────────────────────────────────────── */
 .map-wrap { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }

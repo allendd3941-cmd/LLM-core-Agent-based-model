@@ -159,6 +159,35 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 - 超過 → 依**前端目前 zoom 與可視範圍**裁切:
   - **zoom out（< `[ui].agent_min_zoom`,預設 14）→ 不送車,只看道路壅塞**(道路本來就依壅塞上色)。
   - **zoom in → 只送「可視範圍內」的車**(後端用公尺框過濾,經緯度只算這批)→ 就算總共 2 萬台,畫面內通常幾百台。
-- 前端 `map.js` 在 zoom/平移後(節流)回報 `{zoom, bounds}`(`control{action:"set_view"}`);後端 `engine.set_view`
-  存成公尺框,`_visible_agents` 據此決定本步送哪些車。全域統計/圖表不受影響(由伺服器對全部車算)。
+- 前端 `map.js` 在 zoom/平移後(節流 250ms)回報 `{zoom, bounds}`(`control{action:"set_view"}`);後端 `engine.set_view`
+  存成公尺框,`_visible_agents` 據此決定送哪些車。全域統計/圖表不受影響(由伺服器對全部車算)。
+- **zoom/pan 即時顯示**:後端收到 `set_view` 會**立即回推一張 `snapshot_now()`**(不必等下一個慢的模擬步)→ LLM 模式下
+  zoom 進去也馬上看到範圍內的車。送訊息加 `asyncio.Lock` 序列化,避免與 run loop 並發 send 撞在一起。
+- **渲染可讀性**:道路線寬改**依 zoom 縮放**(細、半透明,不蓋住車);車輛畫在**專屬高 z-index pane(`agentPane`)**
+  → 永遠在彩色道路之上;車點依 zoom 放大,背景車灰點調亮(r、opacity 提高)。
 - **限制(誠實)**:zoom out 時點不了單一車(本來就只看全局壅塞)。詳見 `docs/SCALING_zh-TW.md` §6。
+
+## 15. 前端自訂時間（週期數 / 每週期分鐘）（P3+）
+
+控制面板新增**「週期數」slider** 與**「每週期分鐘」下拉**,讓使用者自訂「跑幾個週期、每週期多久」。
+範圍由後端 `[ui].steps_min/max/step` 與 `step_minutes_options` 下發(單一真實來源)。比照 set_agents:
+**進行中無法變更(會提示先重設)**,改了重新初始化(因為 `step_minutes` 牽涉號誌相位、記憶已行時間、抵達換算)。
+協定:`control{action:"set_max_steps"|"set_step_minutes"}`;後端 `websocket._set_time`。
+
+## 16. 決策日誌即時化（P3+，取代讀 txt 檔）
+
+舊設計前端「Decision 輸出」面板**輪詢 `output/*.txt`**——奇怪又脆弱。改成**走 WebSocket 即時推送**:
+- 每次 LLM 重決批次後,後端把**解析後的決策**(哪些車 → mode → reason)+ **解析健康度**
+  (`triggered / decided / fallback`,fallback 多＝LLM 解析有問題)放進 `state_update`。
+- 前端「決策日誌(即時)」面板直接顯示 → **同時滿足「看結果」與「檢核錯誤」**,且不再讀檔。
+- 每台車的決策也已併入 **Agent 檢視**(行為模式 + 決策理由 + 「上次重決週期」)。
+- **原始 JSON 仍寫在 `output/`** 供離線深度除錯(`output_engine`),但前端不再依賴它。
+- 後端 `engine._record_decision_log` / `state.decisions` / `decision_health`;前端 `simulation.js` 的 `updateDecisions`。
+
+## 17. 事件車分批出發（時空需求）（P3+）
+
+真實事件是**陸續抵達**而非全部同時出發。每台事件車有 `departure_cycle`,在那之前「**尚未進場**」
+(`waiting_for_origin`:不移動、不算路網流量/壅塞、不顯示),到點才開始跑。出發時間在 `[0, 視窗]` 內依
+`profile` 抽樣(seeded、可重現)。狀態列新增「未出發 N」,分析面板的抵達曲線加一條**「每步出發」**對照。
+- 設定 `[departure].window_minutes`(0＝全部同時出發＝舊行為,向後相容)、`profile`(uniform / front_loaded / peak)。
+- 背景車不分批(本即穩態連續流)。後端 `engine._assign_departures` / `_activate_due_departures`;完整見下方設定與 `OVERVIEW`。

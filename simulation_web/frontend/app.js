@@ -40,7 +40,6 @@
           TrafficUI.applyInitConfig(msg.config);
           TrafficUI.setScenarios(msg.scenario);
           TrafficUI.setProfiles(msg.agent_profiles || {});
-          TrafficUI.refreshDecisionSteps();
           TrafficCharts.reset();
           break;
         case "state_update":
@@ -48,6 +47,7 @@
           TrafficMap.updateAgents(msg.agents);
           TrafficMap.updateSignalPhase((msg.elapsed_minutes || 0) * 60);
           TrafficUI.updateStats(msg);
+          TrafficUI.updateDecisions(msg.decisions, msg.decision_health);
           TrafficCharts.update(msg);
           break;
         case "analysis":

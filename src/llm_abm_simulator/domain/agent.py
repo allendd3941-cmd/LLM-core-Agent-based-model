@@ -146,8 +146,9 @@ class VehicleAgent:
 
     # === 旅程狀態（GAML: route_status / waiting_for_origin / next_road_id）===
     route_status: RouteStatus = RouteStatus.CREATED
-    waiting_for_origin: bool = False
+    waiting_for_origin: bool = False     # True＝尚未進場（分批出發、未到 departure_cycle）；不移動/不算流量/不顯示
     next_road_id: str = "calculating"
+    departure_cycle: int = 0             # 進場（開始移動）的週期；分批出發用，0＝開場即出發
 
     # === 路網位置（公尺座標 EPSG:3826）===
     x: float = 0.0
@@ -174,6 +175,7 @@ class VehicleAgent:
     congestion_proxy: float = 0.0
     selected_action: str = "none"
     decision_reason: str = ""            # LLM/mock 選擇此 active_mode 的原因（前端顯示）
+    last_decision_cycle: int | None = None  # 上次「重新決策」的週期（前端 inspect / 決策日誌用）
 
     # === 送 LLM 的環境感知質性標籤（由 engine 每步算好填入；詳見 docs/ENVIRONMENT_zh-TW.md）===
     traffic_here: str = ""               # 腳下壅塞感（順暢/普通/壅塞）

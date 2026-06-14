@@ -132,6 +132,7 @@ const TrafficCharts = (() => {
       data: { labels, datasets: [
         { label: "累積抵達", data: data.cumulative_arrived || [], borderColor: "#00c853", backgroundColor: "rgba(0,200,83,.15)", fill: true, tension: .3, pointRadius: 0 },
         { label: "每步抵達率", data: data.arrival_rate || [], borderColor: "#ffb300", tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: "每步出發", data: data.departures || [], borderColor: "#b388ff", borderDash: [4, 3], tension: .3, pointRadius: 0, yAxisID: "y1" },
       ] },
       options: { ...lineOpts(), scales: { ...lineOpts().scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
     });

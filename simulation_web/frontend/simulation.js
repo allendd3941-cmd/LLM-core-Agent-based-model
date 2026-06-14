@@ -32,6 +32,14 @@ const TrafficUI = (() => {
       ambient.onchange = () => send("set_ambient", parseInt(ambient.value, 10));
     }
 
+    const steps = $("steps");
+    if (steps) {
+      steps.oninput = () => { $("steps-val").textContent = steps.value; };
+      steps.onchange = () => send("set_max_steps", parseInt(steps.value, 10));
+    }
+    const stepMin = $("step-minutes");
+    if (stepMin) stepMin.onchange = () => send("set_step_minutes", parseInt(stepMin.value, 10));
+
     $("mode-mock").onclick = () => setMode("rule");
     $("mode-llm").onclick = () => setMode("llm");
 
@@ -42,11 +50,6 @@ const TrafficUI = (() => {
     if (ep) ep.onclick = openPrompts;
     const pc = $("prompt-close");
     if (pc) pc.onclick = () => { $("prompt-modal").style.display = "none"; };
-
-    const dsel = $("decision-step");
-    if (dsel) dsel.onchange = () => showDecisionOutput(dsel.value);
-    const dref = $("decision-refresh");
-    if (dref) dref.onclick = () => refreshDecisionSteps();
 
     const sigToggle = $("toggle-signals");
     if (sigToggle) sigToggle.onchange = () => TrafficMap.toggleSignals(sigToggle.checked);
@@ -228,10 +231,23 @@ const TrafficUI = (() => {
       agents.min = ui.agents_min;
       agents.max = ui.agents_max;
       agents.step = ui.agents_step;
+
+      const steps = $("steps");
+      if (steps) { steps.min = ui.steps_min; steps.max = ui.steps_max; steps.step = ui.steps_step; }
+      const sm = $("step-minutes");
+      if (sm && ui.step_minutes_options) {
+        sm.innerHTML = ui.step_minutes_options.map((m) => `<option value="${m}">${m} 分</option>`).join("");
+      }
     }
 
     $("agents").value = cfg.nb_agents;
     $("agents-val").textContent = cfg.nb_agents;
+
+    // 時間控制：週期數 slider + 每週期分鐘 dropdown（值由後端 cfg 下發）
+    const stepsEl = $("steps");
+    if (stepsEl) { stepsEl.value = cfg.max_steps; $("steps-val").textContent = cfg.max_steps; }
+    const smEl = $("step-minutes");
+    if (smEl) smEl.value = cfg.step_minutes;
 
     // 背景常態車流 slider（範圍/值由後端 [ambient] 下發）
     if (cfg.ambient) {
@@ -257,6 +273,7 @@ const TrafficUI = (() => {
     $("m-elapsed").textContent = `${state.elapsed_minutes} 分`;
     $("m-source").textContent = CORE_LABEL[state.decision_source] || state.decision_source;
     $("m-arrived").textContent = state.status_distribution.arrived || 0;
+    $("m-pending").textContent = (state.status_distribution && state.status_distribution.created) || 0;
     $("m-ambient").textContent = (state.metrics && state.metrics.ambient_count) || 0;
     $("m-crowded").textContent = state.metrics.crowded_road_count;
     $("m-avgcong").textContent = Number(state.metrics.average_congestion_proxy).toFixed(2);
@@ -275,6 +292,7 @@ const TrafficUI = (() => {
       ["壅塞", Number(a.congestion_proxy).toFixed(2)],
       ["距終點", `${(a.distance_to_destination / 1000).toFixed(2)} km`],
       ["鄰近車輛", a.nearby_agent_count],
+      ["上次重決", a.last_decision_cycle != null ? `第 ${a.last_decision_cycle} 步` : "—"],
     ];
     const rowsHtml = rows
       .map(([k, v]) => `<div class="row"><span>${k}</span><b>${escapeHtml(String(v))}</b></div>`)
@@ -324,33 +342,27 @@ const TrafficUI = (() => {
 
   function setProfiles(p) { profiles = p || {}; }
 
-  // ---- decision making 每步輸出檢視 ----
-  async function refreshDecisionSteps() {
-    const sel = $("decision-step");
-    if (!sel) return;
-    try {
-      const res = await fetch("/api/decision-outputs");
-      const data = await res.json();
-      const steps = data.steps || [];
-      sel.innerHTML = steps.map((n) => `<option value="${n}">#${n}</option>`).join("");
-      if (steps.length) showDecisionOutput(steps[steps.length - 1]);
-      else $("decision-output").textContent = "尚無 decision 輸出（LLM 模式跑過才有）。";
-    } catch (e) {
-      $("decision-output").textContent = "讀取失敗：" + e;
+  // ---- 決策日誌（即時，走 WebSocket；取代讀 output/*.txt）----
+  function updateDecisions(decisions, health) {
+    decisions = decisions || [];
+    health = health || {};
+    const h = $("decision-health");
+    if (h) {
+      h.innerHTML = health.source === "rule"
+        ? `<b>規則式核心</b>：無 LLM 決策日誌（確定性、不產生 LLM 決策）。`
+        : `本步重決 <b>${health.triggered || 0}</b> 台 · 解析成功 <b>${health.decided || 0}</b>`
+          + ` · fallback <b>${health.fallback || 0}</b>（fallback 多＝LLM 解析有問題）`;
     }
-  }
-
-  async function showDecisionOutput(n) {
-    try {
-      const res = await fetch("/api/decision-outputs/" + n);
-      if (!res.ok) { $("decision-output").textContent = "找不到 #" + n; return; }
-      const data = await res.json();
-      let text = data.text || "";
-      try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {} // 能 parse 就美化
-      $("decision-output").textContent = text;
-    } catch (e) {
-      $("decision-output").textContent = "讀取失敗：" + e;
+    const box = $("decision-output");
+    if (!box) return;
+    if (!decisions.length) {
+      box.innerHTML = `<span class="muted">${health.source === "rule"
+        ? "規則式核心：無 LLM 決策。" : "本步無事件車重決（無壅塞觸發）。"}</span>`;
+      return;
     }
+    box.innerHTML = decisions.map((d) =>
+      `<div class="dec-row"><b>${escapeHtml(d.name)}</b> → <span class="dec-mode">${escapeHtml(d.mode)}</span>`
+      + `<p class="dec-reason">${escapeHtml(d.reason || "")}</p></div>`).join("");
   }
 
   function escapeHtml(s) {
@@ -462,5 +474,5 @@ const TrafficUI = (() => {
   }
 
   return { bind, applyInitConfig, updateStats, inspectAgent, setProfiles,
-           refreshDecisionSteps, toast, setConnected, appendChat, setScenarios, activateTab };
+           updateDecisions, toast, setConnected, appendChat, setScenarios, activateTab };
 })();

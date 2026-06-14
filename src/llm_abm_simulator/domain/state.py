@@ -34,6 +34,7 @@ class AgentSnapshot:
     summary_source: str = "template"  # summary 來源："template" | "llm"
     decision_reason: str = ""       # 本步選擇此 active_mode 的原因（前端顯示）
     role: str = "event"             # "event"（去事件地點）| "ambient"（背景常態車流）
+    last_decision_cycle: int | None = None  # 上次重新決策的週期（inspect 顯示）
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -69,6 +70,8 @@ class SimulationState:
     metrics: dict[str, Any] = field(default_factory=dict)
     mode_distribution: dict[str, int] = field(default_factory=dict)
     status_distribution: dict[str, int] = field(default_factory=dict)
+    decisions: list[dict[str, Any]] = field(default_factory=list)   # 本步重決的車：name/mode/reason（前端決策日誌）
+    decision_health: dict[str, Any] = field(default_factory=dict)   # 解析健康度：triggered/decided/fallback/source
 
     def to_message(self) -> dict[str, Any]:
         """轉成 WebSocket JSON 訊息。"""
@@ -85,4 +88,6 @@ class SimulationState:
             "metrics": self.metrics,
             "mode_distribution": self.mode_distribution,
             "status_distribution": self.status_distribution,
+            "decisions": self.decisions,
+            "decision_health": self.decision_health,
         }

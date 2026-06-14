@@ -112,6 +112,9 @@ and agents react to it spatially.
 
 ## System architecture
 
+> 📋 **完整設計參考（paper 用）**：所有功能、設計決策、研究貢獻 vs 基礎建設、誠實限制、可重現性與文件地圖,
+> 集中在 [`docs/OVERVIEW_zh-TW.md`](docs/OVERVIEW_zh-TW.md)（單一入口,各項指向細節 doc 與程式碼）。
+
 ```mermaid
 flowchart TD
     UI["Web demo (Leaflet + Chart.js)"] <-->|WebSocket| WS["web/ session"]

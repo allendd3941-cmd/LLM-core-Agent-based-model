@@ -37,12 +37,23 @@ VLLM_MODEL=<HF 模型名>
 ### vLLM 伺服器啟動（在 Linux/GPU 機，與模擬器分開的環境）
 ```bash
 uv venv .vllm-env --python 3.12
-uv pip install --python .vllm-env vllm
-uv run --python .vllm-env vllm serve <HF模型> \
+uv pip install --python .vllm-env vllm ninja   # ninja 給 FlashInfer 取樣 kernel 的 JIT 編譯用
+# activate 後 .vllm-env/bin 才進 PATH（vllm 與 ninja 都才找得到）
+source .vllm-env/bin/activate
+vllm serve <HF模型> \
   --port 8001 --max-model-len 8192 \
   --gpu-memory-utilization 0.9 --max-num-seqs 64
 ```
+> ⚠️ **不要用 `uv run --python .vllm-env vllm serve`**：在專案目錄裡 `uv run` 是「專案感知」的，會去
+> 動/重建專案自己的 `.venv`（裡面沒有 vllm/ninja）而非用 `.vllm-env`，導致 `Failed to spawn: vllm`。
+> **務必 `source .vllm-env/bin/activate` 後再 `vllm serve …`**（這樣 `.vllm-env/bin` 進 PATH，vllm 與 ninja 都找得到）。
+> **為何要 ninja**：vLLM 用 FlashInfer 做 top-k/top-p 取樣，會在啟動時 JIT 編譯一個 CUDA kernel，需要 `ninja`；
+> 沒裝會在載完模型後崩於 `FileNotFoundError: 'ninja'`（`Engine core initialization failed`）。
+> JIT 還需要 `nvcc`（CUDA toolkit）；若補完 ninja 又報缺 nvcc，可改用**不編譯**的後備：
+> `VLLM_USE_FLASHINFER_SAMPLER=0 vllm serve …`（改用 PyTorch 原生取樣，免 ninja/nvcc，最省事）。
 > `--max-num-seqs` 是真並行度上限；`--max-model-len` 設小可留更多 VRAM 給並行。模型用 HF 格式（非 GGUF）。
+> 很新的 GPU（如 RTX 5090 / Blackwell, sm_120）需較新的 vllm + CUDA 12.8+ 的 torch；若見 `no kernel image`/
+> `sm_120 not supported` 即為版本太舊，需升級 vllm/torch。
 > vLLM 是現成的高吞吐推論伺服器，**不是本專案的研究貢獻**；貢獻在「應用層的事件觸發 + 並行批次整合」。
 
 ---
@@ -144,7 +155,9 @@ LLM 那層已可擴（上面的事件觸發+批次）；真正擋住大規模的
   重讀+重解析池檔（2 萬 persona 大檔尤其有感）；`save_pool` 更新、`clear_pool` 清。
 - **⑥ 前端 zoom/可視範圍裁切**（`engine._visible_agents`/`set_view`，`[ui].render_individual_max`/`agent_min_zoom`）：
   車數 ≤ 門檻 → 逐台送/畫；超過 → zoom out 只送道路壅塞、zoom in 只送「可視範圍內」的車（公尺框過濾，
-  經緯度只算這批）。把 WS 流量與前端繪製綁在「可視範圍」而非總車數。詳見 `docs/DEMO_FEATURES_zh-TW.md`。
+  經緯度只算這批）。把 WS 流量與前端繪製綁在「可視範圍」而非總車數。`set_view` 收到後**立即回推 `snapshot_now()`**
+  → zoom/pan 即時顯示（不等慢的模擬步）；送訊息加 `asyncio.Lock` 序列化。前端：道路線寬依 zoom 縮放+半透明、
+  車輛畫在高 z `agentPane`（永遠在道路之上）。詳見 `docs/DEMO_FEATURES_zh-TW.md`。
 
 > 驗證:`nearby_mode="exact"` + `town_mode="exact"` 時模擬結果與舊版一致(回歸基準);① 經 determinism / 計數測試確認未破。
 > 路徑規劃(每台一次 Dijkstra)實測便宜(~14ms/台),**未改**;若日後每步重算路成瓶頸再評估「終點最短路徑樹」。

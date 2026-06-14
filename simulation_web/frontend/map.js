@@ -14,6 +14,8 @@ const TrafficMap = (() => {
   let onAgentSelect = null;
   let ambientOn = true;       // 背景常態車流顯示開關
   let lastAgents = [];        // 最近一次 agents（toggle 背景車時即時重繪）
+  let lastRoads = [];         // 最近一次 roads（zoom 後重套線寬用）
+  let agentRenderer = null;   // 車輛專屬高 z canvas renderer（畫在道路之上）
   let onViewChange = null;    // ⑥ 回報可視範圍（zoom+bounds）給後端的 callback
   let _viewTimer = null;      // 視圖回報節流
 
@@ -50,8 +52,24 @@ const TrafficMap = (() => {
       maxZoom: 19,
     }).addTo(map);
     signalRenderer = L.canvas({ padding: 0.5 });
+    // 車輛專屬高 z-index pane → 永遠畫在彩色道路之上（canvas 同層時粗路線會蓋住小車點）
+    map.createPane("agentPane");
+    map.getPane("agentPane").style.zIndex = 450;   // 介於道路 overlayPane(400) 與 markerPane(600) 之間
+    agentRenderer = L.canvas({ pane: "agentPane", padding: 0.5 });
     map.on("zoomend", refreshSignalVisibility);
     map.on("zoomend moveend", scheduleReportView);   // ⑥ zoom/平移後回報可視範圍給後端
+    map.on("zoomend", () => { if (lastRoads.length) updateRoads(lastRoads); });  // zoom 後重套道路線寬
+  }
+
+  // 道路線寬依 zoom 縮放（拉遠細、街區層粗一點）；比車點細、半透明 → 不蓋住車。
+  function roadWeight() {
+    const z = map ? map.getZoom() : 13;
+    return z < 12 ? 1.5 : z < 14 ? 2.2 : 3;
+  }
+  // 車點半徑依 zoom 微幅放大（拉近更清楚）。
+  function zoomBump() {
+    const z = map ? map.getZoom() : 13;
+    return z >= 15 ? 2 : z >= 13 ? 1 : 0;
   }
 
   // ⑥ 回報目前 zoom + 可視範圍（節流）→ 後端大規模時據此只送範圍內的車
@@ -268,11 +286,12 @@ const TrafficMap = (() => {
   }
 
   function upsertAgentDot(a, ll, state) {
-    const radius = a.vehicle_type === "機車" ? 4 : 6;
+    const radius = (a.vehicle_type === "機車" ? 4 : 6) + zoomBump();
     let m = agentMarkers[a.agent_id];
     if (!m) {
       m = L.circleMarker(ll, {
-        radius, color: "#0b0f16", weight: 1, fillColor: STATE_COLOR[state], fillOpacity: 0.95,
+        renderer: agentRenderer, radius, color: "#0b0f16", weight: 1,
+        fillColor: STATE_COLOR[state], fillOpacity: 0.95,
       }).addTo(map);
       m.on("click", () => onAgentSelect && onAgentSelect(m._agentData));
       agentMarkers[a.agent_id] = m;
@@ -283,40 +302,44 @@ const TrafficMap = (() => {
     m._agentData = a;
   }
 
-  // 背景常態車流：低調灰小點（不可點選，純粹表現路網基礎負載）。
+  // 背景常態車流：低調灰小點（不可點選，純粹表現路網基礎負載）；畫在道路之上、依 zoom 放大。
   function upsertAmbientDot(a, ll) {
+    const radius = 3 + zoomBump();
     let m = agentMarkers[a.agent_id];
     if (!m) {
       m = L.circleMarker(ll, {
-        radius: 3, stroke: false, fillColor: AMBIENT_COLOR, fillOpacity: 0.5,
-        interactive: false,
+        renderer: agentRenderer, radius, stroke: false,
+        fillColor: AMBIENT_COLOR, fillOpacity: 0.7, interactive: false,
       }).addTo(map);
       agentMarkers[a.agent_id] = m;
     } else {
       m.setLatLng(ll);
+      m.setStyle({ radius });
     }
   }
 
   function updateRoads(roads) {
+    lastRoads = roads;
     // 先把所有主要道路還原底色
     Object.values(roadById).forEach((l) => l.setStyle(BASE_ROAD));
+    const w = roadWeight();   // 依目前 zoom 決定線寬（細、半透明，不蓋住車）
     const seen = new Set();
     roads.forEach((r) => {
       const layer = roadById[r.road_id];
       if (layer) {
         // 底圖已有（主要道路）→ 直接上色
-        layer.setStyle({ color: r.color, weight: 4, opacity: 0.95 });
+        layer.setStyle({ color: r.color, weight: w, opacity: 0.85 });
       } else if (r.coords && r.coords.length > 1) {
         // 底圖沒有（非主要道路）→ 用 snapshot 帶來的幾何疊畫一條，讓壅塞也看得到
         seen.add(r.road_id);
         const latlngs = r.coords.map((c) => [c[1], c[0]]); // [lng,lat] → [lat,lng]
         let ov = flowOverlay[r.road_id];
         if (!ov) {
-          ov = L.polyline(latlngs, { color: r.color, weight: 4, opacity: 0.95 }).addTo(map);
+          ov = L.polyline(latlngs, { color: r.color, weight: w, opacity: 0.85 }).addTo(map);
           flowOverlay[r.road_id] = ov;
         } else {
           ov.setLatLngs(latlngs);
-          ov.setStyle({ color: r.color, weight: 4, opacity: 0.95 });
+          ov.setStyle({ color: r.color, weight: w, opacity: 0.85 });
         }
       }
     });

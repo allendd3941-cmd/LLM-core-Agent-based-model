@@ -201,6 +201,14 @@ count = 40           # 穩態背景車數（前端 slider 可在 0..max_count �
 respawn = true       # 抵達後以新 OD 重生，維持穩態（false＝抵達即停）
 max_count = 10000      # 前端/介入可設的背景車上限（保護效能；數百台時開場/重設較久）
 
+# ----- 事件車分批出發（時空需求）-----
+# 真實事件是陸續抵達。每台事件車在 departure_cycle 前「尚未進場」（不動/不算流量/不顯示），到點才跑。
+# 出發時間在 [0, 視窗] 內依 profile 抽樣（seeded）。window_minutes=0 → 全部同時出發（＝舊行為）。
+# 背景車不分批。詳見 docs/DEMO_FEATURES_zh-TW.md。
+[departure]
+window_minutes = 0      # 出發視窗（分鐘）；0＝全部同時出發
+profile = "uniform"     # uniform（均勻）/ front_loaded（早到多）/ peak（接近開賽尖峰多）
+
 # ----- 可重現性 -----
 [reproducibility]
 seed = 42                    # 同 seed → 同軌跡
@@ -232,6 +240,11 @@ agents_step = 5
 # zoom < agent_min_zoom 時只顯示道路壅塞、不送/不畫車（前端 zoom 進去才看到範圍內車流）。
 render_individual_max = 1500
 agent_min_zoom = 14
+# 時間控制（前端可調「跑幾個週期 / 每週期幾分鐘」；改了需重設）
+steps_min = 6
+steps_max = 240
+steps_step = 6
+step_minutes_options = [1, 2, 5, 10]
 
 # ----- 各 OSM highway 型別的速限 / 車道 / 容量 -----
 # ⚠ 註：改這區只在「重建路網」時生效。bundle 的 data/tainan_roads.graphml

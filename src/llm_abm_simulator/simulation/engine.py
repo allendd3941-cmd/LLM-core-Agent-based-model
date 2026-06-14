@@ -87,6 +87,10 @@ class SimulationEngine:
         self._view: dict[str, float] | None = None        # 前端回報的可視範圍（公尺框 + zoom）；大規模裁切用
         self._to_metric = None                            # lazy pyproj transformer（set_view 用）
 
+        # Decision 即時日誌（走 WebSocket 取代讀 txt 檔）：本步重決的車 + 解析健康度
+        self._decision_log: list[dict[str, Any]] = []
+        self._decision_health: dict[str, Any] = {}
+
         # 決策核心（可選；見 decisions/registry.py）：規則式（rule）/ LLM 認知核心（llm）
         self._mock = MockDecisionPolicy(self.cfg, self.rng)   # 規則式核心（背景車流也用它）
         self._llm = LLMDecisionPolicy(self.cfg)
@@ -125,6 +129,7 @@ class SimulationEngine:
         self._build_ambient_agents()
         for agent in self.agents:
             self._place_agent(agent)
+        self._assign_departures()   # 事件車分批出發（時空需求）；window=0 → 全部 cycle 0 出發
 
         self.recorder.init_csv()
         self.scheduler.reset()
@@ -321,6 +326,37 @@ class SimulationEngine:
             return self.network.node_xy(agent.destination_node)
         return self._stadium_xy
 
+    def _assign_departures(self) -> None:
+        """事件車分批出發：依 `[departure]` 在 [0, 視窗] 內抽每台的 `departure_cycle`（seeded、可重現）。
+
+        `window_minutes=0` → 全部 0（同時出發＝舊行為）。未到 `departure_cycle` 的車標 `waiting_for_origin`
+        （尚未進場：不移動、不算流量、不顯示）。背景車不分批。視窗 clamp 到 max_steps-1，確保都會出發。
+        """
+        dc = config.DEPARTURE_CONFIG
+        window = max(0, round(dc.window_minutes / max(1, self.cfg.step_minutes)))
+        window = min(window, max(0, self.cfg.max_steps - 1))
+        for a in self._event_agents():
+            if window <= 0:
+                a.departure_cycle = 0
+                continue
+            u = self.rng.random()
+            if dc.profile == "front_loaded":
+                u = u * u                              # 偏早出發
+            elif dc.profile == "peak":
+                u = 1.0 - (1.0 - u) * (1.0 - u)        # 偏接近開賽（晚）
+            a.departure_cycle = int(round(u * window))
+            if a.departure_cycle > 0 and a.route_status == RouteStatus.MOVING:
+                a.waiting_for_origin = True            # 尚未進場
+                a.route_status = RouteStatus.CREATED
+
+    def _activate_due_departures(self, cycle: int) -> None:
+        """到出發時間的事件車轉為進場（開始移動）。"""
+        for a in self.agents:
+            if a.waiting_for_origin and a.departure_cycle <= cycle:
+                a.waiting_for_origin = False
+                if a.route_status == RouteStatus.CREATED:
+                    a.route_status = RouteStatus.MOVING
+
     # ==================================================================
     # 單步（對齊 GAML 每 cycle reflex）
     # ==================================================================
@@ -330,19 +366,23 @@ class SimulationEngine:
 
         cycle = self.scheduler.advance()
         self._elapsed_seconds = cycle * self.cfg.step_minutes * 60.0  # 號誌相位基準時間
+        self._activate_due_departures(cycle)   # 分批出發：到 departure_cycle 的事件車進場
 
-        # 1. 感知快照（用上一步遺留的道路壅塞）
+        # 1. 感知快照（用上一步遺留的道路壅塞；尚未進場的車跳過）
         if self.cfg.nearby_mode == "grid":
             self._build_nearby_grid()
         for agent in self.agents:
-            self._refresh_agent_perception(agent, pre_move=True)
+            if not agent.waiting_for_origin:
+                self._refresh_agent_perception(agent, pre_move=True)
 
         # 2. 決策（LLM 或 mock；LLM 失敗 fallback）
         env = self._environment_summary(cycle)
         self._apply_step_decisions(env, cycle)
 
-        # 3. 感知速度 + 移動（壅塞時重算路徑）；背景車抵達即以新 OD 重生（穩態背景流）
+        # 3. 感知速度 + 移動（壅塞時重算路徑）；尚未進場的車不動；背景車抵達即以新 OD 重生
         for agent in self.agents:
+            if agent.waiting_for_origin:
+                continue
             self._perceive_speed(agent)
             self._move_agent(agent)
         self._respawn_arrived_ambient()
@@ -350,11 +390,12 @@ class SimulationEngine:
         # 4. 重算道路 flow / congestion / weight（含背景車 → 路網層負載 + 瓶頸累積）
         self._recompute_flows()
 
-        # 5. 移動後感知快照（供 memory / 輸出）
+        # 5. 移動後感知快照（供 memory / 輸出；尚未進場的車跳過）
         if self.cfg.nearby_mode == "grid":
             self._build_nearby_grid()
         for agent in self.agents:
-            self._refresh_agent_perception(agent, pre_move=False)
+            if not agent.waiting_for_origin:
+                self._refresh_agent_perception(agent, pre_move=False)
 
         # 6. 指標 + 分佈（事件 KPI 只算事件車；路網層壅塞/流量含背景車）
         event_agents = self._event_agents()
@@ -374,9 +415,10 @@ class SimulationEngine:
         # 記下本步全市平均壅塞，供「下一步」算 congestion_trend
         self._prev_avg_congestion = env["average_congestion_proxy"]
 
-        # 7. memory（只給事件車；LLM 核心的摘要已於決策時重寫）+ CSV
+        # 7. memory（只給已進場的事件車；LLM 核心的摘要已於決策時重寫）+ CSV
         for agent in event_agents:
-            agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
+            if not agent.waiting_for_origin:
+                agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
         self.recorder.append_agent_rows(cycle, self.agents)
         self.recorder.append_road_rows(cycle, self.network.all_roads())
 
@@ -460,7 +502,10 @@ class SimulationEngine:
         - 事件車 + LLM 核心 + 關閉事件觸發：退回「每步對全部事件車決策」的舊行為。
         """
         sc = config.SCALING_CONFIG
-        event_agents = self._event_agents()
+        self._decision_log = []     # 本步決策日誌（走 WS 給前端；每步重置）
+        self._decision_health = {"triggered": 0, "decided": 0, "fallback": 0, "source": "rule"}
+        # 只決策「已進場」的事件車（尚未出發的不決策）
+        event_agents = [a for a in self._event_agents() if not a.waiting_for_origin]
         ambient_agents = self._ambient_agents()
 
         # 背景車一律規則式核心（不吃 LLM、不存記憶）
@@ -482,6 +527,7 @@ class SimulationEngine:
                 decisions = self._mock.decide_step(event_agents, env, cycle)
                 self.last_decision_source = "rule"
             self._apply_decisions(decisions)
+            self._record_decision_log(event_agents, decisions, cycle)
             return
 
         # 事件觸發：只決策觸發的事件車（順暢的車維持現有 mode）
@@ -494,7 +540,9 @@ class SimulationEngine:
         n_batches = math.ceil(len(triggered) / bsize)
         logger.info("step %d · LLM 重決 %d 台（壅塞觸發）→ %d 批 ×%d 並行（batch≤%d）",
                     cycle, len(triggered), n_batches, min(sc.concurrency, n_batches), bsize)
-        self._apply_decisions(self._llm_decide_batched(triggered, self._llm_environment(env), cycle, bsize))
+        decisions = self._llm_decide_batched(triggered, self._llm_environment(env), cycle, bsize)
+        self._apply_decisions(decisions)
+        self._record_decision_log(triggered, decisions, cycle)
 
     def _apply_decisions(self, decisions: dict[str, Any]) -> None:
         """依 agent_id 順序套用決策（確定性，與批次回來的順序無關）。"""
@@ -509,12 +557,37 @@ class SimulationEngine:
             if d.reason:
                 agent.decision_reason = d.reason
 
+    def _record_decision_log(self, targeted: list[VehicleAgent],
+                             decisions: dict[str, Any], cycle: int) -> None:
+        """記錄本步決策日誌（走 WS 取代讀 txt 檔）+ 解析健康度（fallback 數＝解析出問題的訊號）。
+
+        `targeted` 是本步被決策的車；`decisions` 是回傳的 {agent_id: StepDecision}。
+        有拿到 active_mode 的算「成功」、其餘算 fallback（維持現 mode）。日誌上限 50 筆控前端 payload。
+        """
+        log: list[dict[str, Any]] = []
+        decided = 0
+        for a in targeted:
+            d = decisions.get(a.agent_id)
+            if d is not None and getattr(d, "active_mode", ""):
+                decided += 1
+                a.last_decision_cycle = cycle
+                if len(log) < 50:
+                    log.append({"name": a.profile_name or a.agent_id,
+                                "mode": a.active_mode, "reason": a.decision_reason})
+        self._decision_log = log
+        self._decision_health = {
+            "triggered": len(targeted), "decided": decided,
+            "fallback": len(targeted) - decided, "source": self.last_decision_source,
+        }
+
     def _triggered_agents(self, cycle: int, agents: list[VehicleAgent]) -> list[VehicleAgent]:
         """回傳本步「需要重決」的 agent：壅塞訊號上升緣 + 過了 cooldown（只在傳入的事件車中找）。"""
         sc = config.SCALING_CONFIG
         thr = self.cfg.crowded_road_threshold
         out: list[VehicleAgent] = []
         for a in agents:
+            if a.waiting_for_origin:        # 尚未進場的車不重決
+                continue
             if a.route_status in (RouteStatus.ARRIVED, RouteStatus.ERROR):
                 a._prev_congestion_signal = False
                 continue
@@ -776,7 +849,7 @@ class SimulationEngine:
         cell = max(1.0, self.cfg.perception_radius_m)
         grid: dict[tuple[int, int], int] = {}
         for a in self.agents:
-            if a.route_status == RouteStatus.ARRIVED:
+            if a.route_status == RouteStatus.ARRIVED or a.waiting_for_origin:
                 continue
             key = (int(a.x // cell), int(a.y // cell))
             grid[key] = grid.get(key, 0) + 1
@@ -790,7 +863,7 @@ class SimulationEngine:
             r2 = agent.perception_radius ** 2
             count = 0
             for other in self.agents:
-                if other is agent or other.route_status == RouteStatus.ARRIVED:
+                if other is agent or other.route_status == RouteStatus.ARRIVED or other.waiting_for_origin:
                     continue
                 if (other.x - agent.x) ** 2 + (other.y - agent.y) ** 2 <= r2:
                     count += 1
@@ -903,12 +976,13 @@ class SimulationEngine:
         - 超過 且（尚未收到視圖 或 zoom < agent_min_zoom）→ 不送車（前端只看道路壅塞）。
         - 超過 且 zoom 夠近 → 只送「可視範圍內」的車（公尺框過濾，O(n)；經緯度只算這批）。"""
         ui = config.UI_CONFIG
+        active = [a for a in self.agents if not a.waiting_for_origin]   # 尚未進場的車不顯示
         if len(self.agents) <= ui.render_individual_max:
-            return self.agents
+            return active
         v = self._view
         if v is None or v.get("zoom", 0.0) < ui.agent_min_zoom:
             return []
-        return [a for a in self.agents
+        return [a for a in active
                 if v["minx"] <= a.x <= v["maxx"] and v["miny"] <= a.y <= v["maxy"]]
 
     def _snapshot(self, cycle: int, env: dict[str, Any],
@@ -931,6 +1005,7 @@ class SimulationEngine:
                 summary_source=a.summary_source,
                 decision_reason=a.decision_reason,
                 role=a.role,
+                last_decision_cycle=a.last_decision_cycle,
             ))
         # 只送有流量的道路（前端據此即時上色），避免每步送數萬條。
         # 附幾何座標：前端對「非主要道路底圖沒有的路」也能疊畫出壅塞。
@@ -959,6 +1034,7 @@ class SimulationEngine:
                 "history": self.recorder.history,
             },
             mode_distribution=mode_dist, status_distribution=status_dist,
+            decisions=self._decision_log, decision_health=self._decision_health,
         )
 
     def _xy_to_latlng(self, x: float, y: float) -> tuple[float, float]:
@@ -1142,6 +1218,10 @@ class SimulationEngine:
             rate.append(max(0, cum_arrived[i] - cum_arrived[i - 1]))
         sm = self.cfg.step_minutes
         event = self._event_agents()
+        # 出發曲線（分批出發）：每個週期有幾台事件車進場（departure_cycle=0 計入第一個週期）
+        first_cycle = cycles[0] if cycles else 1
+        dep_counter = Counter(max(a.departure_cycle, first_cycle) for a in event)
+        departures = [dep_counter.get(c, 0) for c in cycles]
         travel_min = [a.arrival_cycle * sm for a in event if a.arrival_cycle is not None]
         od_actual = Counter(a.origin_town for a in event if a.origin_town).most_common(12)
         od_expected = demand_mod.expected_distribution(self.towns, self._stadium_xy,
@@ -1153,6 +1233,7 @@ class SimulationEngine:
             "elapsed_minutes": [h["elapsed_minutes"] for h in hist],
             "cumulative_arrived": cum_arrived,
             "arrival_rate": rate,
+            "departures": departures,
             "avg_congestion": [h.get("average_congestion_proxy", 0) for h in hist],
             "crowded_road_count": [h.get("crowded_road_count", 0) for h in hist],
             "signal_waiting": [h.get("signal_waiting", 0) for h in hist],
