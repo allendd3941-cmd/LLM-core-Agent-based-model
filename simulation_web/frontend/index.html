@@ -66,14 +66,19 @@
         <label class="field">
           <span>週期數 <b id="steps-val">36</b></span>
           <input id="steps" type="range" min="6" max="240" step="6" value="36" />
-          <p class="hint">總共跑幾個週期（改了需重設）。</p>
+          <p class="hint">總共跑幾個週期。</p>
         </label>
 
         <label class="field">
           <span>每週期分鐘</span>
           <select id="step-minutes"></select>
-          <p class="hint">每個週期代表多少分鐘（改了需重設）。</p>
+          <p class="hint">每個週期代表多少分鐘。</p>
         </label>
+
+        <div class="field">
+          <button id="btn-apply" class="btn">✓ 套用設定（重新初始化）</button>
+          <p class="hint">調整「事件車數 / 背景車流 / 週期數 / 每週期分鐘」後，按此**一次套用**（拖滑桿只是預覽、不會自動生效；模擬進行中需先重設）。</p>
+        </div>
 
         <div class="field toggle">
           <span>決策核心 <em>（事件車）</em></span>

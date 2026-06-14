@@ -167,12 +167,18 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
   → 永遠在彩色道路之上;車點依 zoom 放大,背景車灰點調亮(r、opacity 提高)。
 - **限制(誠實)**:zoom out 時點不了單一車(本來就只看全局壅塞)。詳見 `docs/SCALING_zh-TW.md` §6。
 
-## 15. 前端自訂時間（週期數 / 每週期分鐘）（P3+）
+## 15. 前端自訂時間 + 「套用設定」按鈕（P3+）
 
 控制面板新增**「週期數」slider** 與**「每週期分鐘」下拉**,讓使用者自訂「跑幾個週期、每週期多久」。
-範圍由後端 `[ui].steps_min/max/step` 與 `step_minutes_options` 下發(單一真實來源)。比照 set_agents:
-**進行中無法變更(會提示先重設)**,改了重新初始化(因為 `step_minutes` 牽涉號誌相位、記憶已行時間、抵達換算)。
-協定:`control{action:"set_max_steps"|"set_step_minutes"}`;後端 `websocket._set_time`。
+範圍由後端 `[ui].steps_min/max/step` 與 `step_minutes_options` 下發(單一真實來源)。
+
+- **預覽 + 一次套用(避免拖滑桿就重設)**:**事件車數 / 背景車流 / 週期數 / 每週期分鐘**這四個改成
+  **「拖動只更新數字、不自動生效」**;調整後「**✓ 套用設定**」按鈕會高亮提示,按一下才**一次**送
+  `control{action:"apply_config", value:{nb_agents, ambient, max_steps, step_minutes}}` → 後端 `websocket._apply_config`
+  **只重新初始化一次**(不再每次微調都重設)。`init` 到達後高亮清除。
+- 進行中無法變更(會提示先重設);改 `step_minutes` 會重新初始化(牽涉號誌相位、記憶已行時間、抵達換算)。
+- (速度 slider 仍即時生效,因為它不需重新初始化。)
+- 後端仍保留 `set_agents`/`set_ambient`/`set_max_steps`/`set_step_minutes` 個別指令(相容),但前端統一走 `apply_config`。
 
 ## 16. 決策日誌即時化（P3+，取代讀 txt 檔）
 

@@ -116,6 +116,8 @@ class SimulationSession:
             await self._set_time(max_steps=int(value) if value is not None else None)
         elif action == "set_step_minutes":
             await self._set_time(step_minutes=int(value) if value is not None else None)
+        elif action == "apply_config":
+            await self._apply_config(value or {})
         elif action == "set_llm":
             await self._set_llm(value or {})
         elif action == "regenerate_profiles":
@@ -180,6 +182,33 @@ class SimulationSession:
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
         await self.status(f"agent 數設為 {n}")
+
+    async def _apply_config(self, v: dict) -> None:
+        """一次套用前端暫存的設定（事件車數/背景車數/週期數/每週期分鐘）→ 只重新初始化一次。
+
+        前端滑桿改成「預覽」（拖動只更新數字、不送），使用者按「套用設定」才送這個 → 避免每次微調都重設。
+        """
+        from .. import config
+        if self.engine.running or self.engine.scheduler.cycle > 0:
+            await self.status("模擬進行中無法變更設定，請先重設。")
+            return
+        changes: dict[str, Any] = {}
+        if v.get("nb_agents") is not None:
+            changes["nb_agents"] = max(UI_CONFIG.agents_min, min(int(v["nb_agents"]), UI_CONFIG.agents_max))
+        if v.get("max_steps") is not None:
+            changes["max_steps"] = max(UI_CONFIG.steps_min, min(int(v["max_steps"]), UI_CONFIG.steps_max))
+        if v.get("step_minutes") is not None and int(v["step_minutes"]) in UI_CONFIG.step_minutes_options:
+            changes["step_minutes"] = int(v["step_minutes"])
+        self.cfg = dataclasses.replace(self.cfg, **changes)
+        if v.get("ambient") is not None:
+            config.set_runtime_ambient_count(max(0, min(int(v["ambient"]), config.AMBIENT_CONFIG.max_count)))
+        await self._stop_run_task()
+        self.engine = SimulationEngine(self.cfg)
+        await asyncio.to_thread(self.engine.initialize)
+        await self.send(self.engine.init_payload())
+        await self.status(
+            f"已套用：{self.cfg.nb_agents} 事件車 · 背景 {config.effective_ambient_count()} · "
+            f"{self.cfg.max_steps} 週期 × {self.cfg.step_minutes} 分")
 
     async def _set_time(self, max_steps: int | None = None, step_minutes: int | None = None) -> None:
         """設定「跑幾個週期 / 每週期幾分鐘」（比照 set_agents：進行中先擋，改了重新初始化）。"""

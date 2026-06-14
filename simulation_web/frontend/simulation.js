@@ -8,6 +8,10 @@ const TrafficUI = (() => {
 
   const $ = (id) => document.getElementById(id);
 
+  // 「套用設定」待套用狀態（拖滑桿後高亮提示，套用/初始化後清除）
+  function markPending() { const b = $("btn-apply"); if (b) b.classList.add("pending"); }
+  function clearPending() { const b = $("btn-apply"); if (b) b.classList.remove("pending"); }
+
   function bind(sendFn) {
     send = sendFn;
 
@@ -22,23 +26,29 @@ const TrafficUI = (() => {
       send("set_speed", parseFloat(speed.value));
     };
 
+    // 事件車數/背景車/週期數/每週期分鐘：拖動只是「預覽」（更新數字、標記待套用），不自動送出；
+    // 按「套用設定」才一次送 apply_config（避免每次微調都重新初始化）。
     const agents = $("agents");
-    agents.oninput = () => { $("agents-val").textContent = agents.value; };
-    agents.onchange = () => send("set_agents", parseInt(agents.value, 10));
+    agents.oninput = () => { $("agents-val").textContent = agents.value; markPending(); };
 
     const ambient = $("ambient");
-    if (ambient) {
-      ambient.oninput = () => { $("ambient-val").textContent = ambient.value; };
-      ambient.onchange = () => send("set_ambient", parseInt(ambient.value, 10));
-    }
+    if (ambient) ambient.oninput = () => { $("ambient-val").textContent = ambient.value; markPending(); };
 
     const steps = $("steps");
-    if (steps) {
-      steps.oninput = () => { $("steps-val").textContent = steps.value; };
-      steps.onchange = () => send("set_max_steps", parseInt(steps.value, 10));
-    }
+    if (steps) steps.oninput = () => { $("steps-val").textContent = steps.value; markPending(); };
     const stepMin = $("step-minutes");
-    if (stepMin) stepMin.onchange = () => send("set_step_minutes", parseInt(stepMin.value, 10));
+    if (stepMin) stepMin.onchange = markPending;
+
+    const applyBtn = $("btn-apply");
+    if (applyBtn) applyBtn.onclick = () => {
+      send("apply_config", {
+        nb_agents: parseInt($("agents").value, 10),
+        ambient: parseInt($("ambient").value, 10),
+        max_steps: parseInt($("steps").value, 10),
+        step_minutes: parseInt($("step-minutes").value, 10),
+      });
+      clearPending();
+    };
 
     $("mode-mock").onclick = () => setMode("rule");
     $("mode-llm").onclick = () => setMode("llm");
@@ -266,6 +276,7 @@ const TrafficUI = (() => {
     }
     if (cfg.decision_source) $("m-source").textContent = CORE_LABEL[cfg.decision_source] || cfg.decision_source;
     setLlmInit(cfg.llm);
+    clearPending();   // init payload 到達＝設定已套用，清除待套用高亮
   }
 
   function updateStats(state) {
