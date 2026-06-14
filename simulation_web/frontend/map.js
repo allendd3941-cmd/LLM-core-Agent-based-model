@@ -112,10 +112,19 @@ const TrafficMap = (() => {
     map.on("zoomend", () => { if (lastRoads.length) updateRoads(lastRoads); });
     map.on("zoomend", () => { if (lastAgents.length) updateAgents(lastAgents); });  // zoom 後重套車點大小
 
-    // 彈性版面（地圖 + 底部面板）可能在地圖初始化後才長好 → 重算尺寸，避免下半部黑塊。
-    setTimeout(() => map.invalidateSize(), 200);
-    setTimeout(() => map.invalidateSize(), 900);
-    window.addEventListener("resize", () => map.invalidateSize());
+    // 地圖容器實際尺寸一變（版面長好 / 字型遲到重排 / 視窗縮放 / 收合面板 / 拖曳分隔條）就重算尺寸，
+    // 徹底解決「下半部黑塊」（不靠定時猜，ResizeObserver 會抓到所有重排）。
+    let _roRaf = null;
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => {
+        if (_roRaf) return;
+        _roRaf = requestAnimationFrame(() => { _roRaf = null; map.invalidateSize(); });
+      }).observe(map.getContainer());
+    } else {
+      window.addEventListener("resize", () => map.invalidateSize());
+    }
+    setTimeout(() => map.invalidateSize(), 200);                 // 首次繪製保險
+    window.addEventListener("load", () => map.invalidateSize()); // 所有資源（含字型）載完再補一次
   }
 
   // 外部（收合底部面板 / 切分頁 / 視窗變動）呼叫，讓地圖重算尺寸補滿圖磚。

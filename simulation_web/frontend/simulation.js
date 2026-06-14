@@ -462,15 +462,17 @@ const TrafficUI = (() => {
     };
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 
-    function bindGutter(gutter, varName, key, computeVal) {
+    function bindGutter(gutter, varName, key, computeVal, onActive) {
       if (!gutter) return;
       gutter.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         try { gutter.setPointerCapture(e.pointerId); } catch (_) {}
         gutter.classList.add("dragging");
+        if (onActive) onActive(true);   // 拖曳中關掉相關過場 → 跟手絲滑
         const move = (ev) => { layout.style.setProperty(varName, computeVal(ev)); mapResize(); };
         const up = () => {
           gutter.classList.remove("dragging");
+          if (onActive) onActive(false);
           try { gutter.releasePointerCapture(e.pointerId); } catch (_) {}
           gutter.removeEventListener("pointermove", move);
           gutter.removeEventListener("pointerup", up);
@@ -493,7 +495,7 @@ const TrafficUI = (() => {
     bindGutter(gh, "--dock-h", DH, (ev) => {
       const stage = dock.parentElement.getBoundingClientRect();
       return clamp(stage.bottom - ev.clientY, 120, window.innerHeight * 0.7) + "px";
-    });
+    }, (active) => { if (dock) dock.classList.toggle("resizing", active); });
   }
 
   // ===== 右側分頁 =====

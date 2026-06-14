@@ -291,6 +291,8 @@ select:hover, select:focus { border-color: var(--accent); outline: none; }
   box-shadow: var(--shadow); overflow: hidden; transition: height .25s ease;
 }
 .dock.collapsed { height: 46px; }
+/* 拖曳調整高度時關掉 height 過場 → 1:1 跟手、絲滑（放開恢復，收合動畫仍在） */
+.dock.resizing { transition: none; }
 .dock.collapsed .dock-body { display: none; }
 .dock-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .tabbar { display: flex; gap: 4px; }

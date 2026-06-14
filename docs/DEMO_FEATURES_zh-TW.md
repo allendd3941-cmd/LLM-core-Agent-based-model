@@ -227,7 +227,7 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
 - **可調窗格大小**:左控制面板↔地圖、地圖↔底部面板 之間各一條**可拖曳分隔條**(`#gutter-left`/`#gutter-dock`);
   用 CSS 變數 `--left-w`(clamp 240–560px)/`--dock-h`(clamp 120px–70vh)驅動;`pointer` 事件(滑鼠+觸控)、
   **localStorage 記住尺寸**、**雙擊分隔條還原預設**;拖動中/放開呼叫 `TrafficMap.resize()` 讓地圖補滿圖磚;底部面板收合時自動隱藏水平分隔條。
-- **地圖尺寸穩健**:`map.invalidateSize()` 於載入(200/900ms)、視窗縮放、收合/切分頁、`fitBounds` 前重算,避免彈性版面初始化早於版面導致的「下半部黑塊」。
+- **地圖尺寸穩健**:用 **`ResizeObserver` 監看地圖容器**,只要實際尺寸一變(版面長好/字型遲到重排/視窗縮放/收合面板/拖曳分隔條)就 `invalidateSize`(rAF 去抖),另加 `window.load` + `fitBounds` 前各補一次 → 徹底解決彈性版面初始化早於版面/字型載入導致的「下半部黑塊」(不靠定時猜)。
 - 對應程式:`simulation_web/frontend/`(`index.html` 重排+分隔條、`index.css` 依色票重寫+`--left-w`/`--dock-h`+分隔條樣式、
   `map.js` 彩點+底圖+色調+`resize()`、`simulation.js` 日誌/忙碌/心跳/收合/`setupResizers`、`app.js` 日誌/忙碌/心跳);`charts.js` 圖表色對齊色票。
 - 圖示字型 CDN 路徑修正:`@tabler/icons-webfont@2.47.0/tabler-icons.min.css`(該版 CSS 在套件根目錄,非 `dist/`)。
