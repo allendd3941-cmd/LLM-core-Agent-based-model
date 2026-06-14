@@ -52,8 +52,8 @@
 ## 1. 環境需求
 
 - Python 3.12+
-- 已含於 `requirements.txt`：`geopandas / shapely / pyproj / networkx / fastapi /
-  uvicorn / websockets`（`osmnx` 僅在「重新下載路網」時需要）。
+- 已含於 `requirements.txt` / `pyproject.toml` 基本依賴：`geopandas / shapely / pyproj / networkx /
+  osmnx / fastapi / uvicorn / websockets`。**`osmnx` 已是基本依賴**（全台南路網 gitignore、首次啟動自動下載建檔需要它，故不再是選用 extra）。
 - 不需要安裝 GAMA。
 
 > **Windows 安裝提示**：`geopandas` 會帶入 GDAL/fiona。若用本 repo 的 `.venv` 已安裝完成，

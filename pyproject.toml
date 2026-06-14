@@ -15,6 +15,7 @@ dependencies = [
     "shapely>=2.0",
     "pyproj>=3.6",
     "networkx>=3.2",
+    "osmnx>=1.9",        # 全台南路網首次啟動自動下載建檔需要（已從 optional 移入基本依賴）
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "websockets>=12.0",
@@ -28,7 +29,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-osm = ["osmnx>=1.9"]
 dev = ["pytest>=8.0"]
 
 # 套件原始碼放在 src/ 之下（src layout）。find 會自動探索 llm_abm_simulator 與 llm_server。

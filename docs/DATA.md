@@ -42,8 +42,9 @@ districts, ≈15.8k nodes / 42.5k edges, ≈24 MB), built by clipping the OSMnx 
 county boundary (`gis_loader.load_county_boundary_wgs84`).
 
 - **Git-ignored** (too large to track). It is **auto-built on first run** (`road_network.load_road_network`
-  → OSMnx download → save) — the machine running the app needs the `osm` extra and network access the
-  first time. To force a rebuild: delete the file (or `python -m llm_abm_simulator.spatial.build_roads`).
+  → OSMnx download → save) — `osmnx` is a base dependency (plain `uv sync` / `pip install -r requirements.txt`),
+  so the machine running the app only needs network access the first time. To force a rebuild: delete the file
+  (or `python -m llm_abm_simulator.spatial.build_roads`).
 - For an offline machine, build it elsewhere and copy `data/tainan_roads.graphml` over.
 - The earlier study-area-only network (`亞太棒球場_研究範圍.shp`) has been removed; coverage is now the full county.
 

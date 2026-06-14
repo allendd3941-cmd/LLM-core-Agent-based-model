@@ -18,7 +18,7 @@ strategy by an LLM — all visualised live on an interactive map.
 - **Real geography.** Routing and congestion run on the real **OSM drive network of the whole
   Tainan City** (all 37 districts, ~15.8k nodes / ~42.5k edges, `data/tainan_roads.graphml`) — not a
   synthetic grid. The graphml is git-ignored and **auto-built on first run** via OSMnx, clipped to the
-  TOWN_MOI county boundary (needs network + the `osm` extra); delete it to force a rebuild.
+  TOWN_MOI county boundary (osmnx ships in the base deps, needs network); delete it to force a rebuild.
 - **Spatial perception for LLMs.** Agents are given *anticipatory* spatial context: congestion
   **ahead along their planned route** (`road_ahead`), **district-level congestion hotspots**, a
   city-wide trend, and qualitative local traffic — encoded in compact natural-language labels so
@@ -257,10 +257,10 @@ LLM_abm_model/
 
 - **Python ≥ 3.12** and **[`uv`](https://docs.astral.sh/uv/)** (handles the virtualenv & deps).
 - For LLM mode: **Ollama** (or an Ollama-compatible API) with a pulled model.
-- **Road network (full Tainan City) is git-ignored and auto-built on first run** via OSMnx, so the
-  machine running the app needs the `osm` extra (`uv sync --extra osm`) **and network access** the
-  first time (≈1 min download; ~24 MB graphml, cached thereafter). To force a rebuild, delete
-  `data/tainan_roads.graphml` (or run `uv run python -m llm_abm_simulator.spatial.build_roads`).
+- **Road network (full Tainan City) is git-ignored and auto-built on first run** via OSMnx. `osmnx`
+  is a **base dependency** (plain `uv sync` installs it), so the machine running the app only needs
+  **network access** the first time (≈1 min download; ~24 MB graphml, cached thereafter). To force a
+  rebuild, delete `data/tainan_roads.graphml` (or run `uv run python -m llm_abm_simulator.spatial.build_roads`).
   For a fully offline machine, build the graphml elsewhere and copy it in.
 
 ---
