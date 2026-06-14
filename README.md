@@ -15,8 +15,10 @@ strategy by an LLM — all visualised live on an interactive map.
 
 ## Highlights
 
-- **Real geography.** Routing and congestion run on a bundled real **OSM road network of Tainan**
-  (~10k nodes / ~28k edges, `data/tainan_roads.graphml`) — not a synthetic grid.
+- **Real geography.** Routing and congestion run on the real **OSM drive network of the whole
+  Tainan City** (all 37 districts, ~15.8k nodes / ~42.5k edges, `data/tainan_roads.graphml`) — not a
+  synthetic grid. The graphml is git-ignored and **auto-built on first run** via OSMnx, clipped to the
+  TOWN_MOI county boundary (needs network + the `osm` extra); delete it to force a rebuild.
 - **Spatial perception for LLMs.** Agents are given *anticipatory* spatial context: congestion
   **ahead along their planned route** (`road_ahead`), **district-level congestion hotspots**, a
   city-wide trend, and qualitative local traffic — encoded in compact natural-language labels so
@@ -225,7 +227,7 @@ LLM_abm_model/
 ├─ simulation_web/frontend/       # Web demo (index.html / map.js / charts.js / simulation.js / app.js)
 ├─ config/simulation.toml         # single source of truth for tunable parameters
 ├─ data/
-│  ├─ tainan_roads.graphml        # bundled real OSM road network
+│  ├─ tainan_roads.graphml        # full-Tainan OSM drive network (git-ignored; auto-built on first run)
 │  └─ gis/                        # town / stadium / study-area shapefiles
 ├─ docs/                          # architecture + Chinese deep-dive guides
 ├─ tests/simulator/               # pytest suite (determinism, routing, parsing, engine…)
@@ -243,7 +245,7 @@ LLM_abm_model/
 - [`docs/PYTHON_SIMULATOR_zh-TW.md`](docs/PYTHON_SIMULATOR_zh-TW.md) — full guide: install, run,
   LLM mode, persona pool, Linux/SSH demo, architecture.
 - [`docs/ENVIRONMENT_zh-TW.md`](docs/ENVIRONMENT_zh-TW.md) — spatial perception design.
-- [`docs/MEMORY_zh-TW.md`](docs/MEMORY_zh-TW.md) — short-/long-term memory design.
+- [`docs/MEMORY_zh-TW.md`](docs/MEMORY_zh-TW.md) — single trip-memory design.
 - [`docs/ACTIVE_MODES_zh-TW.md`](docs/ACTIVE_MODES_zh-TW.md) — the five behavioural modes & routing.
 - [`docs/DEMAND_zh-TW.md`](docs/DEMAND_zh-TW.md) — gravity-model origin demand (decoupled from persona).
 - [`docs/DEMO_FEATURES_zh-TW.md`](docs/DEMO_FEATURES_zh-TW.md) — LLM model selector, post-sim analytics, pause-to-chat.
@@ -255,9 +257,11 @@ LLM_abm_model/
 
 - **Python ≥ 3.12** and **[`uv`](https://docs.astral.sh/uv/)** (handles the virtualenv & deps).
 - For LLM mode: **Ollama** (or an Ollama-compatible API) with a pulled model.
-- Optional, for rebuilding the road network from OSM: `uv sync --extra osm`, then
-  `uv run python -m llm_abm_simulator.spatial.build_roads`. The bundled `tainan_roads.graphml`
-  means the demo runs fully offline by default.
+- **Road network (full Tainan City) is git-ignored and auto-built on first run** via OSMnx, so the
+  machine running the app needs the `osm` extra (`uv sync --extra osm`) **and network access** the
+  first time (≈1 min download; ~24 MB graphml, cached thereafter). To force a rebuild, delete
+  `data/tainan_roads.graphml` (or run `uv run python -m llm_abm_simulator.spatial.build_roads`).
+  For a fully offline machine, build the graphml elsewhere and copy it in.
 
 ---
 

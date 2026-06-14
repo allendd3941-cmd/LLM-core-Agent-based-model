@@ -186,7 +186,12 @@ select:hover, select:focus { border-color: var(--accent); outline: none; }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .btn-block { width: 100%; }
 .btn-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; margin-top: 10px; }
+.btn-grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .btn-grid .btn { padding: 8px 4px; font-size: 11.5px; }
+
+/* LLM 專屬控件：規則式核心時隱藏（body.mode-llm 才顯示） */
+.llm-only { display: none; }
+body.mode-llm .llm-only { display: block; }
 /* 套用設定有未套用變更時高亮 */
 .btn.pending { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); font-weight: 600; }
 

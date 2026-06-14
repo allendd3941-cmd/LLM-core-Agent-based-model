@@ -3,7 +3,7 @@
 職責：
 - 載入 TOWN_MOI 行政區界並只保留臺南市（對齊 GAML ``ask town where county_name != 臺南市 die``）。
 - 載入亞太棒球場固定終點 point（對齊 GAML destination_point）。
-- 載入研究範圍 polygon（供 OSM 路網下載界定範圍）。
+- 載入縣界 polygon（TOWN_MOI 篩該縣市 union；供 OSM 路網下載界定範圍＝全縣）。
 - 統一處理 CRS：對外同時提供公尺座標（EPSG:3826，距離運算）與 WGS84（前端地圖）。
 
 所有 shapefile 以 UTF-8 讀取。
@@ -147,11 +147,19 @@ def load_stadium_point() -> tuple[Point, tuple[float, float]]:
     return metric, (wgs.y, wgs.x)
 
 
-def load_study_area_wgs84() -> BaseGeometry:
-    """載入研究範圍 polygon（WGS84），供 OSM 路網下載界定範圍。"""
-    logger.info("載入研究範圍: %s", config.STUDY_AREA_SHP)
-    gdf = gpd.read_file(str(config.STUDY_AREA_SHP), encoding="utf-8")
+def load_county_boundary_wgs84() -> BaseGeometry:
+    """載入「整個縣市界」polygon（WGS84），供 OSM 路網下載界定範圍。
+
+    以 TOWN_MOI 依目前場景的 ``county_filter`` 篩出該縣市全部行政區 → union 成單一 polygon。
+    取代舊的「球場研究範圍 shp」：預設路網涵蓋改為**全台南市 37 區**，而非球場周邊小範圍。
+    換縣市場景時自動依其 county_filter 取對應縣界。
+    """
+    logger.info("載入縣界（OSM 下載邊界）: %s", config.TOWN_SHP)
+    gdf = gpd.read_file(str(config.TOWN_SHP), encoding="utf-8")
     if gdf.crs is None:
-        gdf = gdf.set_crs(config.CRS_WGS84, allow_override=True)
+        gdf = gdf.set_crs(config.CRS_METRIC, allow_override=True)
+    county_col = _first_col(gdf, _COUNTYNAME_COLS)
+    if county_col is not None:
+        gdf = gdf[gdf[county_col].astype(str).str.contains(scenarios.active().county_filter, na=False)].copy()
     gdf = gdf.to_crs(config.CRS_WGS84)
     return gdf.geometry.union_all()

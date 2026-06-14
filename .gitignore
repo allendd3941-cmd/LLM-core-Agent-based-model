@@ -25,8 +25,12 @@ dist/
 output/
 *.log
 
-#OSMnx HTTP 快取（路網下載時產生；bundle 的 data/tainan_roads.graphml 才需 commit）
+#OSMnx HTTP 快取（路網下載時產生）
 cache/
+
+#全台南路網 graphml：檔案大，不進 repo；首次啟動 osmnx 依縣界自動下載建檔（需連網），之後讀檔。
+#要重建：刪掉此檔再啟動，或 python -m llm_abm_simulator.spatial.build_roads
+data/tainan_roads.graphml
 
 #編輯器與系統檔
 .vscode/

@@ -38,7 +38,7 @@
 |---|---|---|---|
 | 行政區 | 臺南市 37 區（界線 + 形心 + 人口 join） | `data/gis/TOWN_MOI_*.shp` | — |
 | 目的地 | 亞太棒球場 point（可換場景） | `data/gis/亞太棒球場_point.shp` | 球場 point 與最近路網節點有固定偏移，抵達以「到達目的地節點」為準 |
-| 路網 | 真實 OSM 道路 ~10k 節點 / ~28k 有向邊，烤入速度/容量 | `data/tainan_roads.graphml`（committed，離線可重現） | 前端底圖只畫主要道路（~7k）保效能；路徑規劃用全網 |
+| 路網 | 真實 OSM 道路，**涵蓋全台南市 37 區**（依 TOWN_MOI 縣界 union 下載），烤入速度/容量 | `data/tainan_roads.graphml`（**gitignore；首次啟動 osmnx 依縣界自動下載建檔**，之後讀檔） | 前端底圖只畫主要道路保效能；路徑規劃用全網。需 osmnx+網路建檔 |
 | 人口 | 各區人口（重力需求） | `data/gis/town_population.csv` | **近似值（~2023 量級）；正式 paper 換內政部戶政司/臺南市民政局月報** |
 | 號誌 | 號誌節點 + 相位軸 + offset | `data/tainan_signals.json`（由 `build_signals.py`） | **台南只有點位、無真實時相秒數**（時相僅臺北/澎湖且 ID 無法 join）→ cycle/yellow 為**合成值**，非真實號誌孿生 |
 | CRS | 距離/空間運算 EPSG:3826（公尺）；前端 EPSG:4326 | `config.CRS_METRIC/CRS_WGS84` | — |
@@ -240,7 +240,7 @@ CSV 輸出（`metrics.py`）：`agent_memory.csv` / `road_flow.csv`（只寫有�
 
 | # | 優化 | 從→到 | 開關 | 是否改物理 |
 |---|---|---|---|---|
-| ① | 節點→行政區索引一次（放置） | 每台掃全節點 shapely → O(1) 抽 | —（與 covers 一致） | 否（init 2萬台 ~1hr→~1min，**推估**） |
+| ① | 節點→行政區索引一次（放置）；建表 Point 預建一次 + STRtree bbox 先篩 | 放置每台掃全節點→O(1)；建表 O(節點×區)→~O(節點) | —（covers 一致、候選昇冪映回原順序） | 否（建表 6.4s→~0.3s，全台南每次重設 ~1–2s；2萬台 init ~1hr→~1min 為推估） |
 | ③ | 鄰近車數空間網格 | 每步 O(n²) → O(n)（cell=300m，3×3 桶−自己） | `[perception].nearby_mode=grid\|exact` | grid 近似（只餵 LLM）；exact 還原 |
 | ④ | 記憶摘要分批 | 單 prompt 爆 context → token 預算分批/並行 | —（不設每步重決上限） | 否 |
 | ⑤ | persona 池記憶體快取 | 每批重讀大檔 → 載入一次 | — | 否 |
@@ -363,7 +363,7 @@ decision_making **每批**用「當前路況文字（perception）」當 query �
 > **模型來源（重要）**：對話與介入的 LLM 解析都呼叫 `llm_client.generate(...)` **不帶 `model=`** → 一律使用**前端模型選擇器所設的後端+模型**（`llm_config.set_runtime_llm`），與決策/人物/記憶摘要整套共用。
 
 ### 20.5 路網建構與查詢（`spatial/road_network.py`、`geojson.py`）
-- 三層 fallback：bundle graphml →（允許時）OSMnx `graph_from_polygon(network_type="drive")` → 確定性合成網格。
+- 三層 fallback：讀 graphml →（不存在且允許時）OSMnx `graph_from_polygon(network_type="drive")` **以縣界(`gis_loader.load_county_boundary_wgs84`，TOWN_MOI 篩該縣市 union＝全台南 37 區)為下載邊界** → 確定性合成網格。graphml gitignore、首次自動建檔。
 - OSM 轉換：WGS84→EPSG:3826（pyproj）、去重複邊、依 OSM highway 套 `[highway_specs]` 速度/容量、邊幾何存 WKT；**只保留最大強連通分量**（避免 no-path）。
 - `nearest_node`：numpy 向量化 `argmin` 平方距離；`random_node_in_town`：`geom.covers` 內節點隨機，否則形心最近節點（與 engine ① 索引同邏輯確保一致）。
 - graphml 只存純量 + 邊 WKT，載回還原成 shapely LineString。`geojson.roads_to_geojson(only_major=True)`：前端底圖只送主要道路（~7k）保效能、全網仍供路徑規劃。

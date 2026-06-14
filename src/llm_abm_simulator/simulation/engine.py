@@ -192,19 +192,28 @@ class SimulationEngine:
         """① 一次性把每個節點歸到「覆蓋它的行政區」清單。
 
         判定（``geom.covers``）與成員順序刻意與 ``random_node_in_town`` 的 ``inside`` 完全一致，
-        確保改用索引後**放置結果與逐台版完全相同**（同 seed 同軌跡）。一次成本 ~O(節點×區)；
-        之後 ``_node_in_town`` 直接 O(1) 抽，取代每台車掃全節點的 shapely。
+        確保改用索引後**放置結果與逐台版完全相同**（同 seed 同軌跡）。
+
+        效能（往全台南數萬節點）：(i) **Point 預先建一次重用**（取代原本每區迴圈重複建構）；
+        (ii) **STRtree 以 bbox 先篩候選節點、再 covers 確認**，把 O(節點×區) 降到 ~O(節點)；
+        候選索引昇冪排序後映射回 ``nodes`` → covered 清單的**集合與順序與全掃版完全相同**。
         """
         from shapely.geometry import Point
+        from shapely import STRtree
         assert self.network is not None
         nodes = list(self.network.graph.nodes())
-        xy = {n: self.network.node_xy(n) for n in nodes}
+        pts = [Point(*self.network.node_xy(n)) for n in nodes]   # 預建一次，全程重用
+        tree = STRtree(pts)
         idx: dict[str, list[str]] = {}
         node_town: dict[str, str] = {}
         for t in self.towns:
             geom = t.geometry_metric
-            covered = ([n for n in nodes if geom.covers(Point(*xy[n]))]
-                       if geom is not None else [])
+            if geom is None:
+                idx[t.town_name] = []
+                continue
+            # bbox 先篩候選（query 回 pts 索引）→ 昇冪還原成 nodes 原順序 → covers 確認
+            cand = sorted(int(i) for i in tree.query(geom))
+            covered = [nodes[i] for i in cand if geom.covers(pts[i])]
             idx[t.town_name] = covered
             for n in covered:           # 反向表：邊界節點被多區覆蓋時，第一個區勝出（確定性）
                 node_town.setdefault(n, t.town_name)

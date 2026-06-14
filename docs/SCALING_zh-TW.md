@@ -143,6 +143,10 @@ LLM 那層已可擴（上面的事件觸發+批次）；真正擋住大規模的
 - **① 節點→行政區索引一次**（`engine._build_town_node_index`/`_node_in_town`）：放置不再每台車掃全節點做
   shapely（O(節點×車數)）→ init 時把每個節點歸到「覆蓋它的區」一次（與 `random_node_in_town` 的
   `covers` 判定一致 → **結果與逐台版完全相同**），之後 O(1) 抽。實測 init 2 萬台 **~1 小時 → ~1 分鐘**。
+  - **建表本身的加速（往全台南數萬節點）**：原本每區迴圈對每節點重複建 `Point`、且全掃 → 改成
+    **(i) Point 預先建一次重用**、**(ii) shapely `STRtree` 以 bbox 先篩候選節點再 `covers` 確認**，
+    把建表從 O(節點×區) 降到 ~O(節點)。候選索引昇冪排序映回 `nodes` → **covered 集合與順序與全掃版完全相同**
+    （determinism 不變）。實測:研究範圍網（1萬節點）建表 6.4s → 約 0.3s；全台南網每次重設約 1–2s（原會 ~30s）。
 - **③ 鄰近車數網格化**（`engine._build_nearby_grid`/`_count_nearby`，`[perception].nearby_mode`）：
   每步 O(車數²) 全比對 → 公尺方格桶 O(車數)。`grid`（預設、近似、只餵 LLM 感知）/ `exact`（精確、可還原舊值對照）。
 - **⑦ `current_town` 查表 O(1)**（`engine._current_town`，`[perception].town_mode`）：原本每步每台車對 37 區做

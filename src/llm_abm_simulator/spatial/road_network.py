@@ -4,8 +4,8 @@
 因此採三層 fallback 取得路網（對齊計畫決策：真實 OSM 為主、synthetic 為底）：
 
 1. 讀取 bundle 的 ``data/tainan_roads.graphml``（真實 OSM 道路，commit 進 repo，離線可重現）。
-2. 若不存在且允許下載 → 用 OSMnx 即時下載研究範圍內 drivable 道路並存成 graphml。
-3. 再不行 → 產生確定性 synthetic 網格路網（依研究範圍 bounds）。
+2. 若不存在且允許下載 → 用 OSMnx 即時下載「全縣（預設全台南市）」drivable 道路並存成 graphml。
+3. 再不行 → 產生確定性 synthetic 網格路網（依縣界 bounds）。
 
 對齊 GAML 能力：
 - ``as_edge_graph``      → networkx 有向圖（節點含公尺座標 + WGS84）。
@@ -139,13 +139,13 @@ def load_road_network(cfg: config.SimulationConfig | None = None) -> RoadNetwork
 
 # ---- OSM 建構 ----
 def build_osm_graph() -> nx.DiGraph:
-    """用 OSMnx 下載研究範圍內 drivable 道路，轉成本專案的有向圖。"""
+    """用 OSMnx 下載「全縣（預設全台南市）」drivable 道路，轉成本專案的有向圖。"""
     import osmnx as ox  # 延遲匯入：runtime 讀 bundle 時不需要 osmnx
 
     from . import gis_loader
 
-    polygon = gis_loader.load_study_area_wgs84()
-    logger.info("OSMnx 下載研究範圍 drivable 道路…")
+    polygon = gis_loader.load_county_boundary_wgs84()
+    logger.info("OSMnx 下載全縣 drivable 道路（全台南市 37 區）…")
     g_osm = ox.graph_from_polygon(polygon, network_type="drive")
     g = _convert_osm_graph(g_osm)
     return _largest_scc(g)
@@ -223,7 +223,7 @@ def build_synthetic_graph(cfg: config.SimulationConfig) -> nx.DiGraph:
     from . import gis_loader
 
     try:
-        bounds = gis_loader.load_study_area_wgs84().bounds  # (minx,miny,maxx,maxy) in lng/lat
+        bounds = gis_loader.load_county_boundary_wgs84().bounds  # (minx,miny,maxx,maxy) in lng/lat
     except Exception:  # noqa: BLE001
         bounds = (120.10, 22.95, 120.30, 23.15)
 

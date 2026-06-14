@@ -154,7 +154,8 @@
 ## 5. 可重現性（審稿人很在意）
 - **seeded RNG 全程**：同 seed → 同軌跡（agent 建立、出生地抽樣、背景 OD、路徑微擾、persona 分批 seed 皆走注入 RNG）。
 - **近似優化皆有開關還原**：`nearby_mode=exact`、`town_mode=exact` → 與未優化版一致,可當回歸基準。
-- **bundle 資料離線可重現**：`data/tainan_roads.graphml`（OSM 路網）、`data/tainan_signals.json`（號誌）、`data/gis/town_population.csv`（人口）committed。
+- **資料可重現**：`data/tainan_signals.json`（號誌）、`data/gis/town_population.csv`（人口）committed；
+  `data/tainan_roads.graphml`（**全台南市 OSM 路網**，≈15.8k 節點/42.5k 邊）改為 **gitignore + 首次依縣界 osmnx 自動建檔**（大檔不進 repo；要全離線可預先建好複製過去）。
 - **確定性 perception/記憶模板**：規則式核心完全不依賴 LLM;LLM 文字（決策理由、摘要）是唯一非確定元素,且**不回饋進物理**。
 
 ## 6. 誠實限制總表（paper 要主動標清）

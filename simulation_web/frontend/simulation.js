@@ -233,6 +233,7 @@ const TrafficUI = (() => {
   function setMode(mode) {
     $("mode-mock").classList.toggle("active", mode !== "llm");
     $("mode-llm").classList.toggle("active", mode === "llm");
+    document.body.classList.toggle("mode-llm", mode === "llm");  // 規則式時隱藏 LLM 專屬控件
     send("set_mode", mode);
   }
 
@@ -282,6 +283,7 @@ const TrafficUI = (() => {
     if (cfg.current_core) {
       $("mode-mock").classList.toggle("active", cfg.current_core !== "llm");
       $("mode-llm").classList.toggle("active", cfg.current_core === "llm");
+      document.body.classList.toggle("mode-llm", cfg.current_core === "llm");
     }
     if (cfg.decision_source) $("m-source").textContent = CORE_LABEL[cfg.decision_source] || cfg.decision_source;
     setLlmInit(cfg.llm);
@@ -562,8 +564,8 @@ const TrafficUI = (() => {
     $("chat-mode-ask").classList.toggle("active", m === "ask");
     $("chat-mode-act").classList.toggle("active", m === "act");
     $("chat-hint").textContent = m === "act"
-      ? "輸入介入指令（避開某區 / 從某區湧入 N 台），套用後即時更新地圖。"
-      : "暫停時詢問當前路況（唯讀，用所選 LLM 回答）。";
+      ? "介入指令：避開某區 / 某區湧入 N 台。"
+      : "詢問當前路況（唯讀）。";
     $("chat-text").placeholder = m === "act" ? "例如：避開東區 / 從永康區湧入300台" : "輸入問題後按 Enter…";
     $("chat-chips").innerHTML = (CHIPS[m] || [])
       .map(([q, l]) => `<button class="chip" data-q="${q}">${l}</button>`).join("");

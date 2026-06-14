@@ -4,8 +4,9 @@
 
     python -m llm_abm_simulator.spatial.build_roads
 
-會用 OSMnx 依研究範圍下載 drivable 道路、取最大強連通分量，存成
-``data/tainan_roads.graphml``（commit 進 repo 供離線/SSH 重現）。
+會用 OSMnx 依**縣界（預設全台南市 37 區）**下載 drivable 道路、取最大強連通分量，存成
+``data/tainan_roads.graphml``。此檔已 gitignore（大檔不進 repo）：首次啟動會自動建，
+要強制重建就刪檔再啟動、或直接跑本 CLI。
 
 若無法上網或不想用 OSM，可加 ``--synthetic`` 改產生確定性合成路網。
 """

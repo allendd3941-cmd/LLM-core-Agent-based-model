@@ -231,3 +231,11 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
 - 對應程式:`simulation_web/frontend/`(`index.html` 重排+分隔條、`index.css` 依色票重寫+`--left-w`/`--dock-h`+分隔條樣式、
   `map.js` 彩點+底圖+色調+`resize()`、`simulation.js` 日誌/忙碌/心跳/收合/`setupResizers`、`app.js` 日誌/忙碌/心跳);`charts.js` 圖表色對齊色票。
 - 圖示字型 CDN 路徑修正:`@tabler/icons-webfont@2.47.0/tabler-icons.min.css`(該版 CSS 在套件根目錄,非 `dist/`)。
+- **規則式核心隱藏 LLM 專屬控件**:決策核心選「規則式」時,**LLM 模型 / 重新生成人物 / Prompts / RAG** 自動隱藏(包進 `.llm-only`,`setMode`/初始化切 `body.mode-llm`,CSS 控制顯示),避免無關控件造成混淆;與核心無關的「上傳場景」移到「模擬設定」卡常駐。
+- **文案精簡為正式 demo 版**:前端說明文字(hint)精簡為短標籤,移除 beta 感贅述;完整設計理由保留在本檔各節與 `OVERVIEW`/`PAPER_SYSTEM_DESIGN`。對照:
+  - 套用設定 hint → 「拖動上方滑桿後按此套用(進行中需先重設)」(完整行為見 §15)。
+  - 背景車流 hint → 「常態背景車流(重力 OD);0＝關閉」(完整見 §11、`AMBIENT`)。
+  - 決策核心 hint → 「規則式:確定性基線。LLM:依人格與感知決策」(完整見 §10)。
+  - 重新生成人物 hint → 「重生 persona 原型池」(完整見 `OVERVIEW §3.7`)。
+  - 決策日誌 hint → 「LLM 壅塞觸發重決的車與原因 + 解析健康度」(完整見 §16;原始 JSON 仍寫 `output/`)。
+  - Prompts 說明移除(功能見 §5)、場景/事件車/週期數等自明 hint 移除。

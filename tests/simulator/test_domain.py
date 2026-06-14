@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from llm_abm_simulator.config import DEFAULT_CONFIG
+from llm_abm_simulator.config import ACTIVE_MODE_PROFILES, DEFAULT_CONFIG
 from llm_abm_simulator.domain.agent import VehicleAgent
 from llm_abm_simulator.domain.road import Road
 from llm_abm_simulator.domain.events import RouteStatus
@@ -12,9 +12,10 @@ def test_apply_active_mode_dict_partial_update():
     a = VehicleAgent.from_config("v1", DEFAULT_CONFIG)
     a.apply_active_mode({"mode_name": "avoid_congestion", "time_weight": 0.6})
     assert a.active_mode == "avoid_congestion"
+    # 套 mode 會先載入整組 active_mode profile（見 docs/ACTIVE_MODES_zh-TW.md），
+    # 再讓 dict 內明確給的欄位覆寫：time_weight 被覆寫成 0.6，未指定的欄位＝該 profile 的值。
     assert a.time_weight == 0.6
-    # 未提供的欄位保留預設
-    assert a.comfort_weight == DEFAULT_CONFIG.default_comfort_weight
+    assert a.comfort_weight == ACTIVE_MODE_PROFILES["avoid_congestion"].comfort_weight
 
 
 def test_apply_active_mode_string():

@@ -61,8 +61,8 @@
         <label class="field">
           <span>場景（圖層）</span>
           <div class="select-wrap"><i class="ti ti-stack-2" aria-hidden="true"></i><select id="scenario-select"></select></div>
-          <p class="hint">切換事件場景／圖層，重新初始化模擬。</p>
         </label>
+        <button id="btn-upload-scenario" class="btn btn-block"><i class="ti ti-upload" aria-hidden="true"></i> 上傳場景</button>
 
         <label class="field">
           <span class="field-head">速度 <b id="speed-val">1.0×</b></span>
@@ -72,19 +72,17 @@
         <label class="field">
           <span class="field-head">事件車數量 <b id="agents-val">10</b></span>
           <input id="agents" type="range" min="5" max="80" step="5" value="10" />
-          <p class="hint">前往事件地點（球場）的車流；可用 LLM 或規則式核心。</p>
         </label>
 
         <label class="field">
           <span class="field-head">背景常態車流 <b id="ambient-val">40</b></span>
           <input id="ambient" type="range" min="0" max="600" step="20" value="40" />
-          <p class="hint">不指定事件終點的常態背景車（雙邊重力 OD、一律規則式核心），造成路網基礎負載。0＝關閉。</p>
+          <p class="hint">常態背景車流（重力 OD）；0＝關閉。</p>
         </label>
 
         <label class="field">
           <span class="field-head">週期數 <b id="steps-val">36</b></span>
           <input id="steps" type="range" min="6" max="240" step="6" value="36" />
-          <p class="hint">總共跑幾個週期。</p>
         </label>
 
         <label class="field">
@@ -92,8 +90,8 @@
           <div class="select-wrap"><i class="ti ti-clock" aria-hidden="true"></i><select id="step-minutes"></select></div>
         </label>
 
-        <button id="btn-apply" class="btn btn-block"><i class="ti ti-check" aria-hidden="true"></i> 套用設定（重新初始化）</button>
-        <p class="hint">調整「事件車數 / 背景車流 / 週期數 / 每週期分鐘」後按此一次套用（拖滑桿只是預覽、不會自動生效；模擬進行中需先重設）。</p>
+        <button id="btn-apply" class="btn btn-block"><i class="ti ti-check" aria-hidden="true"></i> 套用設定</button>
+        <p class="hint">拖動上方滑桿後按此套用（進行中需先重設）。</p>
       </section>
 
       <section class="card">
@@ -102,27 +100,28 @@
           <button id="mode-mock" class="seg-btn active"><i class="ti ti-settings-2" aria-hidden="true"></i> 規則式</button>
           <button id="mode-llm" class="seg-btn"><i class="ti ti-sparkles" aria-hidden="true"></i> LLM</button>
         </div>
-        <p class="hint" id="mode-hint">規則式（Rule-based）：確定性啟發式核心，即時流暢、作對照基線。LLM：依人格與感知決策（需 Ollama/vLLM）。背景車流一律走規則式核心。</p>
+        <p class="hint" id="mode-hint">規則式：確定性基線。LLM：依人格與感知決策。</p>
 
-        <label class="field">
-          <span>LLM 模型 <em>（整套 LLM 共用）</em></span>
-          <div class="llm-pick">
-            <select id="llm-backend">
-              <option value="ollama">Ollama</option>
-              <option value="vllm">vLLM</option>
-            </select>
-            <select id="llm-model"></select>
+        <div class="llm-only">
+          <label class="field">
+            <span>LLM 模型 <em>（整套 LLM 共用）</em></span>
+            <div class="llm-pick">
+              <select id="llm-backend">
+                <option value="ollama">Ollama</option>
+                <option value="vllm">vLLM</option>
+              </select>
+              <select id="llm-model"></select>
+            </div>
+            <p class="hint" id="llm-model-hint"></p>
+          </label>
+
+          <button id="btn-regen-profiles" class="btn btn-block"><i class="ti ti-users" aria-hidden="true"></i> 重新生成人物</button>
+          <p class="hint">重生 persona 原型池。</p>
+
+          <div class="btn-grid cols-2">
+            <button id="btn-edit-prompts" class="btn"><i class="ti ti-edit" aria-hidden="true"></i> Prompts</button>
+            <button id="btn-rag" class="btn"><i class="ti ti-books" aria-hidden="true"></i> RAG</button>
           </div>
-          <p class="hint" id="llm-model-hint"></p>
-        </label>
-
-        <button id="btn-regen-profiles" class="btn btn-block"><i class="ti ti-users" aria-hidden="true"></i> 重新生成人物</button>
-        <p class="hint">清除 persona 池，下次 LLM 初始化重生一批；平時調 agent 數會重用同一批人，不會一直重生。</p>
-
-        <div class="btn-grid">
-          <button id="btn-edit-prompts" class="btn"><i class="ti ti-edit" aria-hidden="true"></i> Prompts</button>
-          <button id="btn-rag" class="btn"><i class="ti ti-books" aria-hidden="true"></i> RAG</button>
-          <button id="btn-upload-scenario" class="btn"><i class="ti ti-upload" aria-hidden="true"></i> 上傳場景</button>
         </div>
       </section>
 
@@ -244,7 +243,7 @@
                 <div class="log-col-head"><h3><i class="ti ti-brain" aria-hidden="true"></i> 決策日誌（即時）</h3></div>
                 <div id="decision-health" class="hint"></div>
                 <div id="decision-output" class="decision-output">尚無決策（LLM 核心、壅塞觸發時才會重決）。</div>
-                <p class="hint">LLM 核心壅塞觸發重決時：哪些車改了行為模式與原因 + 解析健康度（fallback 數＝解析出問題）。原始 JSON 仍寫在 <code>output/</code> 供離線檢核。</p>
+                <p class="hint">LLM 壅塞觸發重決的車與原因 + 解析健康度。</p>
               </section>
             </div>
           </div>

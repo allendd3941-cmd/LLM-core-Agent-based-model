@@ -181,11 +181,15 @@ pool_size = 500     # persona 原型數上限（建議數百；車多時循環�
 
 ## 5. 重新下載 / 重建路網（可重現）
 
-本專案沒有 ROADLINK 道路檔，路網改用真實 OSM 道路，已 bundle 成 `data/tainan_roads.graphml`。
-要重新產生（例如研究範圍變更）：
+本專案沒有 ROADLINK 道路檔，路網改用真實 OSM 道路，**涵蓋全台南市 37 區**（依 TOWN_MOI 縣界 union 下載，
+≈15.8k 節點 / 42.5k 邊、≈24 MB）。此檔 **已 gitignore（大檔不進 repo）**：
+
+- **首次啟動會自動建檔**（`load_road_network` 偵測檔案不存在 → OSMnx 依縣界下載 → 存檔），之後直接讀檔。
+  → 跑模擬那台機器**首次需 osmnx + 可上網**。
+- **要重建/換範圍**：刪掉 `data/tainan_roads.graphml` 再啟動，或手動跑：
 
 ```powershell
-# 用 OSMnx 依研究範圍重新下載（需安裝 osmnx 與可上網）
+# 用 OSMnx 依縣界（全台南市）重新下載（需安裝 osmnx 與可上網）
 python -m llm_abm_simulator.spatial.build_roads
 
 # 或產生確定性合成路網（不連網、不需 osmnx）
@@ -193,7 +197,8 @@ python -m llm_abm_simulator.spatial.build_roads --synthetic
 ```
 
 執行期路網來源採三層 fallback：① 讀 `data/tainan_roads.graphml` →
-② 允許時用 OSMnx 即時下載 → ③ 確定性合成網格。
+② 不存在且允許時用 OSMnx 即時下載（縣界）→ ③ 確定性合成網格。
+> 舊的「亞太棒球場_研究範圍.shp」已移除；下載邊界改用縣界。換縣市/目的地可用前端「上傳場景」或 `build_scenario.py`。
 
 ---
 
