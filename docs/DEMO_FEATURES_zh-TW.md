@@ -197,3 +197,29 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 `profile` 抽樣(seeded、可重現)。狀態列新增「未出發 N」,分析面板的抵達曲線加一條**「每步出發」**對照。
 - 設定 `[departure].window_minutes`(0＝全部同時出發＝舊行為,向後相容)、`profile`(uniform / front_loaded / peak)。
 - 背景車不分批(本即穩態連續流)。後端 `engine._assign_departures` / `_activate_due_departures`;完整見下方設定與 `OVERVIEW`。
+
+## 18. 前端整體重設計（專業化版面 + 系統日誌 + 多底圖）（P3+）
+
+把前端從「左控制／右圖表夾住地圖」改成 **頂列 + 左控制 + 大地圖 + 可收合底部面板**,並全面提升質感。
+**純前端改動,後端邏輯與 WebSocket 介面完全不動;所有元素 ID 保留**(map.js / charts.js / app.js 邏輯不變,
+simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減,僅移除 emoji 車輛圖示)。
+
+- **版面**:標題「LLM-abm 互動式交通模擬平台」+ 執行心跳 + 連線狀態 + 忙碌進度條(頂列);左側控制面板;
+  中央地圖佔版面最大;底部資料面板(即時 / 分析 / 對話 / 日誌 四分頁)可一鍵收合 → 地圖近全屏。
+  8 項 KPI 改成地圖上方的浮動玻璃列。
+- **色票**:單主色(天藍 `#3FB6FF`)+ 深石板底色三階 + 語義狀態色;**地圖點色 = UI = 圖表**全系統一致
+  (移動藍 / 等燈琥珀 / 抵達綠 / 異常灰 / 背景灰;壅塞 綠黃橘紅)。導入 Tabler 圖示字型(取代 UI emoji)
+  與 Inter + Noto Sans TC 字型(皆走 CDN,失敗自動退系統字/純文字)。
+- **系統日誌(專業 logging)**:底部「日誌」分頁。`simulation.js` 的 `log(level,msg)`,時間戳 + 分級上色
+  (info/success/warn/error/step)、自動捲動、上限 200 行、可清除。餵入:操作生命週期、每步摘要、status、
+  WS 連線/斷線、逾時、錯誤。與「決策日誌」並列同一分頁。
+- **全域忙碌動畫 + 執行心跳**:按下會重新初始化/開跑的重操作 → 頂列進度條左右流動 + 被按按鈕顯示 spinner;
+  收到 `init` 或首個 `state_update` 即解除,另設 90 秒保險逾時(`app.js` 的 `beginBusy/endBusy`)。
+  心跳列顯示 待命 / 處理中 / 執行中第N步 / 已暫停 / 已完成,使用者一眼知道在不在跑。純前端,不改後端行為。
+- **agent 渲染**:移除拉近時的 🚗/🏍️ emoji 圖示(觀感不專業),改為**乾淨彩色圓點**(Uber/Kepler 風):
+  狀態用色、車種用大小(汽車大、機車小)、細暗描邊;保留點擊檢視、spiderfy 散開、背景灰點、依 zoom 放大。
+- **多底圖切換**:`L.control.layers` 原生控制(右上),免金鑰底圖:CARTO 暗(預設)/淺 Positron / Voyager 街道 /
+  OSM / Esri 衛星;切底圖時道路、車流、號誌、行政區等疊加圖層自動保留。
+- **地圖色調微調**:地圖右上自訂控制,亮度 / 對比 / 飽和度 sliders(CSS `filter` 套在底圖圖磚層,不影響向量疊加)+ 還原。
+- 對應程式:`simulation_web/frontend/`(`index.html` 重排、`index.css` 依色票重寫、`map.js` 彩點+底圖+色調、
+  `simulation.js`+`app.js` 日誌/忙碌/心跳/收合);`charts.js` 圖表色對齊色票。

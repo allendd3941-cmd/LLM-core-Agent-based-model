@@ -28,8 +28,8 @@ const TrafficCharts = (() => {
     congestionChart = new Chart(document.getElementById("chart-congestion"), {
       type: "line",
       data: { labels: [], datasets: [
-        { label: "平均壅塞", data: [], borderColor: "#ff6d00", backgroundColor: "rgba(255,109,0,.15)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "壅塞路段數", data: [], borderColor: "#d50000", tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: "平均壅塞", data: [], borderColor: "#FF8A3D", backgroundColor: "rgba(255,138,61,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "壅塞路段數", data: [], borderColor: "#FF4D4D", tension: .3, pointRadius: 0, yAxisID: "y1" },
       ] },
       options: { ...lineOpts(1), scales: { ...lineOpts(1).scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
     });
@@ -37,15 +37,15 @@ const TrafficCharts = (() => {
     arrivedChart = new Chart(document.getElementById("chart-arrived"), {
       type: "line",
       data: { labels: [], datasets: [
-        { label: "已抵達", data: [], borderColor: "#00c853", backgroundColor: "rgba(0,200,83,.15)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "移動中", data: [], borderColor: "#3fb6ff", tension: .3, pointRadius: 0 },
+        { label: "已抵達", data: [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "移動中", data: [], borderColor: "#3FB6FF", tension: .3, pointRadius: 0 },
       ] },
       options: lineOpts(),
     });
 
     modeChart = new Chart(document.getElementById("chart-mode"), {
       type: "bar",
-      data: { labels: [], datasets: [{ label: "累積選擇次數", data: [], backgroundColor: "#3fb6ff" }] },
+      data: { labels: [], datasets: [{ label: "累積選擇次數", data: [], backgroundColor: "#3FB6FF" }] },
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true, ticks: { stepSize: 1 } } } },
     });
@@ -130,9 +130,9 @@ const TrafficCharts = (() => {
     arrivalChart = new Chart(document.getElementById("chart-arrival"), {
       type: "line",
       data: { labels, datasets: [
-        { label: "累積抵達", data: data.cumulative_arrived || [], borderColor: "#00c853", backgroundColor: "rgba(0,200,83,.15)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "每步抵達率", data: data.arrival_rate || [], borderColor: "#ffb300", tension: .3, pointRadius: 0, yAxisID: "y1" },
-        { label: "每步出發", data: data.departures || [], borderColor: "#b388ff", borderDash: [4, 3], tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: "累積抵達", data: data.cumulative_arrived || [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "每步抵達率", data: data.arrival_rate || [], borderColor: "#FFB020", tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: "每步出發", data: data.departures || [], borderColor: "#B388FF", borderDash: [4, 3], tension: .3, pointRadius: 0, yAxisID: "y1" },
       ] },
       options: { ...lineOpts(), scales: { ...lineOpts().scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
     });
@@ -141,7 +141,7 @@ const TrafficCharts = (() => {
     travelChart && travelChart.destroy();
     travelChart = new Chart(document.getElementById("chart-traveltime"), {
       type: "bar",
-      data: { labels: h.labels, datasets: [{ label: "agent 數", data: h.counts, backgroundColor: "#3fb6ff" }] },
+      data: { labels: h.labels, datasets: [{ label: "agent 數", data: h.counts, backgroundColor: "#3FB6FF" }] },
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true } } },
     });
@@ -153,8 +153,8 @@ const TrafficCharts = (() => {
     odChart = new Chart(document.getElementById("chart-od"), {
       type: "bar",
       data: { labels: od.map((r) => r[0]), datasets: [
-        { label: "實際", data: od.map((r) => r[1]), backgroundColor: "#3fb6ff" },
-        { label: "重力期望", data: od.map((r) => Math.round((expShare[r[0]] || 0) * total)), backgroundColor: "rgba(255,179,0,.7)" },
+        { label: "實際", data: od.map((r) => r[1]), backgroundColor: "#3FB6FF" },
+        { label: "重力期望", data: od.map((r) => Math.round((expShare[r[0]] || 0) * total)), backgroundColor: "rgba(255,176,32,.7)" },
       ] },
       options: { responsive: true, animation: false, plugins: { legend: { labels: { boxWidth: 12 } } },
         scales: { x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 60 } }, y: { grid: { color: GRID }, beginAtZero: true } } },
@@ -178,8 +178,8 @@ const TrafficCharts = (() => {
     volumeChart = new Chart(document.getElementById("chart-volume"), {
       type: "line",
       data: { labels, datasets: [
-        { label: "事件車", data: net.volume_event || [], borderColor: "#3fb6ff", backgroundColor: "rgba(63,182,255,.35)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "背景車", data: net.volume_ambient || [], borderColor: "#8a93a6", backgroundColor: "rgba(138,147,166,.35)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "事件車", data: net.volume_event || [], borderColor: "#3FB6FF", backgroundColor: "rgba(63,182,255,.35)", fill: true, tension: .3, pointRadius: 0 },
+        { label: "背景車", data: net.volume_ambient || [], borderColor: "#586275", backgroundColor: "rgba(88,98,117,.4)", fill: true, tension: .3, pointRadius: 0 },
       ] },
       options: { ...vopts, scales: { ...vopts.scales, y: { ...vopts.scales.y, stacked: true } } },
     });

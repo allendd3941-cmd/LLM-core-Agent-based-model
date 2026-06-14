@@ -1,24 +1,29 @@
 /* ================================================================
-   simulation.js — 控制面板 UI、狀態顯示、agent 檢視
+   simulation.js — 控制面板 UI、狀態顯示、agent 檢視、系統日誌
    只負責 DOM 與發送控制指令；不含模擬邏輯。
    ================================================================ */
 const TrafficUI = (() => {
   let send = null; // 由 app.js 注入：send(action, value)
-  let profiles = {}; // name → {identity, traits}（讀自 agent_profile_output_1.txt）
+  let profiles = {}; // name → {identity, traits}
+  let busyBtn = null; // 目前顯示 spinner 的按鈕
 
   const $ = (id) => document.getElementById(id);
 
-  // 「套用設定」待套用狀態（拖滑桿後高亮提示，套用/初始化後清除）
+  // 「套用設定」待套用狀態（拖滑桿後高亮，套用/初始化後清除）
   function markPending() { const b = $("btn-apply"); if (b) b.classList.add("pending"); }
   function clearPending() { const b = $("btn-apply"); if (b) b.classList.remove("pending"); }
+
+  // ---- 按鈕忙碌 spinner ----
+  function markBtnBusy(el) { clearBtnBusy(); if (el) { el.classList.add("loading"); busyBtn = el; } }
+  function clearBtnBusy() { if (busyBtn) { busyBtn.classList.remove("loading"); busyBtn = null; } }
 
   function bind(sendFn) {
     send = sendFn;
 
-    $("btn-start").onclick = () => send("start");
+    $("btn-start").onclick = (e) => { markBtnBusy(e.currentTarget); send("start"); };
     $("btn-pause").onclick = () => send("pause");
-    $("btn-step").onclick = () => send("step");
-    $("btn-reset").onclick = () => send("reset");
+    $("btn-step").onclick = (e) => { markBtnBusy(e.currentTarget); send("step"); };
+    $("btn-reset").onclick = (e) => { markBtnBusy(e.currentTarget); send("reset"); };
 
     const speed = $("speed");
     speed.oninput = () => {
@@ -27,7 +32,7 @@ const TrafficUI = (() => {
     };
 
     // 事件車數/背景車/週期數/每週期分鐘：拖動只是「預覽」（更新數字、標記待套用），不自動送出；
-    // 按「套用設定」才一次送 apply_config（避免每次微調都重新初始化）。
+    // 按「套用設定」才一次送 apply_config。
     const agents = $("agents");
     agents.oninput = () => { $("agents-val").textContent = agents.value; markPending(); };
 
@@ -40,7 +45,8 @@ const TrafficUI = (() => {
     if (stepMin) stepMin.onchange = markPending;
 
     const applyBtn = $("btn-apply");
-    if (applyBtn) applyBtn.onclick = () => {
+    if (applyBtn) applyBtn.onclick = (e) => {
+      markBtnBusy(e.currentTarget);
       send("apply_config", {
         nb_agents: parseInt($("agents").value, 10),
         ambient: parseInt($("ambient").value, 10),
@@ -54,7 +60,7 @@ const TrafficUI = (() => {
     $("mode-llm").onclick = () => setMode("llm");
 
     const regen = $("btn-regen-profiles");
-    if (regen) regen.onclick = () => send("regenerate_profiles");
+    if (regen) regen.onclick = (e) => { markBtnBusy(e.currentTarget); send("regenerate_profiles"); };
 
     const ep = $("btn-edit-prompts");
     if (ep) ep.onclick = openPrompts;
@@ -75,8 +81,12 @@ const TrafficUI = (() => {
     };
 
     document.querySelectorAll(".tab-btn").forEach((b) => {
-      b.onclick = () => activateTab(b.dataset.tab);
+      b.onclick = () => { activateTab(b.dataset.tab); expandDock(); };
     });
+    const dockToggle = $("btn-dock-toggle");
+    if (dockToggle) dockToggle.onclick = () => { const d = $("dock"); if (d) d.classList.toggle("collapsed"); };
+    const clearLog = $("btn-clear-log");
+    if (clearLog) clearLog.onclick = () => { const b = $("system-log"); if (b) b.innerHTML = ""; };
 
     const chatSend = $("chat-send"), chatText = $("chat-text");
     if (chatSend) chatSend.onclick = sendChat;
@@ -107,7 +117,7 @@ const TrafficUI = (() => {
 
   // ===== RAG 知識庫 =====
   async function openRag() {
-    $("util-title").textContent = "📚 RAG 知識庫";
+    $("util-title").textContent = "RAG 知識庫";
     $("util-body").innerHTML =
       `<p class="hint">上傳純文字 / markdown / csv，decision 時會檢索相關內容注入。</p>`
       + `<label class="lg-toggle"><input type="checkbox" id="rag-enabled"> 啟用 RAG</label>`
@@ -133,7 +143,7 @@ const TrafficUI = (() => {
 
   // ===== 上傳自訂場景 =====
   function openUpload() {
-    $("util-title").textContent = "⬆ 上傳自訂場景";
+    $("util-title").textContent = "上傳自訂場景";
     $("util-body").innerHTML =
       `<p class="hint">上傳本專案格式的路網 graphml（由 build_scenario / build_roads 產生）＋選填人口 CSV。</p>`
       + `<div class="prompt-field"><label>場景 key（英數）</label><input id="up-key" type="text" /></div>`
@@ -169,7 +179,7 @@ const TrafficUI = (() => {
     }
   }
 
-  let llmVllmModels = []; // 從 init 帶入的 vLLM 候選登錄表
+  let llmVllmModels = [];
 
   function setLlmInit(llm) {
     if (!llm) return;
@@ -179,7 +189,6 @@ const TrafficUI = (() => {
     refreshLlmModels(llm.backend || "ollama", llm.current_model || "");
   }
 
-  // 依後端填模型下拉：vllm 用登錄表、ollama 即時查實裝模型
   async function refreshLlmModels(backend, preselect) {
     const lm = $("llm-model");
     if (!lm) return;
@@ -214,7 +223,6 @@ const TrafficUI = (() => {
     }
   }
 
-  // 決策核心顯示名（核心 key 同時是 engine.last_decision_source）
   const CORE_LABEL = { rule: "規則式", llm: "LLM", mock: "規則式" };
 
   function setMode(mode) {
@@ -227,7 +235,6 @@ const TrafficUI = (() => {
     if (!cfg) return;
     $("m-cycle").textContent = `0 / ${cfg.max_steps}`;
 
-    // slider 範圍由後端 [ui] 設定下發（單一真實來源），HTML 的值只是 init 前的 fallback
     const ui = cfg.ui;
     if (ui) {
       const speed = $("speed");
@@ -253,13 +260,11 @@ const TrafficUI = (() => {
     $("agents").value = cfg.nb_agents;
     $("agents-val").textContent = cfg.nb_agents;
 
-    // 時間控制：週期數 slider + 每週期分鐘 dropdown（值由後端 cfg 下發）
     const stepsEl = $("steps");
     if (stepsEl) { stepsEl.value = cfg.max_steps; $("steps-val").textContent = cfg.max_steps; }
     const smEl = $("step-minutes");
     if (smEl) smEl.value = cfg.step_minutes;
 
-    // 背景常態車流 slider（範圍/值由後端 [ambient] 下發）
     if (cfg.ambient) {
       const amb = $("ambient");
       if (amb) {
@@ -269,14 +274,13 @@ const TrafficUI = (() => {
       }
       $("m-ambient").textContent = cfg.ambient.active != null ? cfg.ambient.active : 0;
     }
-    // 決策核心：依後端目前核心設定 active（不發送）
     if (cfg.current_core) {
       $("mode-mock").classList.toggle("active", cfg.current_core !== "llm");
       $("mode-llm").classList.toggle("active", cfg.current_core === "llm");
     }
     if (cfg.decision_source) $("m-source").textContent = CORE_LABEL[cfg.decision_source] || cfg.decision_source;
     setLlmInit(cfg.llm);
-    clearPending();   // init payload 到達＝設定已套用，清除待套用高亮
+    clearPending();
   }
 
   function updateStats(state) {
@@ -296,7 +300,7 @@ const TrafficUI = (() => {
       ["姓名", a.profile_name || "—"],
       ["車種", a.vehicle_type],
       ["行為模式", a.active_mode],
-      ["狀態", a.waiting_at_signal ? "🚦 等紅燈" : a.route_status],
+      ["狀態", a.waiting_at_signal ? "等紅燈" : a.route_status],
       ["起點區", a.origin_town],
       ["目前區", a.current_town || "—"],
       ["速度", `${a.speed_kmh} km/h`],
@@ -309,12 +313,10 @@ const TrafficUI = (() => {
       .map(([k, v]) => `<div class="row"><span>${k}</span><b>${escapeHtml(String(v))}</b></div>`)
       .join("");
 
-    // 決策理由
     const reason = a.decision_reason
       ? `<div class="inspect-block"><span>決策理由（選此行為模式的原因）</span><p>${escapeHtml(a.decision_reason)}</p></div>`
       : "";
 
-    // 長期記憶摘要：有內容才顯示來源標籤；LLM 模式尚未生成（pending）就留空提示
     let summary;
     if (a.trip_summary) {
       const srcLabel = a.summary_source === "llm" ? "LLM 摘要" : "模板";
@@ -324,7 +326,6 @@ const TrafficUI = (() => {
       summary = `<div class="inspect-block"><span>長期記憶 · 旅次摘要</span><p class="muted">${placeholder}</p></div>`;
     }
 
-    // 人物背景（讀自 agent_profile_output_1.txt，以姓名對應）
     const persona = renderPersona(a.profile_name);
 
     $("agent-inspect").innerHTML = rowsHtml + reason + summary + persona;
@@ -353,7 +354,7 @@ const TrafficUI = (() => {
 
   function setProfiles(p) { profiles = p || {}; }
 
-  // ---- 決策日誌（即時，走 WebSocket；取代讀 output/*.txt）----
+  // ---- 決策日誌（即時，走 WebSocket）----
   function updateDecisions(decisions, health) {
     decisions = decisions || [];
     health = health || {};
@@ -394,13 +395,46 @@ const TrafficUI = (() => {
     $("conn-text").textContent = ok ? "已連線" : "連線中斷";
   }
 
-  // ===== 右側分頁（即時 / 分析 / 對話）=====
+  // ===== 系統日誌（專業 logging）=====
+  function fmtTime() { return new Date().toTimeString().slice(0, 8); }
+
+  function log(level, msg) {
+    const box = $("system-log");
+    if (!box) return;
+    const line = document.createElement("div");
+    line.className = "log-line log-" + (level || "info");
+    line.innerHTML = `<span class="log-ts">${fmtTime()}</span><span class="log-msg">${escapeHtml(String(msg))}</span>`;
+    box.appendChild(line);
+    while (box.children.length > 200) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // ===== 全域忙碌動畫 + 執行心跳 =====
+  function setBusyBar(on) {
+    const b = $("busy-bar");
+    if (b) b.classList.toggle("active", !!on);
+  }
+
+  function setRunState(state, cycle) {
+    const el = $("run-state"), t = $("run-state-text");
+    if (!el || !t) return;
+    el.className = "run-state run-" + state;
+    t.textContent = state === "running" ? `執行中 第 ${cycle || 0} 步`
+      : state === "paused" ? "已暫停"
+      : state === "done" ? "已完成"
+      : state === "busy" ? "處理中…"
+      : "待命";
+  }
+
+  function expandDock() { const d = $("dock"); if (d) d.classList.remove("collapsed"); }
+
+  // ===== 右側分頁 =====
   function activateTab(name) {
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
   }
 
-  // ===== 編輯 Prompts（demo 即時改 prompt）=====
+  // ===== 編輯 Prompts =====
   async function openPrompts() {
     const box = $("prompt-fields");
     box.innerHTML = "載入中…";
@@ -435,7 +469,7 @@ const TrafficUI = (() => {
     }
   }
 
-  // ===== 場景（圖層）切換 =====
+  // ===== 場景切換 =====
   function setScenarios(scn) {
     const sel = $("scenario-select");
     if (!sel || !scn) return;
@@ -445,7 +479,7 @@ const TrafficUI = (() => {
     sel.onchange = () => send("set_scenario", sel.value);
   }
 
-  // ===== 與模擬對話 / 介入 =====
+  // ===== 對話 / 介入 =====
   let chatMode = "ask";
   const CHIPS = {
     ask: [["現在哪裡最塞？", "哪裡最塞？"], ["目前抵達多少人？還有多少在路上？", "抵達多少？"],
@@ -485,5 +519,6 @@ const TrafficUI = (() => {
   }
 
   return { bind, applyInitConfig, updateStats, inspectAgent, setProfiles,
-           updateDecisions, toast, setConnected, appendChat, setScenarios, activateTab };
+           updateDecisions, toast, setConnected, appendChat, setScenarios, activateTab,
+           log, setBusyBar, setRunState, clearBtnBusy, expandDock };
 })();

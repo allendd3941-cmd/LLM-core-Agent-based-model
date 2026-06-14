@@ -116,10 +116,13 @@
 | **自然語言介入** | 受限動作集（避開某區/某區湧入 N 台）,關鍵字優先解析 | `llm_server/sim_intervene.py`/`engine.apply_intervention` |
 | **網頁上傳場景** | 上傳本專案格式 graphml + 人口 CSV → 註冊切換 | `web/app.py` `/api/scenario/upload` |
 | **暫停對話查詢** | 暫停時用當前路況 + LLM 回答（唯讀） | `llm_server/sim_chat.py` |
-| **分頁化 UI** | 即時/分析/對話三分頁 + 進階收進 Modal | `simulation.js` |
+| **分頁化 UI** | 頂列 + 左控制 + 大地圖 + 可收合底部面板（即時/分析/對話/日誌四分頁）；KPI 浮在地圖上 | `simulation.js`/`index.html` |
 | **自訂時間** | 前端可調「週期數 / 每週期分鐘」（範圍由 `[ui]` 下發，改了重設） | `websocket._set_time` |
 | **決策日誌即時化** | 重決批次 → WS 推送（mode/reason + 解析健康度 fallback 數）；取代讀 txt 檔，原始 JSON 仍寫 `output/` 供離線檢核 | `engine._record_decision_log`/`simulation.js updateDecisions` |
-- [doc] DEMO_FEATURES_zh-TW.md（P0–P3 全列）
+| **系統日誌 + 忙碌動畫 + 執行心跳** | 任何操作有時間戳分級日誌；重操作有頂列進度條+按鈕 spinner（純前端，收到 init/state 解除）；心跳顯示在不在跑 | `app.js beginBusy/endBusy`/`simulation.js log/setRunState` |
+| **乾淨彩點 agent** | 移除 emoji 車圖，改狀態色圓點+車種大小（更專業） | `map.js upsertAgentDot` |
+| **多底圖 + 色調微調** | 5 種免金鑰底圖（暗/淺/Voyager/OSM/衛星）+ 亮度/對比/飽和 sliders | `map.js buildBaseLayers/addAppearanceControl` |
+- [doc] DEMO_FEATURES_zh-TW.md（P0–P3 全列；§18 為前端整體重設計）
 
 ### 3.11 事件車分批出發（時空需求）
 - **定位**：事件車**陸續進場**而非全部 cycle 0 同時出發——加每台 `departure_cycle`，之前「尚未進場」
