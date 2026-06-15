@@ -158,7 +158,7 @@ pool_size = 500                 # persona 原型數上限（建議數百；車�
 event_triggered_decisions = true   # 關閉＝退回「每步對全部 agent 決策」舊行為
 cooldown_steps = 5                 # 同車觸發後幾步內不重複觸發
 batch_size = 30                    # 每批最多幾個 agent（上限；實際會被 [llm_budget] 的 token 預算再壓低）
-concurrency = 4                    # 同時並行幾批
+concurrency = 64                    # 同時並行幾批
 # ----- 引擎初始化效能（皆不改模擬結果；可關閉以對拍驗證）-----
 cache_network = true               # 跨連線/重設快取已解析的 graphml 圖+節點索引（省 24MB 重解析）
 init_workers = 0                   # init 路由並行程序數（0/1=單程序；>1 才開 multiprocessing。Linux 受益最大）
