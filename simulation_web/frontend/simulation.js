@@ -12,7 +12,7 @@ const TrafficUI = (() => {
   // ---- 車流監測器（街景丟人式拖放）----
   function updateDetectorCount() {
     const el = $("detector-count");
-    const n = (window.TrafficMap && TrafficMap.detectorCount) ? TrafficMap.detectorCount() : 0;
+    const n = (typeof TrafficMap !== "undefined" && TrafficMap.detectorCount) ? TrafficMap.detectorCount() : 0;
     if (el) el.textContent = `已放置 ${n} 隻監測器`;
   }
 
@@ -67,17 +67,17 @@ const TrafficUI = (() => {
         ambient: parseInt($("ambient").value, 10),
         max_steps: parseInt($("steps").value, 10),
         step_minutes: parseInt($("step-minutes").value, 10),
-        detectors: (window.TrafficMap && TrafficMap.getDetectors) ? TrafficMap.getDetectors() : [],
+        detectors: (typeof TrafficMap !== "undefined" && TrafficMap.getDetectors) ? TrafficMap.getDetectors() : [],
       });
       clearPending();
     };
 
     // 車流監測器：街景丟人式拖放（拖相機 icon 到路上放開）+ 清除
     const peg = $("det-pegman");
-    if (peg && window.TrafficMap) TrafficMap.setupDetectorDrag(peg);
+    if (peg && typeof TrafficMap !== "undefined") TrafficMap.setupDetectorDrag(peg);
     const detClear = $("btn-detector-clear");
     if (detClear) detClear.onclick = () => {
-      if (window.TrafficMap) TrafficMap.clearDetectors();
+      if (typeof TrafficMap !== "undefined") TrafficMap.clearDetectors();
       updateDetectorCount();
       markPending();
       toast("已清除監測器，按「套用設定」生效。");
@@ -505,7 +505,7 @@ const TrafficUI = (() => {
 
   // 底部面板高度變動（收合/展開/切分頁）後，等 CSS 過場結束再讓地圖重算尺寸補滿圖磚。
   function afterDockAnim() {
-    setTimeout(() => { if (window.TrafficMap && TrafficMap.resize) TrafficMap.resize(); }, 280);
+    setTimeout(() => { if (typeof TrafficMap !== "undefined" && TrafficMap.resize) TrafficMap.resize(); }, 280);
   }
 
   // ===== 可拖曳窗格（左面板寬 / 底部面板高；localStorage 記憶、雙擊還原）=====
@@ -524,7 +524,7 @@ const TrafficUI = (() => {
     let raf = null;
     const mapResize = () => {
       if (raf) return;
-      raf = requestAnimationFrame(() => { raf = null; if (window.TrafficMap && TrafficMap.resize) TrafficMap.resize(); });
+      raf = requestAnimationFrame(() => { raf = null; if (typeof TrafficMap !== "undefined" && TrafficMap.resize) TrafficMap.resize(); });
     };
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 
