@@ -22,13 +22,13 @@
 | 套件 | 角色 | 主要模組 |
 |---|---|---|
 | `llm_abm_simulator` | 模擬器主體（擁有全部狀態與物理） | `domain`（agent/road/town/state/events）、`spatial`（road_network/routing/gis_loader/geojson/signals/build_*）、`mobility`（demand 重力）、`decisions`（registry/base/mock_policy/llm_adapter/response_parser/profile_pool）、`simulation`（engine/scheduler/metrics/random_seed）、`web`（FastAPI app + WebSocket session）、`config.py`、`scenarios.py`、`calibrate.py` |
-| `llm_server` | LLM pipeline（被模擬器在本進程直接呼叫） | `agent_profile`（人格生成）、`perception`（**確定性模板、不呼叫 LLM**）、`decision_making`（決策，唯一每批 LLM 呼叫，結構化輸出）、`memory_summary`（記憶摘要）、`llm_client`（Ollama/vLLM 統一入口）、`llm_config`/`model_registry`、`rag_store`（TF-IDF）、`sim_chat`/`sim_intervene`、`json_utils`（強韌解析）、`prompt_store` |
+| `llm_server` | LLM pipeline（被模擬器在本進程直接呼叫） | `agent_profile`（人格生成）、`perception`（**確定性模板、不呼叫 LLM**）、`decision_making`（決策，唯一每批 LLM 呼叫，結構化輸出）、`llm_client`（Ollama/vLLM 統一入口）、`llm_config`/`model_registry`、`rag_store`（TF-IDF）、`sim_chat`/`sim_intervene`、`json_utils`（強韌解析）、`prompt_store` |
 
 前端：`simulation_web/frontend/`（`index.html`/`index.css`/`map.js`/`charts.js`/`simulation.js`/`app.js`，Leaflet + Chart.js + WebSocket）。
 
 **每步資料流**（`engine.step()`，對應 `ARCHITECTURE.md` mermaid）：
 感知（確定性、無 LLM）→ 決策（規則式 *或* LLM；背景車一律規則式）→ 移動（沿加權最短路；壅塞時重算；背景車抵達重生）
-→ 重算道路 flow/congestion/weight（含背景車）→ 指標（事件 KPI + 路網層）→ 記憶 + CSV → 快照推前端。
+→ 重算道路 flow/congestion/weight（含背景車）→ 指標（事件 KPI + 路網層）→ 記憶 → 快照推前端。
 
 ---
 
@@ -145,7 +145,7 @@ mock/LLM **只回 mode 名字字串**；`apply_active_mode` 查 `ACTIVE_MODE_PRO
 
 **全域（每步只送一份，不乘 N）**：`overall_traffic`（順暢/普通/壅塞，由平均 proxy 套門檻）、
 `congestion_trend`（與上一步比，Δ>+0.02 惡化/<−0.02 改善/否則持平）、`congestion_hotspots`（top-K=5 行政區，
-由 agent 所在區+路況聚合，O(agent) 不掃全網）。**裸統計（車數/活躍路數…）不進 LLM、只給前端/CSV**。
+由 agent 所在區+路況聚合，O(agent) 不掃全網）。**裸統計（車數/活躍路數…）不進 LLM、只給前端**。
 
 **每車局部（純質性）**：`current_road`（路名+等級）、`traffic_here`（順暢/普通/壅塞）、`speed_status`
 （自由流/略慢/壅塞緩行，由 speed÷速限）、`road_ahead`（沿路徑往前看 `lookahead_distance_m=2000`，
@@ -154,15 +154,14 @@ mock/LLM **只回 mode 名字字串**；`apply_active_mode` 查 `ACTIVE_MODE_PRO
 
 ---
 
-## 7. 單一旅次記憶（`MEMORY_zh-TW.md`；`agent.update_memory`/`memory_facts`、`engine._summarize_memory`）
+## 7. 單一旅次記憶（`MEMORY_zh-TW.md`；`agent.update_memory`/`_compose_summary`）
 
 **不分長短期**（1 step=1 分鐘，區分無意義）→ 單一 `memory`：running 的自然語言 `summary` + 當下印象
 （where/traffic_feel/moved/getting_closer/remaining…）+ 整趟聚合量（congested_spots/mode_switches/overall_smoothness/elapsed）。
-量化→質性門檻在 `[memory]`。`summary` 來源：
-- **規則式核心**：`_compose_summary` 模板每步確定性重算（零 token、可重現）。
-- **LLM 核心**：只在該事件車**重新決策時**由小模型批次重寫一次（`memory_facts()`→`run_memory_summary`，「只把事實寫成一句」），
-  其餘沿用；失敗 fallback 模板。`summary_source`（template/llm）隨快照給前端。
-- 背景車**不存記憶**（`memory=={}`）。摘要文字不回饋物理 → 同 seed 同軌跡仍成立。
+量化→質性門檻在 `[memory]`。每步**覆蓋重算**（非堆疊；歷史壓進有界累積器）。
+- `summary` **一律由 `_compose_summary` 模板確定性每步重算**（規則式與 LLM 核心皆然，零 token、可重現）。
+- **已移除 LLM 摘要重寫**：原本在重決策時用小模型重寫 summary，因只改寫既有事實、邊際價值低、又多一次 LLM 呼叫而移除 → memory 全走模板、LLM 只做決策。（未來若要記憶用 LLM，方向是「跨旅次經驗影響決策」，非摘要。）
+- 背景車**不存記憶**（`memory=={}`）。摘要不回饋物理 → 同 seed 同軌跡仍成立。
 
 ---
 
@@ -188,7 +187,7 @@ mock/LLM **只回 mode 名字字串**；`apply_active_mode` 查 `ACTIVE_MODE_PRO
   `per_agent_tok = (persona_chars + status_chars)/chars_per_token`（取樣前 5 台實測字元）；
   `batch = min([scaling].batch_size, avail // per_agent_tok)` → 保證 prompt 不超過 `max_model_len`。
 - **並行**（scatter–gather）：觸發車分批，`ThreadPoolExecutor`（`concurrency=4`）並行送，**同步等齊**後依 `agent_id` 套用（可重現）。
-- 重決前順手用 LLM 重寫該批記憶 summary（§7）。每步 INFO 日誌印實採 batch。
+- 記憶 `summary` 一律確定性模板、不呼叫 LLM（§7）。每步 INFO 日誌印實採 batch。
 
 ### 8.4 結構化輸出 + 強韌解析（`decision_making.DECISION_SCHEMA`、`json_utils`）
 `generate(fmt=DECISION_SCHEMA)`：Ollama 走 `format`、vLLM 走 `guided_json`（受限解碼）；`active mode` 用 enum 限五種。
@@ -242,7 +241,6 @@ ESRI 號誌點 snap 到最近路網節點；**方向相位**（bearing mod 180 �
 - **事件邊際負載占比**：`event_load_share = 100 × event_vehsteps / (event_vehsteps + ambient_vehsteps)`（「車·步」累積）→
   量化「這場活動讓路網多承擔多少」，不需另跑基線。
 
-CSV 輸出（`metrics.py`）：`agent_memory.csv` / `road_flow.csv`（只寫有流量道路），欄位對齊原 GAML，`output/`（gitignored）。
 
 ---
 
@@ -277,14 +275,14 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 - **seeded RNG 全程**：agent 建立、出生地抽樣、背景 OD、路徑微擾（crc32 非 live RNG）、persona 分批 seed（42+idx）皆走注入 RNG → 同 seed 同軌跡（有 determinism 測試）。
 - **近似優化皆可 exact 還原**當回歸基準。
 - **bundle 離線可重現**：路網 graphml / 號誌 json / 人口 csv committed。
-- **唯一非確定元素**：LLM 決策理由文字、LLM 記憶摘要 → **不回饋進物理**。
+- **唯一非確定元素**：LLM 決策理由文字 → **不回饋進物理**（記憶 summary 已改確定性模板）。
 
 ---
 
 ## 16. 參數總表（`config/simulation.toml` ↔ `config.py`，唯一真實來源）
 `[time]`(max_steps36/step_minutes5)、`[agents]`(nb_agents/起訖)、`[perception]`(感知半徑300/抵達50/crowded_speed0.55/門檻0.5/nearby_mode/town_mode)、
 `[movement]`、`[active_modes.*]`(5模式權重+旗標)、`[roads]`+`[highway_specs.*]`(速度/容量；改值需重建路網)、`[llm]`(use_llm)、
-`[memory]`(質性門檻)、`[perception_context]`(hotspots_top_k5/lookahead2000/speed ratios)、`[summary]`(summary_model)、
+`[memory]`(質性門檻)、`[perception_context]`(hotspots_top_k5/lookahead2000/speed ratios)、
 `[profile]`(pool_size 原型數上限)、`[scaling]`(event_triggered/cooldown5/batch_size30/concurrency4)、
 `[llm_budget]`(max_model_len8192/reserve1024/overhead800/chars_per_token2.0)、`[demand]`(beta0.08/decay/min_dist0.5)、
 `[ambient]`(enabled/count40/respawn/max600)、`[departure]`(window_minutes/profile)、`[signals]`(enabled/cycle90/yellow3)、
@@ -300,10 +298,9 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 4. NL 介入限**受限動作集**（避讓/需求突增），非任意控制。
 5. 路徑規劃仍**每台 Dijkstra**（②未做）；`nearby`/`current_town` 大規模用近似（邊界誤差，可切 exact）。
 6. Persona 重用 N>原型數時出現同名車（LLM 模式實務上規模小不觸發）。
-7. 每步寫**全 agent CSV** → 數萬台 I/O 重（未優化）。
-8. 背景車無法共用「終點樹」（各隨機終點）；大規模背景車路徑/CSV 未輕量化。
-9. 上傳場景須**本專案格式 graphml**（非任意 OSM，瀏覽器端不建網）。
-10. vLLM 一機一模型、不可熱切換；極新 GPU（5090/sm_120）需較新 vllm + CUDA 12.8+ torch。
+7. 背景車無法共用「終點樹」（各隨機終點）；大規模背景車路徑未輕量化。
+8. 上傳場景須**本專案格式 graphml**（非任意 OSM，瀏覽器端不建網）。
+9. vLLM 一機一模型、不可熱切換；極新 GPU（5090/sm_120）需較新 vllm + CUDA 12.8+ torch。
 11. 壅塞降速為**二元因子**（0.55），非連續 speed–density 關係。
 12. 重力為**無約束**形式（非 Wilson doubly-constrained）；距離用**歐氏直線**（非網路距離）。
 
@@ -347,10 +344,10 @@ sklearn `TfidfVectorizer(analyzer="char_wb", ngram_range=(2,4), min_df=1)`（cha
 切塊 size=400/overlap=80；`retrieve`：cosine 相似度 top-k(=3)、門檻 `>0.01`。`enabled` 預設 True 但**無上傳文件即無作用**；
 decision_making **每批**用「當前路況文字（perception）」當 query 全域檢索一次注入（不做 per-agent，控 token）。
 
-### 20.3 persona 生成 / 記憶摘要 / prompt（`agent_profile`/`memory_summary`/`prompt_store`）
+### 20.3 persona 生成 / prompt（`agent_profile`/`prompt_store`）
 - `agent_profile`：**prompt 驅動、無 schema 驗證**；批次帶 `seed=42+idx`（同 seed+prompt→相同輸出，故不同 seed 保多樣又可重現）。
-- `memory_summary`：把 `memory_facts()` 批次包 prompt，`temperature=0, seed=42`、**不帶 think**；解析支援 `{agent_id:摘要}` 或 `{summaries:[{agent_id,trip_summary}]}`（截斷亦救回）；失敗回 `{}`（引擎保留模板）。
 - `prompt_store`：`register_default`/`get`(覆寫優先)/`set_override`(空→還原)；結構化輸出 schema 保證即使 prompt 被改壞仍吐合法 JSON。
+- 註：記憶摘要(`memory_summary`)已移除——`summary` 一律確定性模板,不再有 LLM 摘要器(見 §7、`MEMORY_zh-TW.md`)。
 
 ### 20.4 NL 介入 / 對話（`sim_intervene`/`sim_chat`/`engine.apply_intervention`）
 
@@ -370,7 +367,7 @@ decision_making **每批**用「當前路況文字（perception）」當 query �
 
 **對話（`sim_chat`）**：唯讀，只把「引擎組好的狀態文字（`chat_context`）+ 問題」送 LLM，要求不杜撰未提供數據；LLM 不可用 → fallback 附狀態文字。
 
-> **模型來源（重要）**：對話與介入的 LLM 解析都呼叫 `llm_client.generate(...)` **不帶 `model=`** → 一律使用**前端模型選擇器所設的後端+模型**（`llm_config.set_runtime_llm`），與決策/人物/記憶摘要整套共用。
+> **模型來源（重要）**：對話與介入的 LLM 解析都呼叫 `llm_client.generate(...)` **不帶 `model=`** → 一律使用**前端模型選擇器所設的後端+模型**（`llm_config.set_runtime_llm`），與決策/人物整套共用。
 
 ### 20.5 路網建構與查詢（`spatial/road_network.py`、`geojson.py`）
 - 三層 fallback：讀 graphml →（不存在且允許時）OSMnx `graph_from_polygon(network_type="drive")` **以縣界(`gis_loader.load_county_boundary_wgs84`，TOWN_MOI 篩該縣市 union＝全台南 37 區)為下載邊界** → 確定性合成網格。graphml gitignore、首次自動建檔。
@@ -404,7 +401,7 @@ decision_making **每批**用「當前路況文字（perception）」當 query �
 - `domain/events.py`：`RouteStatus` enum（CREATED/MOVING/ARRIVED/ERROR）。
 - `decisions/base.py`：`DecisionPolicy` Protocol + `InitAssignment`/`StepDecision` dataclass（引擎只透過此抽象與核心互動）。
 - `simulation/random_seed.py`：單一 `random.Random(seed)` 注入全引擎。
-- `metrics.py` CSV：`agent_memory.csv`（cycle/agent_id/起訖/current_town/road/mode/車種/速度/移動距離/鄰近/狀態…）、`road_flow.csv`（只寫有流量道路），欄位對齊原 GAML。
+- `metrics.py`：每步指標累積在記憶體 `MetricsRecorder.history`（前端圖表與 `build_analysis` 都讀它，**不落地 CSV**）。
 - 資料前處理 CLI：`spatial/build_roads.py`（OSMnx 下載/合成）、`spatial/build_scenario.py`（建新縣市/尺度 bundle）、`build_signals.py`（號誌 artifact）。
 
 ---

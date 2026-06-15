@@ -27,7 +27,7 @@ PROJECT_ROOT = PACKAGE_DIR.parent.parent
 
 DATA_DIR = PROJECT_ROOT / "data"        # 所有資料集中於此（GIS 原始資料 + 衍生路網）
 GIS_DIR = DATA_DIR / "gis"              # 原 "GIS data/"，整理後移至 data/gis/
-OUTPUT_DIR = PROJECT_ROOT / "output"    # runtime artifact（CSV），已被 .gitignore 忽略
+OUTPUT_DIR = PROJECT_ROOT / "output"    # runtime artifact（persona 池 / decision txt），已被 .gitignore 忽略
 FRONTEND_DIR = PROJECT_ROOT / "simulation_web" / "frontend"
 CONFIG_TOML = PROJECT_ROOT / "config" / "simulation.toml"   # 使用者可編輯的參數檔
 
@@ -42,10 +42,6 @@ ROAD_GRAPHML = DATA_DIR / "tainan_roads.graphml"   # bundle 的真實 OSM 路網
 # 距離/空間運算一律使用公尺投影座標；前端地圖使用 WGS84。
 CRS_METRIC = "EPSG:3826"
 CRS_WGS84 = "EPSG:4326"
-
-# 輸出 CSV（取代 GAMA 的 agent_memory.csv / road_flow.csv）
-AGENT_MEMORY_CSV = OUTPUT_DIR / "agent_memory.csv"
-ROAD_FLOW_CSV = OUTPUT_DIR / "road_flow.csv"
 
 # 五種 active mode（對齊 prompts/decision_making_prompt.txt 與 LLM 實際輸出）
 ACTIVE_MODES = ("fast", "tolerate_congestion", "avoid_congestion", "comfortable", "short_distance")
@@ -156,9 +152,9 @@ class MemoryConfig:
     feel_congested_proxy: float = 0.6    # proxy ≥ 此值（或 is_crowded）→「壅塞」
     feel_normal_proxy: float = 0.3       # proxy ≥ 此值 →「普通」；否則「順暢」
 
-    # --- moved：當步移動感（每步前進公尺）---
-    moved_stalled_m: float = 50.0        # 每步移動 < 此值 →「停滯」
-    moved_slow_m: float = 200.0          # < 此值 →「緩慢」；否則「前進中」
+    # --- moved：當步移動感（用「有效速度 km/h」＝實際位移÷週期時間，與每步分鐘數無關）---
+    moved_stalled_kmh: float = 5.0       # 有效速度 < 此值（km/h）→「停滯」（含等紅燈/卡死）
+    moved_slow_kmh: float = 15.0         # < 此值 →「緩慢」；否則「前進中」
 
     # --- overall_smoothness：整趟順暢度（整趟平均 congestion_proxy）---
     smoothness_rough_proxy: float = 0.6  # 平均 ≥ 此值 →「不順」
@@ -182,20 +178,6 @@ class PerceptionContextConfig:
     lookahead_distance_m: float = 2000.0 # 每車 road_ahead 沿路徑往前看的距離（公尺）
     speed_free_ratio: float = 0.8        # speed/速限 ≥ 此值 →「自由流」
     speed_slow_ratio: float = 0.5        # ≥ 此值 →「略慢」；否則「壅塞緩行」
-
-
-@dataclass(frozen=True)
-class SummaryConfig:
-    """單一旅次記憶 ``summary`` 的 LLM 摘要設定（對應 TOML ``[summary]``）。
-
-    記憶已合併為**單一 memory**（不再分長短期；1 step=1 分鐘，長短期區分無意義）。
-    規則式核心：summary 用 domain/agent.py 的確定性模板每步重算。
-    LLM 核心：summary **只在該 agent「重新決策」時**由 llm_server/memory_summary.py 重寫一次
-    （見 engine `_summarize_memory`），其餘時間沿用上次摘要/模板；失敗 fallback 回模板。
-    這裡只保留「取不到前端所選模型時的後備摘要模型」。詳見 docs/MEMORY_zh-TW.md。
-    """
-
-    summary_model: str = "gemma4:e2b"    # 後備摘要模型 tag（整套 LLM 一般共用前端所選模型）
 
 
 @dataclass(frozen=True)
@@ -223,6 +205,9 @@ class ScalingConfig:
     cooldown_steps: int = 5                  # 同車觸發後幾步內不重複觸發（去抖動）
     batch_size: int = 30                     # B：每批最多幾個 agent（吃 context 預算）
     concurrency: int = 4                     # C：同時並行幾批（搭配後端真並行上限）
+    cache_network: bool = True               # 跨連線/重設快取已解析的 graphml 圖+節點索引（不改結果，省 24MB 重解析）
+    init_workers: int = 0                    # init 路由並行程序數（0/1＝單程序；>1 才開 multiprocessing，不改結果）
+    parallel_init_min_agents: int = 200      # 車數達此門檻才啟用並行 init（量少時 pool 啟動成本不划算）
 
 
 @dataclass(frozen=True)
@@ -421,7 +406,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "summary", "profile", "scaling", "signals", "llm_budget", "demand", "ambient", "departure", "egress"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "profile", "scaling", "signals", "llm_budget", "demand", "ambient", "departure", "egress"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -438,8 +423,8 @@ def _build_memory_config(raw: dict[str, Any]) -> MemoryConfig:
     mem = dataclasses.replace(MemoryConfig(), **overrides)
     if not (mem.feel_normal_proxy <= mem.feel_congested_proxy):
         raise ValueError("設定檔 [memory].feel_normal_proxy 不可大於 feel_congested_proxy")
-    if not (mem.moved_stalled_m <= mem.moved_slow_m):
-        raise ValueError("設定檔 [memory].moved_stalled_m 不可大於 moved_slow_m")
+    if not (mem.moved_stalled_kmh <= mem.moved_slow_kmh):
+        raise ValueError("設定檔 [memory].moved_stalled_kmh 不可大於 moved_slow_kmh")
     if mem.congested_spots_max < 0 or mem.distance_decimals < 0:
         raise ValueError("設定檔 [memory].congested_spots_max / distance_decimals 不可為負")
     return mem
@@ -454,12 +439,6 @@ def _build_perception_context(raw: dict[str, Any]) -> PerceptionContextConfig:
     if not (pc.speed_slow_ratio <= pc.speed_free_ratio):
         raise ValueError("設定檔 [perception_context].speed_slow_ratio 不可大於 speed_free_ratio")
     return pc
-
-
-def _build_summary_config(raw: dict[str, Any]) -> SummaryConfig:
-    overrides = {k: v for k, v in raw.get("summary", {}).items()
-                 if k in {f.name for f in fields(SummaryConfig)}}
-    return dataclasses.replace(SummaryConfig(), **overrides)
 
 
 def _build_profile_config(raw: dict[str, Any]) -> ProfileConfig:
@@ -477,6 +456,8 @@ def _build_scaling_config(raw: dict[str, Any]) -> ScalingConfig:
     sc = dataclasses.replace(ScalingConfig(), **overrides)
     if sc.cooldown_steps < 0 or sc.batch_size < 1 or sc.concurrency < 1:
         raise ValueError("設定檔 [scaling]：cooldown_steps≥0、batch_size≥1、concurrency≥1")
+    if sc.init_workers < 0 or sc.parallel_init_min_agents < 1:
+        raise ValueError("設定檔 [scaling]：init_workers≥0、parallel_init_min_agents≥1")
     return sc
 
 
@@ -599,7 +580,6 @@ DEFAULT_CONFIG = _build_simulation_config(_RAW)
 UI_CONFIG = _build_ui_config(_RAW)
 MEMORY_CONFIG = _build_memory_config(_RAW)
 PERCEPTION_CONTEXT = _build_perception_context(_RAW)
-SUMMARY_CONFIG = _build_summary_config(_RAW)
 PROFILE_CONFIG = _build_profile_config(_RAW)
 SCALING_CONFIG = _build_scaling_config(_RAW)
 DEMAND_CONFIG = _build_demand_config(_RAW)

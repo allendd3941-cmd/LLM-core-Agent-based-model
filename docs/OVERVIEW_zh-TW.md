@@ -22,7 +22,7 @@
 | `DEMAND_zh-TW.md` | 事件車出生地的重力模型（人口×距離衰減） |
 | `AMBIENT_zh-TW.md` | 背景常態車流（雙邊重力 OD）+ 兩層交通分析 |
 | `EGRESS_zh-TW.md` | 散場（egress）兩階段疏運評估（手動宣告散場、回居住地、清場時間） |
-| `MEMORY_zh-TW.md` | 單一旅次記憶（不分長短期；重決策時 LLM 摘要） |
+| `MEMORY_zh-TW.md` | 單一旅次記憶（不分長短期；`summary` 一律確定性模板，已移除 LLM 摘要） |
 | `ENVIRONMENT_zh-TW.md` | 送 LLM 的環境感知（質性標籤、熱點、前方路況） |
 | `ACTIVE_MODES_zh-TW.md` | 五種 active_mode 的權重與路徑策略 |
 | `DEMO_FEATURES_zh-TW.md` | 互動功能（模型選擇器/分析/對話/場景/prompt/RAG/NL 介入/上傳/zoom 渲染） |
@@ -34,7 +34,7 @@
   `mobility`（重力需求）、`decisions`（核心 registry / 規則式 / LLM adapter / persona 池 / 回應解析）、
   `simulation`（engine 主迴圈 / metrics / scheduler）、`web`（FastAPI + WebSocket）。
 - `llm_server`（LLM pipeline，**in-process 直呼**）：agent_profile（人格生成）、perception（**確定性模板、不呼叫 LLM**）、
-  decision_making（決策，結構化輸出）、memory_summary（記憶摘要）、rag_store、sim_chat、sim_intervene、
+  decision_making（決策，結構化輸出）、rag_store、sim_chat、sim_intervene、
   llm_client（Ollama/vLLM 統一入口）、llm_config / model_registry。
 - **無 GAMA、無 HTTP hop**：原型是 GAMA+FastAPI，現已全改成 Python 原生 + in-process pipeline。[doc] ARCHITECTURE.md
 
@@ -75,10 +75,10 @@
 ### 3.5 單一旅次記憶（不分長短期）
 - **定位**：每台事件車一個 `memory`：running 的自然語言 `summary` + 當下印象 + 整趟聚合量（塞過的點/換策略次數/順暢度/已行時間）。
 - **為何**：1 step=1 分鐘,長短期區分無意義 → 合併單一記憶,paper 好說明。
-- **摘要時機**：規則式核心→模板每步重算;**LLM 核心→只在「重新決策」時由 LLM 重寫一次**（記憶在做決定的當下最新、也省 LLM；大規模分批避免爆 context）。失敗 fallback 模板。
+- **摘要生成**：`summary` **一律由確定性模板每步重算**（規則式與 LLM 核心皆然）。**已移除 LLM 摘要重寫**（只改寫既有事實、邊際價值低、又多一次 LLM 呼叫）。
 - **可重現**：聚合量全程確定性,不影響軌跡。
-- **設定**：`[memory]` 質性門檻、`[summary].summary_model`。
-- [doc] MEMORY_zh-TW.md　[code] `domain/agent.py`（`memory`/`update_memory`/`memory_facts`）、`engine._summarize_memory`
+- **設定**：`[memory]` 質性門檻。
+- [doc] MEMORY_zh-TW.md　[code] `domain/agent.py`（`memory`/`update_memory`/`_compose_summary`）
 
 ### 3.6 紅綠燈號誌
 - **定位**：把 ESRI 號誌點位 snap 到路網節點,做**方向相位停等**（一軸綠、垂直軸紅,黃燈尾段皆紅）。
@@ -165,7 +165,7 @@
 - **近似優化皆有開關還原**：`nearby_mode=exact`、`town_mode=exact` → 與未優化版一致,可當回歸基準。
 - **資料可重現**：`data/tainan_signals.json`（號誌）、`data/gis/town_population.csv`（人口）committed；
   `data/tainan_roads.graphml`（**全台南市 OSM 路網**，≈15.8k 節點/42.5k 邊）改為 **gitignore + 首次依縣界 osmnx 自動建檔**（大檔不進 repo；要全離線可預先建好複製過去）。
-- **確定性 perception/記憶模板**：規則式核心完全不依賴 LLM;LLM 文字（決策理由、摘要）是唯一非確定元素,且**不回饋進物理**。
+- **確定性 perception/記憶模板**：規則式核心完全不依賴 LLM;LLM 文字（僅決策理由）是唯一非確定元素,且**不回饋進物理**（記憶 summary 一律確定性模板）。
 
 ## 6. 誠實限制總表（paper 要主動標清）
 1. **號誌時相為合成值**（台南無真實秒數）→ 非真實號誌孿生。
@@ -174,10 +174,9 @@
 4. **NL 介入限受限動作集**（避讓/需求突增）,非任意控制。
 5. **路徑規劃仍為每台 Dijkstra**（② 未做）;`nearby`/`current_town` 大規模用近似（邊界誤差,可切 exact）。
 6. **Persona 重用** N>原型數時同名車;LLM 模式實務上規模小、不觸發。
-7. **每步寫全 agent CSV** → 數萬台時 I/O 重（未優化）。
-8. **背景車無法共用「終點樹」**（各有隨機終點）;大規模背景車的路徑/CSV 尚未輕量化。
-9. **上傳場景須本專案格式 graphml**（非任意 OSM 檔,瀏覽器端不建網）。
-10. **vLLM 一機一模型、不可前端熱切換**;極新 GPU（如 5090/sm_120）需較新 vllm + CUDA 12.8+ torch。
+7. **背景車無法共用「終點樹」**（各有隨機終點）;大規模背景車的路徑尚未輕量化。
+8. **上傳場景須本專案格式 graphml**（非任意 OSM 檔,瀏覽器端不建網）。
+9. **vLLM 一機一模型、不可前端熱切換**;極新 GPU（如 5090/sm_120）需較新 vllm + CUDA 12.8+ torch。
 
 ## 7. 部署與執行（重點）
 - **兩個 process**：① 網頁（uvicorn :8080,內含 in-process LLM pipeline）② vLLM（:8001,需 GPU）。經 HTTP（`VLLM_URL`）溝通。

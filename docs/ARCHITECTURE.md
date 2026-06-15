@@ -42,7 +42,6 @@ the in-process pipeline described here.
 | `agent_profile.py` | Generate agent personas (identity / traits) via the LLM. |
 | `perception.py` | **Deterministic template (no LLM call)** — reformats the simulator's structured, qualitative state into a compact per-agent + global summary for decision-making. |
 | `decision_making.py` | Build the decision prompt and call the LLM with a structured-output schema (`DECISION_SCHEMA`); returns each agent's active mode + `reason`. The only LLM call per batch. |
-| `memory_summary.py` | Optional small-model summariser for the long-term `trip_summary`. |
 | `json_utils.py` | Robust LLM-JSON salvage (handles trailing commas, fences, truncated arrays). |
 | `llm_client.py` | Unified Ollama/vLLM transport (`generate()`); structured output via Ollama `format` / vLLM `guided_json`. |
 | `llm_config.py` / `model_registry.py` | Backend/model connection settings from `.env`; vLLM candidate registry. |
@@ -92,8 +91,9 @@ A user-selectable **decision core** drives the **event** cars (registry: `decisi
 - **LLM** (`llm`): `llm_adapter` builds the init/step payload, calls `llm_server` **in-process**
   (`profile_pool.ensure_and_slice` → `perception` → `decision_making`), and parses the result with
   `response_parser`. On any failure (import error, Ollama down, unparseable output) it **falls back
-  to the rule-based core** without crashing; the active source is reported to the UI. In this mode each
-  triggered car's single `memory.summary` is rewritten by the LLM **at decision time** (`_summarize_memory`).
+  to the rule-based core** without crashing; the active source is reported to the UI. The trip
+  `memory.summary` is always a deterministic template (the LLM summary rewrite has been removed); the
+  LLM is used only for the decision.
 
 ## Cross-cutting properties
 

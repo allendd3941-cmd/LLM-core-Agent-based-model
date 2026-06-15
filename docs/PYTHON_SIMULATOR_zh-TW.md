@@ -9,7 +9,7 @@
 - 套件原始碼：`src/llm_abm_simulator/`
 - 前端：`simulation_web/frontend/`
 - 路網 bundle：`data/tainan_roads.graphml`（真實 OSM 道路，已 commit，離線可重現）
-- 執行輸出：`output/agent_memory.csv`、`output/road_flow.csv`（已被 `.gitignore` 忽略）
+- 執行輸出：`output/`（persona 池快取、decision_making 輸出 txt；已被 `.gitignore` 忽略）。每步指標累積在記憶體 `MetricsRecorder.history`，不落地 CSV。
 
 ---
 
@@ -29,7 +29,6 @@
 | `[llm]` | `use_llm`＝事件車決策核心：false 規則式（預設）/ true LLM；背景車一律規則式（見 `docs/DEMO_FEATURES_zh-TW.md`）|
 | `[memory]` | 單一旅次記憶 memory 的質性門檻（不再分長短期；見 `docs/MEMORY_zh-TW.md`） |
 | `[perception_context]` | 送 LLM 的環境感知：熱點/前方路況取樣（見 `docs/ENVIRONMENT_zh-TW.md`） |
-| `[summary]` | 單一 memory 的後備摘要模型（`summary_model`；LLM 摘要時機＝重決策時，見 `docs/MEMORY_zh-TW.md`）|
 | `[profile]` | persona **原型數上限**（`pool_size`，與車數分離、分批生成、車多時循環重用；見下方「Persona 原型池」）|
 | `[reproducibility]` | `seed`（同 seed → 同軌跡）|
 | `[network]` | OSM 下載開關、合成路網大小 |
@@ -252,7 +251,7 @@ pytest tests/simulator -q
 ```
 
 涵蓋：response 解析（含 GAML 全部 key 變體與真實 LLM 輸出）、路徑規劃、壅塞/分佈指標、
-引擎生命週期、**determinism（同 seed 兩次跑出完全相同軌跡）**、CSV 輸出欄位、GeoJSON 結構。
+引擎生命週期、**determinism（同 seed 兩次跑出完全相同軌跡）**、指標 history、GeoJSON 結構。
 
 ---
 
@@ -304,7 +303,6 @@ tests/simulator/           pytest
 | perceive（速限/missing cap/crowded factor/感知半徑/鄰近數/距離/抵達/重算）| `simulation/engine.py` |
 | congestion 指標、mode/status 分佈、per-cycle | `simulation/metrics.py` |
 | init/step payload 契約（in-process 直呼 llm_server pipeline）、LLM fallback | `decisions/llm_adapter.py` + `response_parser.py` |
-| 輸出 `agent_memory.csv` / `road_flow.csv`（欄位對齊）| `simulation/metrics.py` → `output/` |
 | GUI display（地圖/道路/車輛/球場/控制/圖表/檢視）| `simulation_web/frontend/` |
 
 ---

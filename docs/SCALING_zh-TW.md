@@ -14,7 +14,7 @@
 ## 1. 後端 adapter（✅ 已實作）
 
 `llm_server/llm_client.py` 把「怎麼把 prompt 送出去」集中成單一入口 `generate()`，
-3 個 LLM 呼叫點（decision_making / agent_profile / memory_summary）共用。
+LLM 呼叫點（decision_making / agent_profile）共用。
 > 註：`perception` 已改為**確定性模板**（不再呼叫 LLM），故每批只剩 **decision_making** 一次 LLM 呼叫。
 > `generate()` 另支援 `fmt`（結構化輸出 JSON schema：Ollama `format` / vLLM `guided_json`）。詳見 `docs/CHANGES_LLM_PIPELINE_zh-TW.md`。
 
@@ -71,7 +71,7 @@ vllm serve <HF模型> \
 | 順暢巡航 / 已抵達 | ❌ |
 
 - **cooldown / 遲滯**：同車觸發一次後 `cooldown_steps` 步內或同一壅塞 episode 內不重複觸發（避免卡長龍狂叫）。
-- **初始 mode = 規則式核心預設**：開場不對 1000 台一次決策；LLM 在第一次觸發才介入。觸發時順手用 LLM 重寫該車記憶 summary（見 `docs/MEMORY_zh-TW.md`）。
+- **初始 mode = 規則式核心預設**：開場不對 1000 台一次決策；LLM 在第一次觸發才介入。記憶 `summary` 一律確定性模板、不呼叫 LLM（見 `docs/MEMORY_zh-TW.md`）。
 - **規則式核心不變**：規則式便宜且確定性，維持「每步決策」；事件觸發機制只套用在 LLM 核心。
 - **背景常態車流（ambient）**：一律規則式核心、每步決策、不吃 LLM、不存記憶；不進事件觸發、不算事件 KPI（只造成路網層負載）。見 `docs/AMBIENT_zh-TW.md`。
 
@@ -153,8 +153,7 @@ LLM 那層已可擴（上面的事件觸發+批次）；真正擋住大規模的
   點在多邊形內（O(車數×區數)，2 萬台 ≈ 每步 148 萬次 shapely）→ **重用 ① 的索引反向表**（`_node_town`：節點→區），
   current_town = 所在節點所屬區、查表 O(1)（反向表在 ① 既有索引迴圈內順手建，額外成本 ≈ 0）。
   `node`（預設）/ `exact`（精確內插位置、可還原舊值）。近似只在**行政區交界**差一個區，區內部相同；不影響軌跡。
-- **④ 記憶摘要分批**（`engine._summarize_memory`）：原本把所有觸發車塞一個 prompt（大規模爆 context）→
-  比照決策用 `_budget_batch_size` 分批、可並行。**不設「每步重決上限」**（依使用者決定，保留所有觸發車重決）。
+- **④ 記憶摘要**（已移除）：原本在重決策時用 LLM 重寫記憶 `summary`（曾比照決策分批）→ 因邊際價值低且多一次 LLM 呼叫，**整支移除**；`summary` 現一律確定性模板（見 `MEMORY_zh-TW.md`）。
 - **⑤ persona 池記憶體快取**（`profile_pool` `_POOL_CACHE`）：`personas_json` 每決策批次都呼叫 → 不再每批
   重讀+重解析池檔（2 萬 persona 大檔尤其有感）；`save_pool` 更新、`clear_pool` 清。
 - **⑥ 前端 zoom/可視範圍裁切**（`engine._visible_agents`/`set_view`，`[ui].render_individual_max`/`agent_min_zoom`）：
@@ -162,9 +161,22 @@ LLM 那層已可擴（上面的事件觸發+批次）；真正擋住大規模的
   經緯度只算這批）。把 WS 流量與前端繪製綁在「可視範圍」而非總車數。`set_view` 收到後**立即回推 `snapshot_now()`**
   → zoom/pan 即時顯示（不等慢的模擬步）；送訊息加 `asyncio.Lock` 序列化。前端：道路線寬依 zoom 縮放+半透明、
   車輛畫在高 z `agentPane`（永遠在道路之上）。詳見 `docs/DEMO_FEATURES_zh-TW.md`。
+- **⑧ 跨連線/重設快取路網與索引**（`road_network._GRAPH_CACHE`、`engine._SPATIAL_INDEX_CACHE`，`[scaling].cache_network`）：
+  每開分頁、每次 `set_agents`/`apply_config`/`set_ambient`/重設都會重建引擎；原本每次都重解析 24MB graphml
+  XML、重建 ① 的節點→區索引（皆只取決於「場景＝圖+行政區+球場」，與車數/seed 無關）。改成**模組層快取**（鍵＝
+  graphml 路徑+mtime，檔案重建即失效，只留最新場景一份）→ 命中即跳過 XML 解析與建表；每引擎仍**各自**持有可變
+  `Road.current_flow`（圖在模擬中唯讀）。**不改結果**（共用唯讀確定性產物）；第 2 個分頁起、每次重設的開場時間大幅下降。
+- **⑨ init 路由並行（multiprocessing）**（`engine._parallel_init_routes`，`[scaling].init_workers`/`parallel_init_min_agents`）：
+  init 要為每台車各算一次起點→終點 Dijkstra（~0.4s/台），原為單執行緒。把「**會抽 rng 的放置**」（主程序依序、保
+  determinism）與「**無 rng 的純路徑運算**」（init 時各路段 congestion=0、`find_path` 為純函式、jitter 用 `crc32`
+  跨進程一致）拆開後，後者丟**程序池並行**（worker 用 `initializer` 各載一次圖；`pool.map` 保序、依 index 對回
+  agent）。預設 `init_workers=0`（單程序）；>1 且車數達門檻才啟用。**Linux 用 fork（圖 copy-on-write、受益最大）**，
+  Windows 用 spawn（worker 各載一次圖，仍 spawn-safe）。**不改結果**（已用同 seed 對拍：單程序＝並行逐台相同）。
 
 > 驗證:`nearby_mode="exact"` + `town_mode="exact"` 時模擬結果與舊版一致(回歸基準);① 經 determinism / 計數測試確認未破。
-> 路徑規劃(每台一次 Dijkstra)實測便宜(~14ms/台),**未改**;若日後每步重算路成瓶頸再評估「終點最短路徑樹」。
+> ⑧⑨ 皆以 `cache_network`/`init_workers` 旗標可關，並以同 seed 對拍確認「快取開/關、單程序/並行」軌跡逐一相同。
+> 路徑規劃**每步重算**(每台一次 Dijkstra)實測便宜(~14ms/台),**未改**;init 階段的整批路由則由 ⑨ 並行加速。
+> 若日後每步重算路成瓶頸再評估「終點最短路徑樹」（會改路徑語意，需重建基準；見記憶 routing-optimization-plan）。
 
 ## 7. 研究定位（誠實）
 vLLM / continuous batching 是現成基礎設施，不是貢獻。**貢獻在應用層**：

@@ -5,7 +5,7 @@
 ## 1. 前端 LLM 模型選擇器（P0②）
 
 控制面板「LLM 模型」兩個下拉：**伺服器（Ollama / vLLM）→ 模型**。整套 LLM 用途
-（agent_profile / decision_making / memory_summary / 暫停對話）**共用所選模型**。
+（agent_profile / decision_making / 暫停對話 / 介入）**共用所選模型**。
 
 - **Ollama**：即時查 `/api/tags` 列出實裝模型，可熱切換；選定後自動帶 `options.num_ctx`
   （避免 Ollama 預設 ~2k 截斷）。
@@ -151,8 +151,8 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 
 ## 13. 記憶簡化為單一 memory（P3）
 
-記憶不再分長短期（1 step=1 分鐘，區分無意義），合併為**單一 `memory`**；LLM 摘要的時機改為
-**事件車「重新決策」時**重寫一次（記憶在做決定的當下最新、也省 LLM）。完整設計見 `docs/MEMORY_zh-TW.md`。
+記憶不再分長短期（1 step=1 分鐘，區分無意義），合併為**單一 `memory`**；`summary` 一律由
+**確定性模板每步重算**（已移除 LLM 摘要重寫，零 token、可重現）。完整設計見 `docs/MEMORY_zh-TW.md`。
 
 ## 14. 大規模渲染：zoom / 可視範圍裁切（P3+）
 

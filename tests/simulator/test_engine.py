@@ -5,9 +5,6 @@
 
 from __future__ import annotations
 
-import csv
-
-from llm_abm_simulator import config
 from llm_abm_simulator.simulation.engine import SimulationEngine
 
 
@@ -54,14 +51,13 @@ def test_snapshot_shape(small_config):
         assert key in a
 
 
-def test_csv_outputs_written(small_config):
-    _run(small_config)
-    assert config.AGENT_MEMORY_CSV.exists()
-    assert config.ROAD_FLOW_CSV.exists()
-    with config.AGENT_MEMORY_CSV.open(encoding="utf-8") as f:
-        header = next(csv.reader(f))
-    # 欄位需對齊 GAML save 語句
-    assert header[:5] == ["cycle", "agent_id", "origin_town", "destination_town", "current_town"]
+def test_metrics_history_recorded(small_config):
+    eng, _ = _run(small_config)
+    # 每步指標累積在記憶體 history（前端圖表與 build_analysis 都讀它，不落地 CSV）
+    assert len(eng.recorder.history) == small_config.max_steps
+    entry = eng.recorder.history[-1]
+    for key in ("cycle", "elapsed_minutes", "active_road_count", "average_congestion_proxy"):
+        assert key in entry
 
 
 def test_init_payload_geojson(small_config):

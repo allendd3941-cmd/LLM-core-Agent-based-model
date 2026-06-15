@@ -34,7 +34,7 @@ LLM 真正需要、但舊版**完全沒有**的是：
 
 ### 全域環境（每步**只送一份**，不隨 agent 數膨脹）
 
-全域環境分成「給 LLM 決策的精簡版」與「給 recorder/前端/CSV 的完整統計版」兩份，
+全域環境分成「給 LLM 決策的精簡版」與「給 recorder/前端的完整統計版」兩份，
 刻意分離「決策用」與「展示用」：
 
 **給 LLM 的精簡質性版**（`engine._llm_environment`，只留決策相關欄位）：
@@ -60,12 +60,12 @@ LLM 真正需要、但舊版**完全沒有**的是：
 }
 ```
 
-**給 recorder/前端/CSV 的完整版**（`engine._environment_summary` 的原始輸出，**不進 LLM**）仍含
+**給 recorder/前端的完整版**（`engine._environment_summary` 的原始輸出，**不進 LLM**）仍含
 `agent_count` / `active_road_count` / `crowded_road_count` / `average_congestion_proxy` /
-`elapsed_minutes` 等裸統計，供前端 metrics 面板與 CSV 使用。
+`elapsed_minutes` 等裸統計，供前端 metrics 面板使用。
 
 > **為什麼這樣分？** 那些裸統計（全場車數、活躍/壅塞道路數、平均 proxy）對「單一 agent 選哪個
-> active_mode」幫助不大，卻會佔 LLM context；它們真正的用途是展示與記錄，所以只給前端/CSV，
+> active_mode」幫助不大，卻會佔 LLM context；它們真正的用途是展示與記錄，所以只給前端，
 > 不送 LLM。LLM 只看得懂、也只需要質性的 `overall_traffic` / `congestion_trend` / `congestion_hotspots`。
 
 > **為什麼用 agent 聚合算熱點？** 壅塞只存在於有 agent 的路段（`congestion_proxy = flow/capacity`，
@@ -136,4 +136,4 @@ speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩�
   `spatial/routing.py` 的加權最短路徑決定。也就是說 `road_ahead` 目前是**讓 LLM 提前選避塞
   mode**，而非直接讓 routing 預先繞路；若要「前方壅塞就提前改道」真正生效，需另外調整
   `_move_agent` 的重算觸發條件。
-- **不影響**：`output/*.csv`（recorder 獨立）、前端 `AgentSnapshot`、旅次記憶 STM/LTM。
+- **不影響**：`recorder.history`（指標累積獨立）、前端 `AgentSnapshot`、旅次記憶 STM/LTM。

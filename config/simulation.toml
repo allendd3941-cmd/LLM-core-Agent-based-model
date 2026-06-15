@@ -126,8 +126,8 @@ use_llm = true               # true＝LLM 核心（demo 預設；前端規則式
 [memory]
 feel_congested_proxy = 0.6   # 當步 congestion_proxy ≥ 此值（或被判定壅塞）→「壅塞」
 feel_normal_proxy = 0.3      # ≥ 此值 →「普通」；否則「順暢」
-moved_stalled_m = 50.0       # 每步移動 < 此值 →「停滯」
-moved_slow_m = 200.0         # 每步移動 < 此值 →「緩慢」；否則「前進中」
+moved_stalled_kmh = 5.0      # 有效速度（實際位移÷週期時間）< 此值 km/h →「停滯」（與每週期分鐘無關）
+moved_slow_kmh = 15.0        # < 此值 →「緩慢」；否則「前進中」
 smoothness_rough_proxy = 0.6 # 整趟平均 congestion_proxy ≥ 此值 →「不順」
 smoothness_mid_proxy = 0.3   # ≥ 此值 →「中等」；否則「順暢」
 congested_spots_max = 5      # 記憶中最多保留幾個塞過的地點
@@ -141,15 +141,6 @@ hotspots_top_k = 5            # 全域 congestion_hotspots 取前幾個最塞的
 lookahead_distance_m = 500  # 每車 road_ahead 沿路徑往前看的距離（公尺）
 speed_free_ratio = 0.8       # speed/速限 ≥ 此值 →「自由流」
 speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩行」
-
-# ----- 單一 memory 的 LLM 摘要 -----
-# 記憶摘要（summary）的時機已固定為「事件車重新決策時」由 LLM 重寫一次（見 engine._summarize_memory）：
-#   規則式核心 → summary 用確定性模板每步重算；
-#   LLM 核心   → summary 在該車重決策時由 LLM 重寫（記憶在做決定的當下最新、也省 LLM），其餘沿用。
-# 失敗一律 fallback 回模板，不中斷。摘要不影響模擬物理（同 seed 同軌跡仍成立）。詳見 docs/MEMORY_zh-TW.md。
-# （已移除 use_llm_summary / summary_every_n_steps：摘要時機改為「重決策時」，不再每 N 步。）
-[summary]
-summary_model = "llama3.1:8b"    # 後備摘要模型 tag（整套 LLM 一般共用前端所選模型；取不到才用這個）
 
 # ----- agent persona 原型池 -----
 # pool_size 是「原型數上限」（人物範本數），與模擬車數（nb_agents）分離：生成一次、存成穩定池檔、
@@ -168,6 +159,10 @@ event_triggered_decisions = true   # 關閉＝退回「每步對全部 agent 決
 cooldown_steps = 5                 # 同車觸發後幾步內不重複觸發
 batch_size = 30                    # 每批最多幾個 agent（上限；實際會被 [llm_budget] 的 token 預算再壓低）
 concurrency = 4                    # 同時並行幾批
+# ----- 引擎初始化效能（皆不改模擬結果；可關閉以對拍驗證）-----
+cache_network = true               # 跨連線/重設快取已解析的 graphml 圖+節點索引（省 24MB 重解析）
+init_workers = 0                   # init 路由並行程序數（0/1=單程序；>1 才開 multiprocessing。Linux 受益最大）
+parallel_init_min_agents = 200     # 車數達此門檻才啟用並行 init（量少時 pool 啟動成本不划算）
 
 # ----- LLM token 預算（依預算動態切批，避免 prompt 溢位 vLLM context）-----
 # 每批 decision prompt ≈ prompt_overhead + batch×(每 agent status+persona) + 輸出。

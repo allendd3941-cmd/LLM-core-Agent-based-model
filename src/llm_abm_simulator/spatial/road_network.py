@@ -270,12 +270,33 @@ def save_graphml(graph: nx.DiGraph, path: Path) -> None:
     logger.info("路網已存成 graphml: %s", path)
 
 
-def _from_graphml(path: Path) -> RoadNetwork:
+# 跨連線/重設的 graphml 解析快取：避免每次初始化都重解析 24MB XML（不改結果——
+# 圖在模擬中唯讀，每步流量存在 per-engine 的 Road 物件，故可安全共用同一份唯讀圖）。
+# 鍵含 mtime：檔案被重建（重新下載 OSM）時自動失效。只保留最新一份，避免多場景累積記憶體。
+_GRAPH_CACHE: dict[tuple[str, float], nx.DiGraph] = {}
+
+
+def _parse_graphml(path: Path) -> nx.DiGraph:
     graph = nx.read_graphml(str(path))
     # graphml 讀回來節點屬性是字串，轉回數值
     for _, d in graph.nodes(data=True):
         for k in ("lat", "lng", "x_m", "y_m"):
             d[k] = float(d[k])
+    return graph
+
+
+def _from_graphml(path: Path) -> RoadNetwork:
+    if not config.SCALING_CONFIG.cache_network:
+        return _wrap(_parse_graphml(path))
+    key = (str(path), path.stat().st_mtime)
+    graph = _GRAPH_CACHE.get(key)
+    if graph is None:
+        graph = _parse_graphml(path)
+        _GRAPH_CACHE.clear()   # 只留最新場景的圖
+        _GRAPH_CACHE[key] = graph
+        logger.info("graphml 解析並快取：%s", path)
+    else:
+        logger.info("graphml 命中快取（跳過 XML 解析）：%s", path)
     return _wrap(graph)
 
 

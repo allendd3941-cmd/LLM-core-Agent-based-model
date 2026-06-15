@@ -3,7 +3,7 @@
 擁有完整模擬狀態，對齊 GAML 主模型的 init 與每 cycle reflex 行為：
 
     每 step：套用決策 → 感知（速限/壅塞/鄰近）→ 移動（壅塞時重算路徑）→
-             重算道路 flow/congestion/weight → 指標/分佈 → 記錄 memory + CSV → 快照。
+             重算道路 flow/congestion/weight → 指標/分佈 → 記錄 memory → 快照。
 
 決策來源透過 DecisionPolicy 抽象（mock 預設，可切 LLM）；LLM 不可用時自動 fallback
 到 mock，不會 crash。同一個 seed 兩次執行產生相同軌跡。
@@ -39,6 +39,45 @@ from .random_seed import make_rng
 from .scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
+
+# 跨連線/重設的「節點→行政區索引」快取（鍵＝graphml 路徑+mtime）。索引唯讀、確定性，
+# 與車數/seed 無關 → 共用不改結果；只留最新場景一份。詳見 _build_town_node_index。
+_SPATIAL_INDEX_CACHE: dict[tuple[str, float], tuple[dict[str, list[str]], dict[str, str]]] = {}
+
+
+# ---------------------------------------------------------------------------
+# init 路由並行（multiprocessing）：spawn-safe（worker 函式放模組頂層、圖以 initializer
+# 在每個 worker 載一次）。Linux 用 fork（圖 copy-on-write、最快）；Windows 用 spawn（各載一次）。
+# 不改結果：init 時各路段 congestion=0，find_path 為純函式（jitter 用 crc32，跨進程一致）。
+# ---------------------------------------------------------------------------
+_ROUTE_WORKER_NET = None     # 每個 worker 程序各自持有的 RoadNetwork（initializer 載一次）
+_ROUTE_WORKER_SEED = 0
+
+
+def _init_route_worker(graphml_path: str, seed: int) -> None:
+    global _ROUTE_WORKER_NET, _ROUTE_WORKER_SEED
+    from pathlib import Path
+    from ..spatial import road_network
+    _ROUTE_WORKER_NET = road_network._from_graphml(Path(graphml_path))
+    _ROUTE_WORKER_SEED = seed
+
+
+def _route_worker(task: tuple[str, str, dict]) -> list[str]:
+    from ..spatial import routing
+    origin, dest, strategy = task
+    return routing.find_path(_ROUTE_WORKER_NET, origin, dest, strategy,
+                             seed=_ROUTE_WORKER_SEED, avoid_circles=None)
+
+
+def _parallel_init_routes(tasks: list[tuple[str, str, dict]], graphml_path: str,
+                          seed: int, workers: int) -> list[list[str]]:
+    import multiprocessing as mp
+    ctx = mp.get_context()   # 預設：Linux=fork、Windows=spawn
+    chunk = max(1, len(tasks) // (workers * 4))
+    with ctx.Pool(processes=workers, initializer=_init_route_worker,
+                  initargs=(graphml_path, seed)) as pool:
+        # pool.map 保留輸入順序 → 結果可依 index 對回 agent（確定性）
+        return pool.map(_route_worker, tasks, chunksize=chunk)
 
 
 def congestion_color(proxy: float) -> str:
@@ -131,11 +170,9 @@ class SimulationEngine:
         self._build_ambient_agents()
         self._egress_declared_cycle = None          # 散場尚未宣告
         self._build_persona_residence()             # 散場 destination=residence：name→居住區（一次建表）
-        for agent in self.agents:
-            self._place_agent(agent)
+        self._place_all_agents()    # 放置（依序、保 determinism）+ 路徑運算（可選並行，不改結果）
         self._assign_departures()   # 事件車分批出發（時空需求）；window=0 → 全部 cycle 0 出發
 
-        self.recorder.init_csv()
         self.scheduler.reset()
         self.is_initialized = True
         logger.info("初始化完成：%d 事件車 + %d 背景車，事件目的地節點 %s",
@@ -205,6 +242,17 @@ class SimulationEngine:
         from shapely.geometry import Point
         from shapely import STRtree
         assert self.network is not None
+
+        # 跨連線/重設快取：索引只取決於（圖節點、行政區幾何、球場），與車數/seed 無關 →
+        # 同一份 graphml 可重用，省掉數萬節點的 covers 計算（不改結果）。
+        cache_key = self._spatial_cache_key()
+        if cache_key is not None:
+            cached = _SPATIAL_INDEX_CACHE.get(cache_key)
+            if cached is not None:
+                self._town_nodes, self._node_town = cached
+                logger.info("節點→行政區索引命中快取（跳過建表）")
+                return
+
         nodes = list(self.network.graph.nodes())
         pts = [Point(*self.network.node_xy(n)) for n in nodes]   # 預建一次，全程重用
         tree = STRtree(pts)
@@ -223,7 +271,22 @@ class SimulationEngine:
                 node_town.setdefault(n, t.town_name)
         self._town_nodes = idx
         self._node_town = node_town
+        if cache_key is not None:
+            _SPATIAL_INDEX_CACHE.clear()   # 只留最新場景的索引
+            _SPATIAL_INDEX_CACHE[cache_key] = (idx, node_town)
         logger.info("節點→行政區索引完成：%d 節點 / %d 區", len(nodes), len(idx))
+
+    def _spatial_cache_key(self) -> tuple[str, float] | None:
+        """節點→行政區索引的快取鍵：bundle graphml 路徑 + mtime（檔案重建即失效）。
+        無 bundle 檔（synthetic fallback）或停用快取時回 None（不快取、每次重算）。"""
+        if not config.SCALING_CONFIG.cache_network:
+            return None
+        from .. import scenarios
+        path = scenarios.active().road_graphml
+        try:
+            return (str(path), path.stat().st_mtime)
+        except OSError:
+            return None
 
     def _node_in_town(self, town_name: str) -> str:
         """在指定行政區內抽一個節點（O(1)）。與 ``random_node_in_town`` 同邏輯、同 rng 消耗：
@@ -238,10 +301,17 @@ class SimulationEngine:
         return self.network._node_ids[self.rng.randrange(len(self.network._node_ids))]
 
     def _place_agent(self, agent: VehicleAgent) -> None:
-        """把 agent 放到起點行政區內的路網節點，計算到目的地的初始路徑。
+        """把單一 agent 放到起點節點、算初始路徑（runtime 介入新增車用；init 走 _place_all_agents）。"""
+        self._place_agent_setup(agent)
+        path = self._route(agent.current_node, agent.destination_node, agent.routing_strategy())
+        self._finalize_agent_route(agent, path)
+
+    def _place_agent_setup(self, agent: VehicleAgent) -> None:
+        """放置（會抽 rng）：定起點/終點節點、destination_town、phase、散場居住地。
 
         事件車（role=event）：目的地＝事件地點（球場）。
         背景車（role=ambient）：目的地＝其 destination_town 內的隨機節點（不指定事件終點）。
+        把「抽 rng 的放置」與「無 rng 的路徑運算」分開，讓 init 路由可安全並行（不改結果）。
         """
         assert self.network is not None
         town = self._town_by_name(agent.origin_town)
@@ -263,7 +333,9 @@ class SimulationEngine:
         agent.current_node = origin_node
         agent.destination_node = dest_node
         agent.x, agent.y = self.network.node_xy(origin_node)
-        path = self._route(origin_node, dest_node, agent.routing_strategy())
+
+    def _finalize_agent_route(self, agent: VehicleAgent, path: list[str]) -> None:
+        """套用算好的路徑（無 rng）：設定 path/status，並刷新一次感知。"""
         agent.current_path = path
         agent.path_index = 0
         agent.edge_progress = 0.0
@@ -272,6 +344,36 @@ class SimulationEngine:
         else:
             agent.route_status = RouteStatus.ARRIVED if path else RouteStatus.ERROR
         self._refresh_agent_perception(agent, pre_move=True)
+
+    def _place_all_agents(self) -> None:
+        """init 放置所有 agent。放置（抽 rng）一律主程序依序（保 determinism）；
+        路徑運算（無 rng、純函式）可選擇用 multiprocessing 並行（[scaling].init_workers）。"""
+        for agent in self.agents:
+            self._place_agent_setup(agent)
+        tasks = [(a.current_node, a.destination_node, a.routing_strategy()) for a in self.agents]
+        paths = self._compute_init_routes(tasks)
+        for agent, path in zip(self.agents, paths):
+            self._finalize_agent_route(agent, path)
+
+    def _compute_init_routes(self, tasks: list[tuple[str, str, dict]]) -> list[list[str]]:
+        """算 init 路徑清單。預設單程序；init_workers>1 且車數達門檻且有 bundle 路網時改並行。
+
+        並行不改結果：路徑成本是 length/speed/權重/旗標 + crc32 jitter 的純函式（init 時各路段
+        congestion 皆為 0），與程序無關；所有 rng 抽取已在主程序 _place_agent_setup 依序完成。
+        """
+        sc = config.SCALING_CONFIG
+        seq = lambda: [self._route(o, d, s) for (o, d, s) in tasks]
+        if sc.init_workers <= 1 or len(tasks) < sc.parallel_init_min_agents or self._avoid_circles:
+            return seq()
+        from .. import scenarios
+        graphml = scenarios.active().road_graphml
+        if not graphml.exists():        # synthetic fallback 無檔可在 worker 重建 → 單程序
+            return seq()
+        try:
+            return _parallel_init_routes(tasks, str(graphml), self.cfg.seed, sc.init_workers)
+        except Exception as e:  # noqa: BLE001  並行失敗一律安全退回單程序
+            logger.warning("並行 init 路由失敗（%s），改用單程序", e)
+            return seq()
 
     # ==================================================================
     # 散場（egress）：居住地指派 / 階段推進
@@ -519,72 +621,18 @@ class SimulationEngine:
         # 記下本步全市平均壅塞，供「下一步」算 congestion_trend
         self._prev_avg_congestion = env["average_congestion_proxy"]
 
-        # 7. memory（只給已進場的事件車；LLM 核心的摘要已於決策時重寫）+ CSV
+        # 7. memory（只給已進場的事件車；LLM 核心的摘要已於決策時重寫）
         for agent in event_agents:
             if not agent.waiting_for_origin:
                 agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
-        self.recorder.append_agent_rows(cycle, self.agents)
-        self.recorder.append_road_rows(cycle, self.network.all_roads())
 
         return self._snapshot(cycle, env, mode_dist, status_dist)
-
-    def _summarize_memory(self, agents: list[VehicleAgent]) -> None:
-        """用小模型批次把這批 agent 的單一 ``memory.summary`` 重寫一次。
-
-        只在它們「重新決策」時呼叫（見 `_apply_step_decisions`）——記憶恰好在做決定的當下最新，
-        也省 LLM（不每步、不對全車）。失敗（匯入/呼叫/解析）一律保留既有摘要/模板，不中斷模擬。
-        整套統一：摘要也用前端所選的模型（current_model）；取不到才退回 [summary].summary_model。
-        """
-        agents = [a for a in agents if a.memory]
-        if not agents:
-            return
-        try:
-            from llm_server.memory_summary import run_memory_summary
-        except ImportError as e:
-            logger.warning("memory_summary 匯入失敗，沿用模板摘要：%s", e)
-            return
-        try:
-            from llm_server import llm_config as _lc
-            model = _lc.current_model() or config.SUMMARY_CONFIG.summary_model
-        except ImportError:
-            model = config.SUMMARY_CONFIG.summary_model
-
-        # ④ 分批（比照決策的 token 預算切批、可並行）：避免大規模時上千台塞一個 prompt 爆 context。
-        sc = config.SCALING_CONFIG
-        bsize = self._budget_batch_size(agents, sc.batch_size)
-        batches = [agents[i:i + bsize] for i in range(0, len(agents), bsize)]
-
-        def _one(batch: list[VehicleAgent]) -> dict[str, str]:
-            try:
-                return run_memory_summary([a.memory_facts() for a in batch], model)
-            except Exception as e:  # noqa: BLE001  單批失敗不影響其他批
-                logger.warning("記憶摘要批次失敗：%s", e)
-                return {}
-
-        merged: dict[str, str] = {}
-        if len(batches) <= 1:
-            merged = _one(batches[0]) if batches else {}
-        else:
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=min(sc.concurrency, len(batches))) as ex:
-                for f in [ex.submit(_one, b) for b in batches]:
-                    try:
-                        merged.update(f.result())
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("記憶摘要批次取結果失敗：%s", e)
-        if not merged:
-            return
-        for a in agents:
-            s = merged.get(a.agent_id)
-            if s:
-                a.memory["summary"] = s
-                a.summary_source = "llm"
 
     def _llm_environment(self, env: dict[str, Any]) -> dict[str, Any]:
         """給 LLM 決策用的精簡質性全域環境。
 
         只留決策相關欄位；展示用統計（agent_count / active_road_count / crowded_road_count /
-        average_congestion_proxy 等裸值）繼續給 recorder/前端/CSV，不進 LLM。
+        average_congestion_proxy 等裸值）繼續給 recorder/前端，不進 LLM。
         詳見 docs/ENVIRONMENT_zh-TW.md。
         """
         return {
@@ -601,9 +649,9 @@ class SimulationEngine:
 
         - 背景車（ambient）：一律規則式核心（便宜、無 LLM、無記憶）。
         - 事件車 + 規則式核心：每步對全部事件車決策（便宜、確定性）。
-        - 事件車 + LLM 核心 + 事件觸發（預設）：只對「踩到壅塞/前方塞」的事件車重決，分批並行；
-          重決前順手用 LLM 重寫其記憶 summary（記憶在做決定的當下最新）。
+        - 事件車 + LLM 核心 + 事件觸發（預設）：只對「踩到壅塞/前方塞」的事件車重決，分批並行。
         - 事件車 + LLM 核心 + 關閉事件觸發：退回「每步對全部事件車決策」的舊行為。
+        記憶 summary 一律用確定性模板（已移除 LLM 重寫；見 docs/MEMORY_zh-TW.md）。
         """
         sc = config.SCALING_CONFIG
         self._decision_log = []     # 本步決策日誌（走 WS 給前端；每步重置）
@@ -622,8 +670,6 @@ class SimulationEngine:
             return
 
         if not sc.event_triggered_decisions:  # 舊行為：每步決策全部事件車
-            if event_agents:
-                self._summarize_memory(event_agents)
             decisions = self._llm.decide_step(event_agents, self._llm_environment(env), cycle)
             if decisions and self._llm.last_call_ok:
                 self.last_decision_source = "llm"
@@ -639,7 +685,6 @@ class SimulationEngine:
         triggered = self._triggered_agents(cycle, event_agents)
         if not triggered:
             return  # 沒人觸發 → 不呼叫 LLM
-        self._summarize_memory(triggered)   # 重決前先把記憶 summary 用 LLM 重寫一次
         bsize = self._budget_batch_size(triggered, sc.batch_size)  # 依 token 預算動態壓低批量
         n_batches = math.ceil(len(triggered) / bsize)
         logger.info("step %d · LLM 重決 %d 台（壅塞觸發）→ %d 批 ×%d 並行（batch≤%d）",
@@ -1106,7 +1151,6 @@ class SimulationEngine:
                 current_town=a.current_town, current_road_id=a.current_road_id,
                 waiting_at_signal=a.waiting_at_signal,
                 trip_summary=a.memory.get("summary", ""),
-                summary_source=a.summary_source,
                 decision_reason=a.decision_reason,
                 role=a.role,
                 phase=a.phase,

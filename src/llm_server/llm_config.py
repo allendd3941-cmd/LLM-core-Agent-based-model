@@ -30,7 +30,7 @@ VLLM_URL = os.getenv("VLLM_URL", "http://127.0.0.1:8001")  # vLLM server（vllm 
 VLLM_MODEL = os.getenv("VLLM_MODEL", "")                   # vLLM 用的 HF 模型名
 
 # --- runtime 可變的「目前選用」狀態（前端可即時覆寫；上面的 .env 值為啟動預設）---
-# 整套 LLM 用途（agent_profile / decision_making / memory_summary）都讀這裡的目前模型。
+# 整套 LLM 用途（agent_profile / decision_making）都讀這裡的目前模型。
 OLLAMA_NUM_CTX: int | None = None   # ollama 呼叫帶的 context 長度（None＝用 ollama 預設）
 
 
@@ -50,7 +50,7 @@ def set_runtime_llm(backend: str | None = None, model: str | None = None,
 
 
 def current_model() -> str:
-    """目前後端實際使用的模型名（整套 LLM 用途共用，含 memory_summary）。"""
+    """目前後端實際使用的模型名（整套 LLM 用途共用）。"""
     return VLLM_MODEL if LLM_BACKEND == "vllm" else OLLAMA_MODEL
 
 

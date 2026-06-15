@@ -7,7 +7,7 @@
   system→system message、prompt→user message，並把 Ollama options 映射成 OpenAI 參數。
 
 所有 prompt 內容不變；本檔只集中「怎麼把 prompt 送出去、怎麼把回應取回來」這層 transport，
-讓 perception / decision_making / agent_profile / memory_summary 共用同一個入口、且能一鍵換後端。
+讓 perception / decision_making / agent_profile 共用同一個入口、且能一鍵換後端。
 """
 
 from __future__ import annotations

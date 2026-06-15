@@ -343,14 +343,9 @@ const TrafficUI = (() => {
       ? `<div class="inspect-block"><span>決策理由（選此行為模式的原因）</span><p>${escapeHtml(a.decision_reason)}</p></div>`
       : "";
 
-    let summary;
-    if (a.trip_summary) {
-      const srcLabel = a.summary_source === "llm" ? "LLM 摘要" : "模板";
-      summary = `<div class="inspect-block"><span>長期記憶 · 旅次摘要 <em>（${srcLabel}）</em></span><p>${escapeHtml(a.trip_summary)}</p></div>`;
-    } else {
-      const placeholder = a.summary_source === "pending" ? "等待 LLM 摘要…" : "尚無旅次記憶。";
-      summary = `<div class="inspect-block"><span>長期記憶 · 旅次摘要</span><p class="muted">${placeholder}</p></div>`;
-    }
+    const summary = a.trip_summary
+      ? `<div class="inspect-block"><span>旅次摘要</span><p>${escapeHtml(a.trip_summary)}</p></div>`
+      : `<div class="inspect-block"><span>旅次摘要</span><p class="muted">尚無旅次記憶。</p></div>`;
 
     const persona = renderPersona(a.profile_name);
 

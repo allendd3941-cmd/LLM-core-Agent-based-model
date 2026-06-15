@@ -31,7 +31,6 @@ class AgentSnapshot:
     current_road_id: str
     waiting_at_signal: bool = False  # 本步是否停在號誌路口等紅燈
     trip_summary: str = ""          # 單一 memory 的旅次摘要 summary（前端點擊 agent 顯示）
-    summary_source: str = "template"  # summary 來源："template" | "llm"
     decision_reason: str = ""       # 本步選擇此 active_mode 的原因（前端顯示）
     role: str = "event"             # "event"（去事件地點）| "ambient"（背景常態車流）
     phase: str = "ingress"          # 事件車階段：ingress（往球場）/dwell（停留）/egress（往家）/home（已返家）

@@ -56,11 +56,16 @@ def _traffic_feel(proxy: float, is_crowded: bool, cfg: MemoryConfig) -> str:
     return FEEL_SMOOTH
 
 
-def _moved_label(dist_moved_m: float, cfg: MemoryConfig) -> str:
-    """當步移動感：每步前進公尺 → 停滯/緩慢/前進中。"""
-    if dist_moved_m < cfg.moved_stalled_m:
+def _moved_label(dist_moved_m: float, step_minutes: int, cfg: MemoryConfig) -> str:
+    """當步移動感：用「有效速度（km/h）＝實際位移÷週期時間」判定 停滯/緩慢/前進中。
+
+    用速度（而非每步絕對公尺）→ 與每步分鐘數無關（週期變長不會全變「前進中」）；
+    又因取「實際位移」換算，等紅燈/卡死（位移≈0）仍正確判為停滯。
+    """
+    eff_kmh = (dist_moved_m / 1000.0) / (step_minutes / 60.0) if step_minutes > 0 else 0.0
+    if eff_kmh < cfg.moved_stalled_kmh:
         return MOVED_STALLED
-    if dist_moved_m < cfg.moved_slow_m:
+    if eff_kmh < cfg.moved_slow_kmh:
         return MOVED_SLOW
     return MOVED_FORWARD
 
@@ -194,9 +199,8 @@ class VehicleAgent:
     # === API & memory（單一旅次記憶；不再分長短期）===
     # memory：一段 running 的旅次印象 ``summary`` + 少量確定性聚合量（每步由累積器重算）。
     # 1 step=1 分鐘，長短期區分無意義，故合併為單一 memory。詳見 docs/MEMORY_zh-TW.md。
-    # 規則式核心：summary 用模板每步重算；LLM 核心：summary 只在「重新決策」時由 LLM 重寫一次。
+    # summary 一律用確定性模板每步重算（已移除 LLM 摘要重寫；見 docs/MEMORY_zh-TW.md）。
     memory: dict[str, Any] = field(default_factory=dict)
-    summary_source: str = "template"     # summary 來源："template"（模板）或 "llm"（小模型摘要）
     api_status: str = "not_sent"
     warning_message: str = ""
 
@@ -423,12 +427,7 @@ class VehicleAgent:
 
         elapsed_steps = cycle - self._start_cycle + 1
         avg_proxy = self._smoothness_sum / max(self._smoothness_n, 1)
-        template = self._compose_summary(elapsed_steps, step_minutes, avg_proxy, closer, arrived, cfg)
-        if self.summary_source == "llm":
-            summary = self.memory.get("summary", "") or template   # 保留 LLM 摘要；空才退模板
-        else:
-            summary = template
-            self.summary_source = "template"
+        summary = self._compose_summary(elapsed_steps, step_minutes, avg_proxy, closer, arrived, cfg)
 
         # --- 單一 memory：旅次印象 summary + 當下印象 + 聚合量（固定大小）---
         self.memory = {
@@ -437,7 +436,7 @@ class VehicleAgent:
             "where": where,
             "traffic_feel": feel,
             "mode_used": self.active_mode,
-            "moved": _moved_label(self.distance_moved_last_step, cfg),
+            "moved": _moved_label(self.distance_moved_last_step, step_minutes, cfg),
             "getting_closer": bool(closer),
             "remaining": _km_label(self.distance_to_destination, cfg.distance_decimals),
             "elapsed": f"約 {elapsed_steps * step_minutes} 分鐘（{elapsed_steps} 步）",
@@ -456,25 +455,7 @@ class VehicleAgent:
         self._smoothness_sum = 0.0
         self._smoothness_n = 0
         self.memory = {}
-        self.summary_source = "template"
         self.egress_start_cycle = cycle
-
-    def memory_facts(self) -> dict[str, Any]:
-        """給 LLM 摘要器的結構化事實（只給事實，不含模板那句）。"""
-        mem = self.memory
-        return {
-            "agent_id": self.agent_id,
-            "origin_town": self.origin_town,
-            "destination_town": self.destination_town,
-            "active_mode": self.active_mode,
-            "route_status": str(self.route_status),
-            "overall_smoothness": mem.get("overall_smoothness", ""),
-            "congested_spots": mem.get("congested_spots", []),
-            "mode_switches": mem.get("mode_switches", 0),
-            "elapsed": mem.get("elapsed", ""),
-            "traffic_here": self.traffic_here,
-            "road_ahead": self.road_ahead,
-        }
 
     def _compose_summary(
         self, elapsed_steps: int, step_minutes: int, avg_proxy: float,
