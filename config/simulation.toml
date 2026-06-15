@@ -59,7 +59,7 @@ default_road_type_preference = ["primary", "secondary", "tertiary", "residential
 # mock/LLM 只需回 mode 名字，套用時會自動帶入下列數值與策略。
 
 [active_modes.fast]              # 最短時間：無視壅塞，走自由流最快路線
-desired_speed_kmh = 55.0
+desired_speed_kmh = 100.0
 time_weight = 0.70
 distance_weight = 0.20
 comfort_weight = 0.05
@@ -67,7 +67,7 @@ capacity_weight = 0.05
 route_randomness = 0.05
 
 [active_modes.tolerate_congestion]   # 時間優先但不繞路：塞了也走到底
-desired_speed_kmh = 45.0
+desired_speed_kmh = 80.0
 time_weight = 0.55
 distance_weight = 0.30
 comfort_weight = 0.10
@@ -76,7 +76,7 @@ recompute_on_crowded = false
 route_randomness = 0.05
 
 [active_modes.avoid_congestion]  # 避塞：壅塞重罰 + 硬避開高壅塞邊 + 積極重算 + 高隨機分散
-desired_speed_kmh = 38.0
+desired_speed_kmh = 80.0
 time_weight = 0.20
 distance_weight = 0.10
 comfort_weight = 0.25
@@ -86,7 +86,7 @@ avoid_threshold = 0.6
 route_randomness = 0.20
 
 [active_modes.comfortable]       # 舒適：偏好大路，中度避塞
-desired_speed_kmh = 42.0
+desired_speed_kmh = 60.0
 time_weight = 0.20
 distance_weight = 0.10
 comfort_weight = 0.45
@@ -96,7 +96,7 @@ road_class_bias = 0.4
 route_randomness = 0.10
 
 [active_modes.short_distance]    # 最短距離：純距離，願意鑽小路抄近
-desired_speed_kmh = 35.0
+desired_speed_kmh = 70.0
 time_weight = 0.10
 distance_weight = 0.70
 comfort_weight = 0.10
@@ -161,7 +161,7 @@ batch_size = 30                    # 每批最多幾個 agent（上限；實際�
 concurrency = 64                    # 同時並行幾批
 # ----- 引擎初始化效能（皆不改模擬結果；可關閉以對拍驗證）-----
 cache_network = true               # 跨連線/重設快取已解析的 graphml 圖+節點索引（省 24MB 重解析）
-init_workers = 0                   # init 路由並行程序數（0/1=單程序；>1 才開 multiprocessing。Linux 受益最大）
+init_workers = 16                   # init 路由並行程序數（0/1=單程序；>1 才開 multiprocessing。Linux 受益最大）
 parallel_init_min_agents = 200     # 車數達此門檻才啟用並行 init（量少時 pool 啟動成本不划算）
 
 # ----- LLM token 預算（依預算動態切批，避免 prompt 溢位 vLLM context）-----
