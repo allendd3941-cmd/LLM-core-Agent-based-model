@@ -6,35 +6,20 @@ const TrafficUI = (() => {
   let send = null; // 由 app.js 注入：send(action, value)
   let profiles = {}; // name → {identity, traits}
   let busyBtn = null; // 目前顯示 spinner 的按鈕
-  let detectorMode = false; // 監測器放置模式
 
   const $ = (id) => document.getElementById(id);
 
-  // ---- 車流監測器放置 ----
-  function setDetectorMode(on) {
-    detectorMode = !!on;
-    if (window.TrafficMap) TrafficMap.setDetectorPlaceMode(detectorMode);
-    const b = $("btn-detector");
-    if (b) {
-      b.classList.toggle("active", detectorMode);
-      b.innerHTML = detectorMode
-        ? '<i class="ti ti-map-pin-check" aria-hidden="true"></i> 放置中…點地圖（再按結束）'
-        : '<i class="ti ti-map-pin-plus" aria-hidden="true"></i> 放置監測器';
-    }
-  }
-
-  function updateDetectorHint() {
-    const h = $("detector-hint");
+  // ---- 車流監測器（街景丟人式拖放）----
+  function updateDetectorCount() {
+    const el = $("detector-count");
     const n = (window.TrafficMap && TrafficMap.detectorCount) ? TrafficMap.detectorCount() : 0;
-    if (h) h.textContent = n
-      ? `已放置 ${n} 個監測器；按「套用設定」生效，模擬結束在「分析」分頁看各類流量。`
-      : "啟用後在地圖上點選路段放置（只能放在路上）；放好後按「套用設定」生效。";
+    if (el) el.textContent = `已放置 ${n} 隻監測器`;
   }
 
   // app.js 收到後端吸附成功後呼叫
   function onDetectorPlaced(label) {
     markPending();
-    updateDetectorHint();
+    updateDetectorCount();
     toast("已放置監測器：" + (label || "路段"));
     log("success", "監測器已吸附到路段：" + (label || ""));
   }
@@ -87,14 +72,13 @@ const TrafficUI = (() => {
       clearPending();
     };
 
-    // 車流監測器：放置模式切換 / 清除 / 結束放置
-    const detBtn = $("btn-detector");
-    if (detBtn) detBtn.onclick = () => setDetectorMode(!detectorMode);
+    // 車流監測器：街景丟人式拖放（拖相機 icon 到路上放開）+ 清除
+    const peg = $("det-pegman");
+    if (peg && window.TrafficMap) TrafficMap.setupDetectorDrag(peg);
     const detClear = $("btn-detector-clear");
     if (detClear) detClear.onclick = () => {
       if (window.TrafficMap) TrafficMap.clearDetectors();
-      setDetectorMode(false);
-      updateDetectorHint();
+      updateDetectorCount();
       markPending();
       toast("已清除監測器，按「套用設定」生效。");
     };
@@ -343,6 +327,7 @@ const TrafficUI = (() => {
     }
     if (cfg.decision_source) $("m-source").textContent = CORE_LABEL[cfg.decision_source] || cfg.decision_source;
     setLlmInit(cfg.llm);
+    updateDetectorCount();   // init 後同步「已放置 N 隻」（含已套用的監測器）
     clearPending();
   }
 

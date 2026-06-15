@@ -19,11 +19,12 @@ const TrafficMap = (() => {
   let onViewChange = null;    // ⑥ 回報可視範圍（zoom+bounds）給後端的 callback
   let _viewTimer = null;      // 視圖回報節流
 
-  // 車流監測器：放在路上的計數點（放置模式下點地圖 → 後端吸附 → 暫存點位，套用設定時送出）
+  // 車流監測器：像 Google 街景丟人——拖曳相機 icon 到路上放開 → 後端吸附 → 暫存點位（套用設定時送出）
   let detectorLayer = null;
-  let stagedDetectors = [];   // [{lat,lng}] 暫存（套用設定時帶入 apply_config）
-  let placeMode = false;
+  let stagedDetectors = [];       // [{lat,lng}] 暫存（套用設定時帶入 apply_config）
+  let detMarkers = [];            // 地圖上的監測器 icon marker（zoom 時重算大小）
   let onDetectorRequest = null;   // (lat,lng) → app 送 snap_detector
+  let placing = false;            // 拖曳放置進行中
 
   // agent 依「狀態」上色（與道路壅塞上色分離）；車種以「大小」區分（不用 emoji）。
   const STATE_COLOR = {
@@ -124,9 +125,7 @@ const TrafficMap = (() => {
     map.getPane("agentPane").style.zIndex = 450;
     agentRenderer = L.canvas({ pane: "agentPane", padding: 0.5 });
     detectorLayer = L.layerGroup().addTo(map);
-    map.on("click", (e) => {
-      if (placeMode && onDetectorRequest) onDetectorRequest(e.latlng.lat, e.latlng.lng);
-    });
+    map.on("zoomend", rescaleDetectors);   // icon 隨比例尺美觀縮放
     map.on("zoomend", refreshSignalVisibility);
     map.on("zoomend moveend", scheduleReportView);
     map.on("zoomend", () => { if (lastRoads.length) updateRoads(lastRoads); });
@@ -176,27 +175,42 @@ const TrafficMap = (() => {
   }
   function setViewReporter(cb) { onViewChange = cb; reportView(); }
 
-  // ---- 車流監測器 ----
+  // ---- 車流監測器（街景丟人式拖放）----
   function setDetectorReporter(cb) { onDetectorRequest = cb; }
 
-  function setDetectorPlaceMode(on) {
-    placeMode = !!on;
-    if (map) map.getContainer().style.cursor = placeMode ? "crosshair" : "";
+  // icon 大小隨 zoom 美觀縮放
+  function detIconSize() {
+    const z = map ? map.getZoom() : 13;
+    return z >= 15 ? 36 : z >= 13 ? 28 : z >= 11 ? 22 : 18;
   }
 
-  function _detectorMarker(lat, lng, label, registered) {
-    const m = L.circleMarker([lat, lng], {
-      radius: 7, color: "#10141c", weight: 2,
-      fillColor: registered ? "#7C4DFF" : "#FFB020", fillOpacity: 1,
-    }).addTo(detectorLayer);
-    m.bindTooltip("📍 " + (label || "監測器"), { direction: "top" });
+  function detIcon(registered) {
+    const s = detIconSize();
+    return L.divIcon({
+      className: "det-divicon",
+      html: `<div class="det-pin ${registered ? "reg" : "staged"}" style="font-size:${s}px">`
+        + `<i class="ti ti-device-cctv" aria-hidden="true"></i></div>`,
+      iconSize: [s, s], iconAnchor: [s / 2, s / 2],
+    });
+  }
+
+  function makeDetMarker(lat, lng, label, registered) {
+    const m = L.marker([lat, lng], { icon: detIcon(registered), keyboard: false })
+      .addTo(detectorLayer);
+    m.bindTooltip("📍 " + (label || "監測器"), { direction: "top", offset: [0, -6] });
+    m._det = { lat, lng, label, registered };
+    detMarkers.push(m);
     return m;
   }
 
-  // app 收到後端吸附成功的點 → 暫存 + 畫黃色標記（尚未套用）
+  function rescaleDetectors() {
+    detMarkers.forEach((m) => m.setIcon(detIcon(m._det.registered)));
+  }
+
+  // app 收到後端吸附成功的點 → 暫存 + 畫（尚未套用＝amber）
   function addStagedDetector(lat, lng, label) {
     stagedDetectors.push({ lat, lng });
-    _detectorMarker(lat, lng, label, false);
+    makeDetMarker(lat, lng, label, false);
   }
 
   function getDetectors() { return stagedDetectors.map((d) => ({ lat: d.lat, lng: d.lng })); }
@@ -204,15 +218,63 @@ const TrafficMap = (() => {
 
   function clearDetectors() {
     stagedDetectors = [];
+    detMarkers = [];
     if (detectorLayer) detectorLayer.clearLayers();
   }
 
-  // init payload 帶回「已註冊（吸附後）」的監測器 → 重畫並同步暫存清單
+  // init payload 帶回「已註冊（吸附後）」的監測器 → 重畫並同步暫存清單（紫＝已套用）
   function renderRegisteredDetectors(list) {
     if (!detectorLayer) return;
     detectorLayer.clearLayers();
+    detMarkers = [];
     stagedDetectors = (list || []).map((d) => ({ lat: d.lat, lng: d.lng }));
-    (list || []).forEach((d) => _detectorMarker(d.lat, d.lng, d.label, true));
+    (list || []).forEach((d) => makeDetMarker(d.lat, d.lng, d.label, true));
+  }
+
+  // 拖曳時把所有道路打亮 → 提示「可以放在這些路上」（像街景把有覆蓋的街道變藍）；放開還原
+  function highlightRoadsForPlacement(on) {
+    if (on) {
+      const hl = { color: "#5BE0FF", weight: Math.max(3, roadWeight() + 1.5), opacity: 1 };
+      Object.values(roadById).forEach((l) => l.setStyle(hl));
+      Object.values(flowOverlay).forEach((l) => l.setStyle(hl));
+    } else if (lastRoads.length) {
+      updateRoads(lastRoads);   // 還原（含即時壅塞上色）
+    } else {
+      Object.values(roadById).forEach((l) => l.setStyle(BASE_ROAD));
+    }
+  }
+
+  function endPlacing() {
+    if (!placing) return;
+    placing = false;
+    highlightRoadsForPlacement(false);
+    const c = map && map.getContainer();
+    if (c) c.classList.remove("placing-detector");
+  }
+
+  // 把左側面板的相機 icon 設成可拖放的「pegman」；拖到地圖路上放開 → 吸附放置
+  function setupDetectorDrag(pegmanEl) {
+    if (!pegmanEl || !map) return;
+    const cont = map.getContainer();
+    pegmanEl.addEventListener("dragstart", (e) => {
+      placing = true;
+      try { e.dataTransfer.setData("text/plain", "detector"); e.dataTransfer.effectAllowed = "copy"; } catch (_) {}
+      highlightRoadsForPlacement(true);
+      cont.classList.add("placing-detector");
+    });
+    pegmanEl.addEventListener("dragend", endPlacing);
+    cont.addEventListener("dragover", (e) => {
+      if (!placing) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "copy"; } catch (_) {}
+    });
+    cont.addEventListener("drop", (e) => {
+      if (!placing) return;
+      e.preventDefault();
+      const ll = map.mouseEventToLatLng(e);   // 放開處的經緯度 → 後端吸附到最近路段
+      if (onDetectorRequest) onDetectorRequest(ll.lat, ll.lng);
+      endPlacing();
+    });
   }
 
   function setInit(data) {
@@ -422,6 +484,6 @@ const TrafficMap = (() => {
   }
 
   return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient,
-           setViewReporter, resize, setDetectorReporter, setDetectorPlaceMode, addStagedDetector,
+           setViewReporter, resize, setDetectorReporter, setupDetectorDrag, addStagedDetector,
            getDetectors, detectorCount, clearDetectors };
 })();

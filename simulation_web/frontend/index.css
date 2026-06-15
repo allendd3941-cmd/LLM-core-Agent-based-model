@@ -390,6 +390,34 @@ h3.sub.layer-tag { color: var(--text); border-left: 3px solid var(--accent); pad
 .chart-dl:hover { border-color: var(--accent); color: var(--accent); }
 .chart-dl i { font-size: 15px; }
 
+/* ── 監測器：街景丟人式拖放 ─────────────────────── */
+.det-dock { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.det-pegman { flex: 0 0 auto; width: 52px; height: 52px; border-radius: var(--r-md);
+  background: var(--accent-soft); border: 1px dashed var(--accent-deep); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; cursor: grab; user-select: none;
+  transition: transform .12s, box-shadow .12s; }
+.det-pegman i { font-size: 28px; pointer-events: none; }
+.det-pegman:hover { transform: translateY(-1px); box-shadow: 0 0 0 3px var(--accent-soft); }
+.det-pegman:active { cursor: grabbing; transform: scale(.96); }
+.det-dock-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.det-dock-text b { color: var(--accent); font-size: 13px; }
+
+/* 地圖上的監測器 icon（divIcon；font-size 由 JS 依 zoom 設）*/
+.det-divicon { background: none; border: none; }
+.det-pin { display: flex; align-items: center; justify-content: center; line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+.det-pin.staged { color: #FFB020; }
+.det-pin.reg { color: #B388FF; }
+
+/* 拖放放置進行中：游標 + 中央提示橫幅 */
+#map.placing-detector { cursor: copy; }
+#map.placing-detector::after {
+  content: "🛣️ 拖到任一路段上放開以放置監測器";
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1000;
+  background: var(--glass); backdrop-filter: blur(8px); border: 1px solid var(--accent-deep);
+  color: var(--accent); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px;
+  pointer-events: none; white-space: nowrap; }
+
 /* ── 對話 ─────────────────────────────────────── */
 .chat-wrap { max-width: 760px; }
 .chat-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }

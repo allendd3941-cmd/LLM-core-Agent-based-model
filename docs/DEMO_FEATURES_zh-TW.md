@@ -253,11 +253,13 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
 
 ## 20. 車流監測器 + GIS 主題圖層匯出（P3+，交通局交付）
 
-- **車流監測器**：左面板「車流監測器」卡 →「放置監測器」進入放置模式 → 點地圖,後端**吸附到最近路段**
-  (離道路 >80m 拒絕,強制「只能放路上」)→ 黃點暫存;隨**套用設定**一起送(`apply_config.detectors`)、初始化註冊(紫點)。
-  模擬中以「進入新邊」累積**通過次數**(真實流量,與 step_minutes 無關),`車種×來源`交叉表。
-  分析面板「**④ 車流監測器**」:**下拉選**總量/汽車/機車/事件/背景,表格 + 每步通過數曲線。
-  `map.js`(放置/吸附/標記)、`engine._register_detectors/_update_detectors/snap_point`、`websocket snap_detector/export_gis`。
+- **車流監測器（街景丟人式拖放）**：左面板「車流監測器」卡有一個**可拖曳的相機 icon（pegman）**——
+  按住拖到地圖上,**拖曳時全網道路打亮**(像 Google 街景把有覆蓋街道變藍)+中央橫幅提示「拖到路上放開」;
+  在路段上放開 → 後端 `snap_point` **吸附到最近路段**(離道路 >80m 拒絕,強制「只能放路上」)→ amber icon 暫存。
+  地圖上的監測器 icon **隨比例尺(zoom)美觀縮放**(`zoomend` 重算大小);左面板顯示「**已放置 N 隻監測器**」。
+  隨**套用設定**一起送(`apply_config.detectors`)、初始化註冊(紫色 icon)。模擬中以「進入新邊」累積**通過次數**
+  (真實流量,與 step_minutes 無關),`車種×來源`交叉表。分析面板「**④ 車流監測器**」:**下拉選**總量/汽車/機車/事件/背景,表格 + 每步通過數曲線。
+  `map.js`(`setupDetectorDrag`/`highlightRoadsForPlacement`/`detIcon` 縮放)、`engine._register_detectors/_update_detectors/snap_point`、`websocket snap_detector/export_gis`。
 - **GIS 主題圖層匯出**:分析面板「**⑤ 匯出 GIS 圖層**」下拉(LOS / 車流量 / 壅塞 / 監測器 / 全部)+「下載 Shapefile」
   → `export_gis` → 後端 `spatial/gis_export.py` 產 zip(.shp/.shx/.dbf/.prj/.cpg,EPSG:4326)→ `GET /api/gis/<name>` 下載。
   交通局可在 QGIS/ArcGIS 用屬性分類上色。
