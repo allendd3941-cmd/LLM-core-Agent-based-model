@@ -131,8 +131,9 @@
             TrafficMap.addStagedDetector(msg.lat, msg.lng, msg.label);
             TrafficUI.onDetectorPlaced(msg.label);
           } else {
-            TrafficUI.toast("這裡不在路上，請點在道路上。");
-            TrafficUI.log("warn", "監測器放置失敗：點離道路過遠。");
+            const d = msg.dist ? `（最近道路在 ~${Math.round(msg.dist)} m 外）` : "";
+            TrafficUI.toast("這裡離道路太遠，請靠近一點或放大地圖再放。" + d);
+            TrafficUI.log("warn", "監測器放置失敗：附近沒有道路可吸附。" + d);
           }
           break;
         case "download":

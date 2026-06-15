@@ -44,8 +44,9 @@ logger = logging.getLogger(__name__)
 # 與車數/seed 無關 → 共用不改結果；只留最新場景一份。詳見 _build_town_node_index。
 _SPATIAL_INDEX_CACHE: dict[tuple[str, float], tuple[dict[str, list[str]], dict[str, str]]] = {}
 
-# 監測器吸附門檻（公尺）：點離最近道路超過此距離 → 視為「沒點在路上」、拒絕放置。
-_DETECTOR_SNAP_M = 80.0
+# 監測器放置：一律「吸附到最近的道路」（像街景丟人，總會落在最近街道上）。
+# 只有當最近道路都超過此距離（等於丟到外海/深山、附近根本沒路）才拒絕。
+_DETECTOR_SNAP_M = 1500.0
 
 
 # ---------------------------------------------------------------------------
@@ -1322,7 +1323,7 @@ class SimulationEngine:
                 continue
             rid, (u, v), dist, (px, py) = snapped
             if dist > _DETECTOR_SNAP_M:
-                logger.info("監測器 #%d 離道路 %.0fm 超門檻，略過", i + 1, dist)
+                logger.info("監測器 #%d 附近無道路（最近 %.0fm），略過", i + 1, dist)
                 continue
             road = self.network.road_between(u, v)
             plng, plat = to_wgs.transform(px, py)

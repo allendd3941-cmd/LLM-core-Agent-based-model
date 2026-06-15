@@ -412,7 +412,7 @@ h3.sub.layer-tag { color: var(--text); border-left: 3px solid var(--accent); pad
 /* 拖放放置進行中：游標 + 中央提示橫幅 */
 #map.placing-detector { cursor: copy; }
 #map.placing-detector::after {
-  content: "🛣️ 拖到任一路段上放開以放置監測器";
+  content: "🛣️ 拖到地圖放開 — 會自動吸附到最近的道路";
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1000;
   background: var(--glass); backdrop-filter: blur(8px); border: 1px solid var(--accent-deep);
   color: var(--accent); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px;
