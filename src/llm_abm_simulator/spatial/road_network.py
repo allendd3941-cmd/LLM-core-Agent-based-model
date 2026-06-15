@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from pathlib import Path
 
 import networkx as nx
@@ -40,6 +41,60 @@ def _spec_for(highway: str) -> dict[str, float]:
     # OSM highway 可能是 list 的字串表示，取第一個關鍵字
     key = highway.split(",")[0].strip().strip("[]'\" ") if highway else ""
     return config.HIGHWAY_SPECS.get(key, config.DEFAULT_HIGHWAY_SPEC)
+
+
+def _first_number(raw: object) -> float | None:
+    """從 OSM tag（可能是 None / 數值 / 字串 "50" / "2;3" / list）取第一個正數；無則 None。"""
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, list):
+        nums = [n for n in (_first_number(x) for x in raw) if n is not None]
+        return max(nums) if nums else None
+    m = re.search(r"\d+(?:\.\d+)?", str(raw))
+    return float(m.group()) if m else None
+
+
+def _parse_lanes(data: dict, spec: dict[str, float]) -> float:
+    """OSM 車道數 → 每方向車道（缺值回退層級預設）。
+
+    OSM ``lanes`` 通常是「雙向總車道」；非單行道時每方向約 lanes/2（四捨五入、至少 1）。
+    ⚠ OSM 車道覆蓋率部分，且少數路段以 lanes:forward/backward 分向標記未處理 → 屬近似。
+    """
+    val = _first_number(data.get("lanes"))
+    if val is None or val <= 0:
+        return float(spec.get("lanes", 1.0))
+    oneway = data.get("oneway")
+    is_oneway = oneway in (True, "yes", "true", "1", 1)
+    if not is_oneway:
+        val = max(1.0, round(val / 2.0))
+    return float(val)
+
+
+def _resolve_speeds(data: dict, spec: dict[str, float]) -> tuple[float, float]:
+    """OSM ``maxspeed`` → (speed_car, speed_moto) km/h；缺值/非數值回退層級估計值。
+
+    機車速沿用該層級的 moto/car 比例。支援 mph 轉換；上限 130 防離群值。
+    """
+    class_car = float(spec.get("speed_car", 40.0))
+    class_moto = float(spec.get("speed_moto", 35.0))
+    raw = data.get("maxspeed")
+    v = _first_number(raw)
+    if v is None or v <= 0:
+        return class_car, class_moto
+    if "mph" in str(raw).lower():
+        v *= 1.60934
+    v = min(v, 130.0)
+    ratio = (class_moto / class_car) if class_car > 0 else 0.85
+    return float(round(v, 1)), float(round(v * ratio, 1))
+
+
+def _capacity_for(spec: dict[str, float], lanes: float) -> float:
+    """容量代理值 = 每車道容量 × 車道數（至少一車道）。"""
+    per_lane = float(spec.get("capacity_per_lane",
+                              config.DEFAULT_HIGHWAY_SPEC.get("capacity_per_lane", 12.0)))
+    return max(1.0, lanes) * per_lane
 
 
 # ---------------------------------------------------------------------------
@@ -190,16 +245,19 @@ def _convert_osm_graph(g_osm: nx.MultiDiGraph) -> nx.DiGraph:
         name = data.get("name", "")
         if isinstance(name, list):
             name = name[0] if name else ""
+        # 優先用 OSM 真實車道/速限（缺值回退層級估計）；容量 = 每車道容量 × 車道數
+        lanes = _parse_lanes(data, spec)
+        speed_car, speed_moto = _resolve_speeds(data, spec)
         g.add_edge(
             su, sv,
             road_id=f"{su}_{sv}",
             length=length,
             highway=str(highway),
             road_name=str(name),
-            speed_car=spec["speed_car"],
-            speed_moto=spec["speed_moto"],
-            lanes=spec["lanes"],
-            capacity=spec["capacity"],
+            speed_car=speed_car,
+            speed_moto=speed_moto,
+            lanes=lanes,
+            capacity=_capacity_for(spec, lanes),
             wkt=geom.wkt,
         )
     logger.info("OSM 路網轉換完成：%d 節點 / %d 邊", g.number_of_nodes(), g.number_of_edges())
@@ -247,11 +305,12 @@ def build_synthetic_graph(cfg: config.SimulationConfig) -> nx.DiGraph:
         length = _node_dist(g, a, b)
         geom = LineString([(g.nodes[a]["lng"], g.nodes[a]["lat"]),
                            (g.nodes[b]["lng"], g.nodes[b]["lat"])])
+        lanes = float(spec.get("lanes", 2))
         for u, v in ((a, b), (b, a)):
             g.add_edge(u, v, road_id=f"{u}_{v}", length=length, highway="secondary",
                        road_name="synthetic", speed_car=spec["speed_car"],
-                       speed_moto=spec["speed_moto"], lanes=spec["lanes"],
-                       capacity=spec["capacity"], wkt=geom.wkt)
+                       speed_moto=spec["speed_moto"], lanes=lanes,
+                       capacity=_capacity_for(spec, lanes), wkt=geom.wkt)
 
     for i in range(n):
         for j in range(n):
@@ -311,18 +370,22 @@ def _wrap(graph: nx.DiGraph) -> RoadNetwork:
                 geom = shapely_wkt.loads(w)
             except Exception:  # noqa: BLE001
                 geom = None
+        highway = str(data.get("highway", ""))
+        spec = _spec_for(highway)
+        lanes = float(data.get("lanes", spec.get("lanes", 1.0)))
+        # 容量在載入時由 每車道容量 × 車道數 算出（調 capacity_per_lane 免重建即生效）
         roads[(u, v)] = Road(
             road_id=str(data.get("road_id", f"{u}_{v}")),
             node_a=u,
             node_b=v,
             length=float(data.get("length", 0.0)),
-            highway=str(data.get("highway", "")),
-            highway_type=str(data.get("highway", "")),
+            highway=highway,
+            highway_type=highway,
             road_name=str(data.get("road_name", "")),
             speed_car=float(data.get("speed_car", 45.0)),
             speed_moto=float(data.get("speed_moto", 35.0)),
-            lanes=float(data.get("lanes", 1.0)),
-            capacity=float(data.get("capacity", 30.0)),
+            lanes=lanes,
+            capacity=_capacity_for(spec, lanes),
             geometry_wgs84=geom,
         )
     return RoadNetwork(graph, roads)

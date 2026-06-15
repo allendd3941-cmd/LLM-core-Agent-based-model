@@ -49,6 +49,10 @@ const TrafficCharts = (() => {
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true, ticks: { stepSize: 1 } } } },
     });
+
+    const dv = document.getElementById("detector-view");
+    if (dv) dv.onchange = drawDetectorTable;   // 監測器流量類型下拉 → 重畫表
+    addChartDownloads();                        // 每張圖加「下載 PNG」鈕
   }
 
   function update(state) {
@@ -89,15 +93,22 @@ const TrafficCharts = (() => {
     // 隱藏並清掉分析圖（reset 時舊分析不該殘留）
     const card = document.getElementById("analysis-card");
     if (card) card.style.display = "none";
-    [arrivalChart, travelChart, odChart, volumeChart, egressChart, egressTravelChart, egressOdChart]
+    [arrivalChart, travelChart, odChart, volumeChart, egressChart, egressTravelChart, egressOdChart, detectorsChart]
       .forEach((c) => { if (c) c.destroy(); });
     arrivalChart = travelChart = odChart = volumeChart = null;
-    egressChart = egressTravelChart = egressOdChart = null;
+    egressChart = egressTravelChart = egressOdChart = detectorsChart = null;
+    _lastAnalysis = null;
+    _lastDetectors = [];
+    const db = document.getElementById("detector-analysis");
+    if (db) db.innerHTML = "";
   }
 
   // ===== 模擬後交通分析（收到 type:analysis 時呼叫）=====
   let arrivalChart = null, travelChart = null, odChart = null, volumeChart = null;
   let egressChart = null, egressTravelChart = null, egressOdChart = null;
+  let detectorsChart = null;
+  let _lastAnalysis = null;     // 最近一次分析資料（CSV 匯出用）
+  let _lastDetectors = [];      // 最近一次監測器資料（下拉切換重畫用）
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
@@ -165,6 +176,104 @@ const TrafficCharts = (() => {
 
     renderNetwork(data.network || {}, labels);
     renderEgress(data.egress || {}, labels);
+    _lastAnalysis = data;
+    renderDetectors(data.detectors || []);
+    addChartDownloads();   // 分析圖此時才有內容 → 補綁下載鈕
+  }
+
+  // ===== 車流監測器（放在路上的計數器）=====
+  function renderDetectors(dets) {
+    _lastDetectors = dets || [];
+    drawDetectorTable();
+    detectorsChart && detectorsChart.destroy();
+    detectorsChart = null;
+    const canvas = document.getElementById("chart-detectors");
+    if (!canvas || !_lastDetectors.length) return;
+    const maxLen = Math.max(0, ..._lastDetectors.map((d) => (d.series || []).length));
+    const labels = Array.from({ length: maxLen }, (_, i) => i + 1);
+    const palette = ["#3FB6FF", "#FF8A3D", "#2FD17A", "#B388FF", "#FF4D4D", "#FFD600"];
+    detectorsChart = new Chart(canvas, {
+      type: "line",
+      data: { labels, datasets: _lastDetectors.map((d, i) => ({
+        label: `${d.id} ${d.label}`, data: d.series || [],
+        borderColor: palette[i % palette.length], tension: .3, pointRadius: 0 })) },
+      options: lineOpts(),
+    });
+  }
+
+  function drawDetectorTable() {
+    const box = document.getElementById("detector-analysis");
+    if (!box) return;
+    const viewEl = document.getElementById("detector-view");
+    const view = (viewEl && viewEl.value) || "total";
+    if (!_lastDetectors.length) {
+      box.innerHTML = '<p class="muted">尚未放置監測器（在左側「車流監測器」放置後按「套用設定」，再跑模擬）。</p>';
+      return;
+    }
+    const VL = { total: "總車流量", car: "汽車", moto: "機車", event: "事件車", ambient: "背景車" };
+    box.innerHTML = `<table><thead><tr><th>監測器</th><th>路段</th><th>${VL[view]}</th><th>上行/下行</th><th>汽/機·事/背</th></tr></thead><tbody>`
+      + _lastDetectors.map((d) => {
+          const b = d.both || {}, a = d.dir_a || {}, bb = d.dir_b || {};
+          return `<tr><td>${esc(d.id)}</td><td>${esc(d.label)}</td>`
+            + `<td><b>${b[view] || 0}</b></td>`
+            + `<td>${a[view] || 0} / ${bb[view] || 0}</td>`
+            + `<td>${b.car || 0}/${b.moto || 0} · ${b.event || 0}/${b.ambient || 0}</td></tr>`;
+        }).join("")
+      + "</tbody></table>";
+  }
+
+  // 每步通過數曲線 + 表格的數據另存 CSV（含時間序列 + 監測器）
+  function downloadAnalysisCSV() {
+    const d = _lastAnalysis;
+    if (!d) { return; }
+    const lines = ["# 時間序列",
+      "cycle,elapsed_min,cumulative_arrived,arrival_rate,avg_congestion,crowded_roads,volume_event,volume_ambient"];
+    const cyc = d.cycles || [], net = d.network || {};
+    const at = (arr, i) => { const v = (arr || [])[i]; return v == null ? "" : v; };
+    for (let i = 0; i < cyc.length; i++) {
+      lines.push([cyc[i], at(d.elapsed_minutes, i), at(d.cumulative_arrived, i), at(d.arrival_rate, i),
+        at(d.avg_congestion, i), at(d.crowded_road_count, i),
+        at(net.volume_event, i), at(net.volume_ambient, i)].join(","));
+    }
+    const dets = d.detectors || [];
+    if (dets.length) {
+      lines.push("", "# 監測器（通過次數）", "id,label,total,car,moto,event,ambient,dir_a_total,dir_b_total");
+      dets.forEach((x) => {
+        const b = x.both || {}, a = x.dir_a || {}, bb = x.dir_b || {};
+        lines.push([x.id, '"' + String(x.label).replace(/"/g, '""') + '"',
+          b.total || 0, b.car || 0, b.moto || 0, b.event || 0, b.ambient || 0,
+          a.total || 0, bb.total || 0].join(","));
+      });
+    }
+    const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "analysis.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // 為每張圖卡加「下載 PNG」鈕（直接抓 canvas 像素，不需 Chart 實例）
+  function addChartDownloads() {
+    document.querySelectorAll(".chart-card").forEach((card) => {
+      if (card.querySelector(".chart-dl")) return;
+      const canvas = card.querySelector("canvas");
+      if (!canvas) return;
+      const btn = document.createElement("button");
+      btn.className = "chart-dl"; btn.type = "button"; btn.title = "下載此圖 PNG";
+      btn.innerHTML = '<i class="ti ti-download" aria-hidden="true"></i>';
+      btn.onclick = () => {
+        try {
+          const a = document.createElement("a");
+          a.href = canvas.toDataURL("image/png");
+          const h = card.querySelector("h3");
+          a.download = (h ? h.textContent.trim() : "chart") + ".png";
+          document.body.appendChild(a); a.click(); a.remove();
+        } catch (e) {}
+      };
+      if (!card.style.position) card.style.position = "relative";
+      card.appendChild(btn);
+    });
   }
 
   // ===== 散場層（宣告散場後）=====
@@ -239,5 +348,5 @@ const TrafficCharts = (() => {
       : `<p class="muted">無瓶頸資料（無背景車或路網未壅塞）。</p>`;
   }
 
-  return { init, update, reset, renderAnalysis };
+  return { init, update, reset, renderAnalysis, downloadAnalysisCSV };
 })();

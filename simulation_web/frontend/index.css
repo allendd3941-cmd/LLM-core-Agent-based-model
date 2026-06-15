@@ -369,6 +369,27 @@ h3.sub.layer-tag { color: var(--text); border-left: 3px solid var(--accent); pad
 .bottleneck-table .los-E, .bottleneck-table .los-F { color: var(--c-severe); }
 .bottleneck-table p.muted { color: var(--text-mut); font-size: 12px; }
 
+/* ── 監測器表格 / GIS 匯出 / 圖表下載 ───────────── */
+#detector-analysis { overflow: auto; margin-bottom: 8px; }
+#detector-analysis table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+#detector-analysis th, #detector-analysis td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+#detector-analysis th { color: var(--text-dim); font-weight: 500; }
+#detector-analysis td b { color: var(--accent); }
+#detector-analysis p.muted { color: var(--text-mut); font-size: 12px; }
+
+.gis-export { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 12px; }
+.gis-export .select-wrap { min-width: 220px; }
+.gis-export .btn { width: auto; flex: 0 0 auto; }
+
+.btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+.chart-dl { position: absolute; top: 6px; right: 6px; z-index: 2;
+  background: var(--glass); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 6px; width: 26px; height: 26px; cursor: pointer; display: flex;
+  align-items: center; justify-content: center; padding: 0; }
+.chart-dl:hover { border-color: var(--accent); color: var(--accent); }
+.chart-dl i { font-size: 15px; }
+
 /* ── 對話 ─────────────────────────────────────── */
 .chat-wrap { max-width: 760px; }
 .chat-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }

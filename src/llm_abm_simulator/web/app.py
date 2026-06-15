@@ -88,6 +88,17 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"step": n, "text": text})
 
+    @app.get("/api/gis/{name}", response_model=None)
+    async def get_gis_export(name: str):
+        """下載匯出的 GIS 主題圖層 Shapefile zip（由 WS export_gis 動作產生於 output/）。"""
+        # 防路徑穿越：只允許 output/ 內、gis_*.zip 命名的檔案
+        if "/" in name or "\\" in name or ".." in name or not re.fullmatch(r"gis_[\w.]+\.zip", name):
+            return JSONResponse({"error": "invalid name"}, status_code=400)
+        p = config.OUTPUT_DIR / name
+        if not p.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(p, media_type="application/zip", filename=name)
+
     @app.get("/api/llm/models")
     async def list_llm_models(backend: str = "ollama") -> JSONResponse:
         """列出可選模型：ollama→即時查 /api/tags 的實裝模型；vllm→候選登錄表。"""

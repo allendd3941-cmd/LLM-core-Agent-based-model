@@ -19,6 +19,12 @@ const TrafficMap = (() => {
   let onViewChange = null;    // ⑥ 回報可視範圍（zoom+bounds）給後端的 callback
   let _viewTimer = null;      // 視圖回報節流
 
+  // 車流監測器：放在路上的計數點（放置模式下點地圖 → 後端吸附 → 暫存點位，套用設定時送出）
+  let detectorLayer = null;
+  let stagedDetectors = [];   // [{lat,lng}] 暫存（套用設定時帶入 apply_config）
+  let placeMode = false;
+  let onDetectorRequest = null;   // (lat,lng) → app 送 snap_detector
+
   // agent 依「狀態」上色（與道路壅塞上色分離）；車種以「大小」區分（不用 emoji）。
   const STATE_COLOR = {
     moving: "#3FB6FF",   // 移動中（藍）
@@ -117,6 +123,10 @@ const TrafficMap = (() => {
     map.createPane("agentPane");
     map.getPane("agentPane").style.zIndex = 450;
     agentRenderer = L.canvas({ pane: "agentPane", padding: 0.5 });
+    detectorLayer = L.layerGroup().addTo(map);
+    map.on("click", (e) => {
+      if (placeMode && onDetectorRequest) onDetectorRequest(e.latlng.lat, e.latlng.lng);
+    });
     map.on("zoomend", refreshSignalVisibility);
     map.on("zoomend moveend", scheduleReportView);
     map.on("zoomend", () => { if (lastRoads.length) updateRoads(lastRoads); });
@@ -166,6 +176,45 @@ const TrafficMap = (() => {
   }
   function setViewReporter(cb) { onViewChange = cb; reportView(); }
 
+  // ---- 車流監測器 ----
+  function setDetectorReporter(cb) { onDetectorRequest = cb; }
+
+  function setDetectorPlaceMode(on) {
+    placeMode = !!on;
+    if (map) map.getContainer().style.cursor = placeMode ? "crosshair" : "";
+  }
+
+  function _detectorMarker(lat, lng, label, registered) {
+    const m = L.circleMarker([lat, lng], {
+      radius: 7, color: "#10141c", weight: 2,
+      fillColor: registered ? "#7C4DFF" : "#FFB020", fillOpacity: 1,
+    }).addTo(detectorLayer);
+    m.bindTooltip("📍 " + (label || "監測器"), { direction: "top" });
+    return m;
+  }
+
+  // app 收到後端吸附成功的點 → 暫存 + 畫黃色標記（尚未套用）
+  function addStagedDetector(lat, lng, label) {
+    stagedDetectors.push({ lat, lng });
+    _detectorMarker(lat, lng, label, false);
+  }
+
+  function getDetectors() { return stagedDetectors.map((d) => ({ lat: d.lat, lng: d.lng })); }
+  function detectorCount() { return stagedDetectors.length; }
+
+  function clearDetectors() {
+    stagedDetectors = [];
+    if (detectorLayer) detectorLayer.clearLayers();
+  }
+
+  // init payload 帶回「已註冊（吸附後）」的監測器 → 重畫並同步暫存清單
+  function renderRegisteredDetectors(list) {
+    if (!detectorLayer) return;
+    detectorLayer.clearLayers();
+    stagedDetectors = (list || []).map((d) => ({ lat: d.lat, lng: d.lng }));
+    (list || []).forEach((d) => _detectorMarker(d.lat, d.lng, d.label, true));
+  }
+
   function setInit(data) {
     if (townLayer) map.removeLayer(townLayer);
     if (roadLayer) map.removeLayer(roadLayer);
@@ -196,6 +245,7 @@ const TrafficMap = (() => {
     }).addTo(map).bindPopup(`${destName}（目的地）`);
 
     setSignals(data.signals);
+    renderRegisteredDetectors(data.detectors);
 
     try { map.invalidateSize(); map.fitBounds(townLayer.getBounds().pad(0.05)); } catch (e) {}
   }
@@ -371,5 +421,7 @@ const TrafficMap = (() => {
     });
   }
 
-  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient, setViewReporter, resize };
+  return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient,
+           setViewReporter, resize, setDetectorReporter, setDetectorPlaceMode, addStagedDetector,
+           getDetectors, detectorCount, clearDetectors };
 })();

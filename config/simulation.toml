@@ -250,64 +250,64 @@ steps_max = 240
 steps_step = 6
 step_minutes_options = [1, 2, 5, 10]
 
-# ----- 各 OSM highway 型別的速限 / 車道 / 容量 -----
-# ⚠ 註：改這區只在「重建路網」時生效。bundle 的 data/tainan_roads.graphml
-#    已把速度/容量烤進每條邊；改值後需執行：
+# ----- 各 OSM highway 型別的速限 / 車道 / 每車道容量 -----
+# ⚠ 註：speed_car/speed_moto/lanes 在「重建路網」時烤進每條邊（建網時優先用 OSM 真實 maxspeed/lanes，
+#    缺值才回退本表）；改值後需執行：
 #        python -m llm_abm_simulator.spatial.build_roads            （OSM）
 #        python -m llm_abm_simulator.spatial.build_roads --synthetic（合成）
-#    重建 graphml 才會反映新值。
-# capacity 為 congestion_proxy = flow/capacity 的分母，刻意取較小值讓壅塞在 demo 可見。
+# capacity（congestion_proxy = flow/capacity 的分母）改由 capacity_per_lane × lanes 在「載入時」算出
+#    → 調 capacity_per_lane 免重建即生效；車道越多越耐塞。capacity_per_lane 單調遞減、刻意取小讓壅塞在 demo 可見。
 [highway_specs.motorway]
 speed_car = 90
 speed_moto = 70
 lanes = 3
-capacity = 60
+capacity_per_lane = 22
 
 [highway_specs.trunk]
 speed_car = 80
 speed_moto = 65
 lanes = 2
-capacity = 50
+capacity_per_lane = 20
 
 [highway_specs.primary]
 speed_car = 60
 speed_moto = 50
 lanes = 2
-capacity = 40
+capacity_per_lane = 18
 
 [highway_specs.secondary]
 speed_car = 50
 speed_moto = 40
 lanes = 2
-capacity = 30
+capacity_per_lane = 15
 
 [highway_specs.tertiary]
 speed_car = 40
 speed_moto = 35
 lanes = 1
-capacity = 20
+capacity_per_lane = 12
 
 [highway_specs.residential]
 speed_car = 30
 speed_moto = 30
 lanes = 1
-capacity = 12
+capacity_per_lane = 9
 
 [highway_specs.unclassified]
 speed_car = 30
 speed_moto = 30
 lanes = 1
-capacity = 10
+capacity_per_lane = 8
 
 [highway_specs.service]
 speed_car = 25
 speed_moto = 25
 lanes = 1
-capacity = 8
+capacity_per_lane = 6
 
 # 未列出的 highway 型別套用此預設
 [highway_specs.default]
 speed_car = 40
 speed_moto = 35
 lanes = 1
-capacity = 15
+capacity_per_lane = 12

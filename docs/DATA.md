@@ -48,6 +48,37 @@ county boundary (`gis_loader.load_county_boundary_wgs84`).
 - For an offline machine, build it elsewhere and copy `data/tainan_roads.graphml` over.
 - The earlier study-area-only network (`亞太棒球場_研究範圍.shp`) has been removed; coverage is now the full county.
 
+### Speed limit, lanes, and capacity
+
+Per-edge attributes are derived at build time from OSM and `config/simulation.toml` `[highway_specs]`:
+
+- **Lanes** — read from the OSM `lanes` tag when present (two-way streets split per direction ≈ `lanes/2`),
+  falling back to the highway-class default when absent. **OSM lane coverage is partial**, so many edges use
+  the class default — document this as an approximation, not surveyed lane counts.
+- **Speed** — read from the OSM `maxspeed` tag when present (mph converted to km/h), else the class estimate.
+  Motorcycle speed keeps the class car/moto ratio. Also partial coverage.
+- **Capacity** — a *proxy* denominator for `congestion_proxy = flow/capacity`, computed **at load time** as
+  `lanes × capacity_per_lane[class]` (so `capacity_per_lane` can be tuned in the TOML without rebuilding).
+  `capacity_per_lane` is monotonic by class and deliberately small so congestion is visible in the demo.
+  **Not an HCM-calibrated capacity (veh/hr)** — state this plainly in the paper.
+
+> `lanes` only feeds the capacity formula; the map renders each road as a single centerline polyline
+> (no per-lane geometry).
+
+## Analysis Exports (GIS shapefiles + detectors)
+
+After a run, the demo can export **thematic GIS layers** (for QGIS/ArcGIS, e.g. a city traffic bureau):
+road **service level (LOS, A–F)**, **volume** (cumulative passages by car/moto/event/ambient), and
+**congestion** (peak proxy), plus a **detector** point layer. These are produced by
+`engine.gis_road_records()` / `gis_detector_records()` → `spatial/gis_export.py` (geopandas
+`to_file(driver="ESRI Shapefile")`), zipped and served via `GET /api/gis/<name>`.
+
+- **CRS** EPSG:4326 (with `.prj`/`.cpg`); field names ≤10 chars (DBF limit).
+- **Detectors** are user-placed, on-road (snapped) **passive counters** — they count vehicle **passages**
+  (edge-entry events, independent of `step_minutes`), broken down by vehicle type × role; they do not
+  affect the simulation (deterministic, reproducible).
+- These are runtime artifacts (under `output/`, git-ignored); not versioned.
+
 ## Scenario Bundles
 
 `data/scenarios/` holds swappable-scenario bundles produced by

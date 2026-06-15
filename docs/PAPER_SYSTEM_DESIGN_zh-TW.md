@@ -38,7 +38,8 @@
 |---|---|---|---|
 | 行政區 | 臺南市 37 區（界線 + 形心 + 人口 join） | `data/gis/TOWN_MOI_*.shp` | — |
 | 目的地 | 亞太棒球場 point（可換場景） | `data/gis/亞太棒球場_point.shp` | 球場 point 與最近路網節點有固定偏移，抵達以「到達目的地節點」為準 |
-| 路網 | 真實 OSM 道路，**涵蓋全台南市 37 區**（依 TOWN_MOI 縣界 union 下載），烤入速度/容量 | `data/tainan_roads.graphml`（**gitignore；首次啟動 osmnx 依縣界自動下載建檔**，之後讀檔） | 前端底圖只畫主要道路保效能；路徑規劃用全網。需 osmnx+網路建檔 |
+| 路網 | 真實 OSM 道路，**涵蓋全台南市 37 區**（依 TOWN_MOI 縣界 union 下載） | `data/tainan_roads.graphml`（**gitignore；首次啟動 osmnx 依縣界自動下載建檔**，之後讀檔） | 前端底圖只畫主要道路保效能；路徑規劃用全網。需 osmnx+網路建檔 |
+| 速限/車道/容量 | 建網優先用 OSM `maxspeed`/`lanes`（缺值回退 `[highway_specs]` 層級估計）；容量＝`lanes × capacity_per_lane`（載入時算，調參免重建） | `config/simulation.toml` `[highway_specs]` | **OSM maxspeed/lanes 覆蓋率部分**，缺值用層級估計；`capacity_per_lane` 為 demo 可見性的代理值（**非 HCM 校準**）；`lanes` 只影響容量、地圖以中心線呈現（非車道級） |
 | 人口 | 各區人口（重力需求） | `data/gis/town_population.csv` | **近似值（~2023 量級）；正式 paper 換內政部戶政司/臺南市民政局月報** |
 | 號誌 | 號誌節點 + 相位軸 + offset | `data/tainan_signals.json`（由 `build_signals.py`） | **台南只有點位、無真實時相秒數**（時相僅臺北/澎湖且 ID 無法 join）→ cycle/yellow 為**合成值**，非真實號誌孿生 |
 | CRS | 距離/空間運算 EPSG:3826（公尺）；前端 EPSG:4326 | `config.CRS_METRIC/CRS_WGS84` | — |
@@ -240,6 +241,18 @@ ESRI 號誌點 snap 到最近路網節點；**方向相位**（bearing mod 180 �
 - **Top-N 瓶頸路段**：整趟尖峰累積（`_road_peak`），`V/C = peak_flow / capacity`，附 LOS。
 - **事件邊際負載占比**：`event_load_share = 100 × event_vehsteps / (event_vehsteps + ambient_vehsteps)`（「車·步」累積）→
   量化「這場活動讓路網多承擔多少」，不需另跑基線。
+
+### ③ 車流監測器（detectors，使用者放置；`engine._update_detectors`/`_register_detectors`）
+- **放置**：前端點地圖 → 後端**吸附到最近路段**（numpy 點到線段，`_DETECTOR_SNAP_M=80m` 內才接受 → 強制「只能放路上」）；
+  隨「套用設定」（`apply_config`）一起帶入、初始化時註冊。
+- **計數**：以「**進入新邊**」事件累積**通過次數**（背景車重生再經過再計＝真實流量），**與 `step_minutes` 無關**；
+  雙向分開、按 `車種(汽/機) × 來源(事件/背景)` 交叉表，前端下拉自選總量/各類別/上下行。**被動量測、不改物理、可重現**。
+
+### ④ GIS 主題圖層匯出（給交通局；`engine.gis_road_records`/`spatial/gis_export.py`）
+- 同一套 edge-entry 計數擴及**全路網**（每段累積通過量），結合 `_road_peak` 與 LOS → 匯出 **Shapefile（zip）**：
+  **道路服務水準 LOS / 車流量 / 壅塞程度**（線圖層）＋**監測器點位**（點圖層）；前端下拉選圖層、`GET /api/gis/<name>` 下載。
+- CRS EPSG:4326（含 .prj/.cpg）、欄名 ≤10 字元對齊 DBF；交通局可在 QGIS/ArcGIS 用屬性分類上色出版級主題圖。
+- 圖表面板另提供**每圖 PNG 下載 + 分析數據 CSV**。
 
 
 ---

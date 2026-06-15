@@ -250,3 +250,16 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
 - **底部面板自適應**：對話/系統日誌/決策日誌內捲區改 flex 撐滿,隨拖動面板高度自適應(不再寫死 max-height)。
 - **地圖色調可開關**：右上小鈕(`ti-adjustments`)開/關色調面板,預設收起。`map.addAppearanceControl`(toggle)。
 - **滾輪縮放絲滑**：`zoomSnap:0` + 加大 `wheelPxPerZoomLevel` → 連續(小數)縮放、平滑。
+
+## 20. 車流監測器 + GIS 主題圖層匯出（P3+，交通局交付）
+
+- **車流監測器**：左面板「車流監測器」卡 →「放置監測器」進入放置模式 → 點地圖,後端**吸附到最近路段**
+  (離道路 >80m 拒絕,強制「只能放路上」)→ 黃點暫存;隨**套用設定**一起送(`apply_config.detectors`)、初始化註冊(紫點)。
+  模擬中以「進入新邊」累積**通過次數**(真實流量,與 step_minutes 無關),`車種×來源`交叉表。
+  分析面板「**④ 車流監測器**」:**下拉選**總量/汽車/機車/事件/背景,表格 + 每步通過數曲線。
+  `map.js`(放置/吸附/標記)、`engine._register_detectors/_update_detectors/snap_point`、`websocket snap_detector/export_gis`。
+- **GIS 主題圖層匯出**:分析面板「**⑤ 匯出 GIS 圖層**」下拉(LOS / 車流量 / 壅塞 / 監測器 / 全部)+「下載 Shapefile」
+  → `export_gis` → 後端 `spatial/gis_export.py` 產 zip(.shp/.shx/.dbf/.prj/.cpg,EPSG:4326)→ `GET /api/gis/<name>` 下載。
+  交通局可在 QGIS/ArcGIS 用屬性分類上色。
+- **圖表匯出**:每張圖右上「下載 PNG」(直接抓 canvas)、分析面板「下載分析數據 CSV」(時間序列 + 監測器)。
+- **誠實**:監測器/匯出皆**被動量測、不改物理、可重現**;LOS/容量為代理映射(非 HCM 校準)。對應 `docs/DATA.md`、`PAPER_SYSTEM_DESIGN §12 ③④`。

@@ -304,17 +304,19 @@ class SignalConfig:
 
 
 # road_network 的 highway 速限 fallback（TOML [highway_specs] 缺省時用這組）。
+# capacity（同時容車代理值）改由 capacity_per_lane × lanes 在載入時算出，讓「車道數」真正影響容量；
+# capacity_per_lane 單調遞減（高等級每車道吞吐較大），符合交通工程直覺。
 _DEFAULT_HIGHWAY_SPECS: dict[str, dict[str, float]] = {
-    "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity": 60},
-    "trunk": {"speed_car": 80, "speed_moto": 65, "lanes": 2, "capacity": 50},
-    "primary": {"speed_car": 60, "speed_moto": 50, "lanes": 2, "capacity": 40},
-    "secondary": {"speed_car": 50, "speed_moto": 40, "lanes": 2, "capacity": 30},
-    "tertiary": {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity": 20},
-    "residential": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity": 12},
-    "unclassified": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity": 10},
-    "service": {"speed_car": 25, "speed_moto": 25, "lanes": 1, "capacity": 8},
+    "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity_per_lane": 22},
+    "trunk": {"speed_car": 80, "speed_moto": 65, "lanes": 2, "capacity_per_lane": 20},
+    "primary": {"speed_car": 60, "speed_moto": 50, "lanes": 2, "capacity_per_lane": 18},
+    "secondary": {"speed_car": 50, "speed_moto": 40, "lanes": 2, "capacity_per_lane": 15},
+    "tertiary": {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity_per_lane": 12},
+    "residential": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity_per_lane": 9},
+    "unclassified": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity_per_lane": 8},
+    "service": {"speed_car": 25, "speed_moto": 25, "lanes": 1, "capacity_per_lane": 6},
 }
-_DEFAULT_HIGHWAY_SPEC = {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity": 15}
+_DEFAULT_HIGHWAY_SPEC = {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity_per_lane": 12}
 
 
 @dataclass(frozen=True)

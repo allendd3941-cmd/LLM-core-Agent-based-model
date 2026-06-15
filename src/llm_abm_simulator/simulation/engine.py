@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 # 與車數/seed 無關 → 共用不改結果；只留最新場景一份。詳見 _build_town_node_index。
 _SPATIAL_INDEX_CACHE: dict[tuple[str, float], tuple[dict[str, list[str]], dict[str, str]]] = {}
 
+# 監測器吸附門檻（公尺）：點離最近道路超過此距離 → 視為「沒點在路上」、拒絕放置。
+_DETECTOR_SNAP_M = 80.0
+
 
 # ---------------------------------------------------------------------------
 # init 路由並行（multiprocessing）：spawn-safe（worker 函式放模組頂層、圖以 initializer
@@ -128,6 +131,16 @@ class SimulationEngine:
         self._view: dict[str, float] | None = None        # 前端回報的可視範圍（公尺框 + zoom）；大規模裁切用
         self._to_metric = None                            # lazy pyproj transformer（set_view 用）
 
+        # 車流監測器（detectors）：放在路上的被動計數器（不改物理、可重現）。GIS 流量圖層也用同一套計數。
+        self._detector_specs: list[dict[str, Any]] = []   # 前端放置、套用設定時帶入的 {lat,lng}
+        self._detectors: list[dict[str, Any]] = []        # 已吸附到路段、註冊好的監測器
+        self._detector_series: dict[str, list[int]] = {}  # 監測器 id → 每步通過數（時間曲線）
+        self._road_volume: dict[str, dict[str, int]] = {}  # 全路網每條有向邊累積通過數（流量圖層用）
+        self._agent_prev_road: dict[str, str] = {}        # agent_id → 上一個所在邊 road_id（偵測「進入新邊」）
+        self._edge_ids: list[str] = []                    # 監測器吸附用：邊 road_id 清單
+        self._edge_uv: list[tuple[str, str]] = []         # 對應 (u, v)
+        self._edge_xy = None                              # numpy (N,4)：每邊端點公尺座標 ax,ay,bx,by
+
         # Decision 即時日誌（走 WebSocket 取代讀 txt 檔）：本步重決的車 + 解析健康度
         self._decision_log: list[dict[str, Any]] = []
         self._decision_health: dict[str, Any] = {}
@@ -156,10 +169,14 @@ class SimulationEngine:
         self.signals = signals_mod.load_signal_system()
         self._dest_node = self.network.nearest_node(*self._stadium_xy)
         self._build_town_node_index()   # ① 節點→行政區一次性索引（放置 O(1)）
+        self._build_edge_index()        # 監測器吸附用：邊端點 numpy 索引
 
         self._road_peak = {}
         self._event_vehsteps = 0
         self._ambient_vehsteps = 0
+        self._road_volume = {}
+        self._agent_prev_road = {}
+        self._register_detectors()      # 把暫存的監測器點位吸附到路段並註冊（計數歸零）
 
         self._build_agents()
         self._initial_decisions()
@@ -594,6 +611,9 @@ class SimulationEngine:
         for agent in self.agents:
             if not agent.waiting_for_origin:
                 self._refresh_agent_perception(agent, pre_move=False)
+
+        # 5.5 監測器 / 全路網流量累積（被動量測、進入新邊計一次；不改物理）
+        self._update_detectors(cycle)
 
         # 6. 指標 + 分佈（事件 KPI 只算事件車；路網層壅塞/流量含背景車）
         event_agents = self._event_agents()
@@ -1241,6 +1261,228 @@ class SimulationEngine:
     # ==================================================================
     # 前端初始化資料（GeoJSON）
     # ==================================================================
+    # ==================================================================
+    # 車流監測器（detectors）：放在路上的被動計數器（不改物理、可重現）
+    # ==================================================================
+    def set_detectors(self, specs: list[dict[str, Any]] | None) -> None:
+        """設定待註冊的監測器點位（[{lat,lng}, ...]）；下次 initialize 時吸附到路段。"""
+        self._detector_specs = list(specs or [])
+
+    def _build_edge_index(self) -> None:
+        """建監測器吸附用的邊端點 numpy 索引（每邊 ax,ay,bx,by，公尺座標）。"""
+        import numpy as np
+        assert self.network is not None
+        ids: list[str] = []
+        uv: list[tuple[str, str]] = []
+        rows: list[tuple[float, float, float, float]] = []
+        for (u, v), road in self.network.roads.items():
+            ax, ay = self.network.node_xy(u)
+            bx, by = self.network.node_xy(v)
+            ids.append(road.road_id)
+            uv.append((u, v))
+            rows.append((ax, ay, bx, by))
+        self._edge_ids = ids
+        self._edge_uv = uv
+        self._edge_xy = np.array(rows, dtype=float) if rows else np.zeros((0, 4))
+
+    def _snap_to_road(self, x: float, y: float):
+        """把點 (x,y 公尺) 吸附到最近的邊；回 (road_id,(u,v),dist_m,(projx,projy))；無邊→None。"""
+        import numpy as np
+        if self._edge_xy is None or len(self._edge_xy) == 0:
+            return None
+        ax, ay = self._edge_xy[:, 0], self._edge_xy[:, 1]
+        bx, by = self._edge_xy[:, 2], self._edge_xy[:, 3]
+        dx, dy = bx - ax, by - ay
+        seg2 = dx * dx + dy * dy
+        seg2_safe = np.where(seg2 > 0, seg2, 1.0)
+        t = np.clip(((x - ax) * dx + (y - ay) * dy) / seg2_safe, 0.0, 1.0)
+        t = np.where(seg2 > 0, t, 0.0)   # 退化邊（零長）→ 投影到端點 a
+        px, py = ax + t * dx, ay + t * dy
+        d = np.hypot(x - px, y - py)
+        i = int(np.argmin(d))
+        return self._edge_ids[i], self._edge_uv[i], float(d[i]), (float(px[i]), float(py[i]))
+
+    def _register_detectors(self) -> None:
+        """把暫存的監測器點位吸附到路段並註冊（計數歸零）；離所有道路 > 門檻則略過。"""
+        from pyproj import Transformer
+        self._detectors = []
+        self._detector_series = {}
+        if not self._detector_specs or self.network is None:
+            return
+        to_m = Transformer.from_crs(config.CRS_WGS84, config.CRS_METRIC, always_xy=True)
+        to_wgs = Transformer.from_crs(config.CRS_METRIC, config.CRS_WGS84, always_xy=True)
+        for i, spec in enumerate(self._detector_specs):
+            try:
+                lat, lng = float(spec["lat"]), float(spec["lng"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            x, y = to_m.transform(lng, lat)
+            snapped = self._snap_to_road(x, y)
+            if snapped is None:
+                continue
+            rid, (u, v), dist, (px, py) = snapped
+            if dist > _DETECTOR_SNAP_M:
+                logger.info("監測器 #%d 離道路 %.0fm 超門檻，略過", i + 1, dist)
+                continue
+            road = self.network.road_between(u, v)
+            plng, plat = to_wgs.transform(px, py)
+            self._detectors.append({
+                "id": f"D{len(self._detectors) + 1}",
+                "label": (road.road_name if road and road.road_name else rid),
+                "lat": round(plat, 6), "lng": round(plng, 6),
+                "dir_a": rid, "dir_b": f"{v}_{u}",
+                "a": {"ce": 0, "ca": 0, "me": 0, "ma": 0},
+                "b": {"ce": 0, "ca": 0, "me": 0, "ma": 0},
+            })
+        for d in self._detectors:
+            self._detector_series[d["id"]] = []
+        if self._detectors:
+            logger.info("已註冊 %d 個車流監測器", len(self._detectors))
+
+    @staticmethod
+    def _vehicle_leaf(agent: VehicleAgent) -> str:
+        """車輛分類葉節點鍵：c/m（汽車/機車）× e/a（事件/背景）。"""
+        return ("m" if agent.vehicle_type == "機車" else "c") + ("a" if agent.role == "ambient" else "e")
+
+    def _update_detectors(self, cycle: int) -> None:
+        """每步：以「進入新邊」事件累積全路網流量 + 監測器計數。
+
+        被動量測、不改物理、確定性；計的是「通過次數」(背景車重生再經過再計=真實流量)，
+        且以 edge-entry 觸發 → 與每步分鐘數 step_minutes 完全無關。
+        """
+        step_counts = {d["id"]: 0 for d in self._detectors}
+        det_a = {d["dir_a"]: d for d in self._detectors}
+        det_b = {d["dir_b"]: d for d in self._detectors}
+        for agent in self.agents:
+            if agent.waiting_for_origin:
+                continue
+            rid = agent.current_road_id
+            if not rid or self._agent_prev_road.get(agent.agent_id) == rid:
+                continue
+            self._agent_prev_road[agent.agent_id] = rid   # 進入新邊
+            leaf = self._vehicle_leaf(agent)
+            rv = self._road_volume.get(rid)
+            if rv is None:
+                rv = {"ce": 0, "ca": 0, "me": 0, "ma": 0}
+                self._road_volume[rid] = rv
+            rv[leaf] += 1
+            d = det_a.get(rid)
+            if d is not None:
+                d["a"][leaf] += 1
+                step_counts[d["id"]] += 1
+            d = det_b.get(rid)
+            if d is not None:
+                d["b"][leaf] += 1
+                step_counts[d["id"]] += 1
+        for d in self._detectors:
+            self._detector_series[d["id"]].append(step_counts[d["id"]])
+
+    @staticmethod
+    def _expand_counts(c: dict[str, int]) -> dict[str, int]:
+        """4 葉計數 → 可選視角（汽車/機車、事件/背景、各小計與總計）。"""
+        ce, ca, me, ma = c["ce"], c["ca"], c["me"], c["ma"]
+        return {"car_event": ce, "car_ambient": ca, "moto_event": me, "moto_ambient": ma,
+                "car": ce + ca, "moto": me + ma, "event": ce + me, "ambient": ca + ma,
+                "total": ce + ca + me + ma}
+
+    def _detector_payload(self, d: dict[str, Any]) -> dict[str, Any]:
+        both = {k: d["a"][k] + d["b"][k] for k in ("ce", "ca", "me", "ma")}
+        return {"id": d["id"], "label": d["label"], "lat": d["lat"], "lng": d["lng"],
+                "dir_a": self._expand_counts(d["a"]),
+                "dir_b": self._expand_counts(d["b"]),
+                "both": self._expand_counts(both),
+                "series": list(self._detector_series.get(d["id"], []))}
+
+    def detectors_payload(self) -> list[dict[str, Any]]:
+        """給前端：已註冊監測器的位置（畫標記用）。"""
+        return [{"id": d["id"], "label": d["label"], "lat": d["lat"], "lng": d["lng"]}
+                for d in self._detectors]
+
+    def snap_point(self, lat: float, lng: float) -> dict[str, Any]:
+        """放置監測器時的即時吸附驗證：把點吸到最近路段；離道路過遠回 ok=False。"""
+        from pyproj import Transformer
+        if self.network is None:
+            return {"ok": False}
+        to_m = Transformer.from_crs(config.CRS_WGS84, config.CRS_METRIC, always_xy=True)
+        to_wgs = Transformer.from_crs(config.CRS_METRIC, config.CRS_WGS84, always_xy=True)
+        x, y = to_m.transform(float(lng), float(lat))
+        snapped = self._snap_to_road(x, y)
+        if snapped is None:
+            return {"ok": False}
+        rid, (u, v), dist, (px, py) = snapped
+        if dist > _DETECTOR_SNAP_M:
+            return {"ok": False, "dist": round(dist, 1)}
+        road = self.network.road_between(u, v)
+        plng, plat = to_wgs.transform(px, py)
+        return {"ok": True, "lat": round(plat, 6), "lng": round(plng, 6),
+                "label": (road.road_name if road and road.road_name else rid), "dist": round(dist, 1)}
+
+    # ==================================================================
+    # GIS 主題圖層匯出（給交通局 QGIS/ArcGIS 分析）
+    # ==================================================================
+    def gis_road_records(self) -> list[dict[str, Any]]:
+        """每「無向路段」一筆：幾何(WGS84) + LOS/流量/壅塞屬性（欄名 ≤10 字元對齊 DBF）。
+
+        整趟尖峰來自 `_road_peak`（含背景車），累積通過量來自 `_road_volume`（雙向合計）。
+        涵蓋全路網（無流量者 peak=0/LOS=A/vol=0），供交通局出完整主題圖。
+        """
+        from shapely.geometry import LineString
+        assert self.network is not None
+        recs: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for (u, v), road in self.network.roads.items():
+            key = tuple(sorted((u, v)))
+            if key in seen:
+                continue
+            seen.add(key)
+            rid_a, rid_b = f"{u}_{v}", f"{v}_{u}"
+            pa, pb = self._road_peak.get(rid_a, {}), self._road_peak.get(rid_b, {})
+            peak = max(pa.get("peak_proxy", 0.0), pb.get("peak_proxy", 0.0))
+            pflow = max(pa.get("peak_flow", 0), pb.get("peak_flow", 0))
+            va, vb = self._road_volume.get(rid_a, {}), self._road_volume.get(rid_b, {})
+            ce = va.get("ce", 0) + vb.get("ce", 0)
+            ca = va.get("ca", 0) + vb.get("ca", 0)
+            me = va.get("me", 0) + vb.get("me", 0)
+            ma = va.get("ma", 0) + vb.get("ma", 0)
+            cap = road.capacity
+            geom = road.geometry_wgs84
+            if geom is None:
+                latu, lngu = self.network.node_latlng(u)
+                latv, lngv = self.network.node_latlng(v)
+                geom = LineString([(lngu, latu), (lngv, latv)])
+            recs.append({
+                "geometry": geom,
+                "road_id": road.road_id, "name": road.road_name, "highway": road.highway,
+                "lanes": float(road.lanes), "capacity": round(cap, 1),
+                "peak_prox": round(peak, 3),
+                "peak_vc": round(pflow / cap, 3) if cap else 0.0,
+                "peak_flow": int(pflow), "peak_los": self._los_grade(peak),
+                "tot_vol": ce + ca + me + ma, "car_vol": ce + ca, "moto_vol": me + ma,
+                "evt_vol": ce + me, "amb_vol": ca + ma,
+            })
+        return recs
+
+    def gis_detector_records(self) -> list[dict[str, Any]]:
+        """每監測器一筆點位 + 各類通過量（欄名 ≤10 字元）。"""
+        from shapely.geometry import Point
+        recs: list[dict[str, Any]] = []
+        for d in self._detectors:
+            both = self._expand_counts({k: d["a"][k] + d["b"][k] for k in ("ce", "ca", "me", "ma")})
+            recs.append({
+                "geometry": Point(d["lng"], d["lat"]),
+                "det_id": d["id"], "name": d["label"],
+                "tot_vol": both["total"], "car_vol": both["car"], "moto_vol": both["moto"],
+                "evt_vol": both["event"], "amb_vol": both["ambient"],
+                "dir_a_vol": self._expand_counts(d["a"])["total"],
+                "dir_b_vol": self._expand_counts(d["b"])["total"],
+            })
+        return recs
+
+    def export_gis_layer(self, layer: str, out_dir) -> "Any":
+        """建指定主題圖層的 Shapefile 並打包成 zip，回傳 zip 路徑。lazy 匯入 gis_export。"""
+        from ..spatial import gis_export
+        return gis_export.export_layer_zip(self, layer, out_dir)
+
     def init_payload(self) -> dict[str, Any]:
         assert self.network is not None
         return {
@@ -1256,6 +1498,7 @@ class SimulationEngine:
                 "zoom": scenarios.active().zoom,
             },
             "stadium": {"lat": self._stadium_latlng[0], "lng": self._stadium_latlng[1]},
+            "detectors": self.detectors_payload(),
             "agent_profiles": self._load_agent_profiles(),
             "config": {
                 "max_steps": self.cfg.max_steps,
@@ -1401,6 +1644,7 @@ class SimulationEngine:
             },
             "network": self._network_analysis(hist),
             "egress": self._egress_analysis(cycles),
+            "detectors": [self._detector_payload(d) for d in self._detectors],
         }
 
     def _egress_analysis(self, cycles: list[int]) -> dict[str, Any]:

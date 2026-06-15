@@ -106,6 +106,13 @@
       </section>
 
       <section class="card">
+        <h2><i class="ti ti-current-location" aria-hidden="true"></i> 車流監測器</h2>
+        <button id="btn-detector" class="btn btn-block"><i class="ti ti-map-pin-plus" aria-hidden="true"></i> 放置監測器</button>
+        <p class="hint" id="detector-hint">啟用後在地圖上點選路段放置（只能放在路上）；放好後按「套用設定」生效。模擬結束在「分析」分頁看各類流量。</p>
+        <button id="btn-detector-clear" class="btn btn-block"><i class="ti ti-trash" aria-hidden="true"></i> 清除全部監測器</button>
+      </section>
+
+      <section class="card">
         <h2><i class="ti ti-brain" aria-hidden="true"></i> 決策核心</h2>
         <div class="seg" role="group" aria-label="決策核心">
           <button id="mode-mock" class="seg-btn" disabled title="demo 預設 LLM；規則式為內部 fallback / paper baseline"><i class="ti ti-settings-2" aria-hidden="true"></i> 規則式</button>
@@ -230,6 +237,35 @@
                 <section class="chart-card"><h3 class="sub">疏散曲線（累積返家 / 每步離場）</h3><div class="chart-box"><canvas id="chart-egress"></canvas></div></section>
                 <section class="chart-card"><h3 class="sub">散場旅行時間分布（分鐘）</h3><div class="chart-box"><canvas id="chart-egress-travel"></canvas></div></section>
                 <section class="chart-card"><h3 class="sub">返家地分布（Top）</h3><div class="chart-box"><canvas id="chart-egress-od"></canvas></div></section>
+              </div>
+
+              <h3 class="sub layer-tag">④ 車流監測器（放置在路上的計數器）</h3>
+              <label class="field">
+                <span>顯示流量類型</span>
+                <div class="select-wrap"><i class="ti ti-filter" aria-hidden="true"></i><select id="detector-view">
+                  <option value="total">總車流量</option>
+                  <option value="car">汽車</option>
+                  <option value="moto">機車</option>
+                  <option value="event">事件車</option>
+                  <option value="ambient">背景車</option>
+                </select></div>
+              </label>
+              <div id="detector-analysis"></div>
+              <div class="chart-grid">
+                <section class="chart-card chart-card-wide"><h3 class="sub">監測器流量隨時間（每步通過數）</h3><div class="chart-box"><canvas id="chart-detectors"></canvas></div></section>
+              </div>
+
+              <h3 class="sub layer-tag">⑤ 匯出 GIS 圖層（給交通局 QGIS/ArcGIS 分析）</h3>
+              <div class="gis-export">
+                <div class="select-wrap"><i class="ti ti-map-2" aria-hidden="true"></i><select id="gis-layer">
+                  <option value="los">道路服務水準 LOS</option>
+                  <option value="flow">車流量</option>
+                  <option value="congestion">壅塞程度</option>
+                  <option value="detectors">監測器點位</option>
+                  <option value="all">全部圖層</option>
+                </select></div>
+                <button id="btn-gis-export" class="btn"><i class="ti ti-download" aria-hidden="true"></i> 下載 Shapefile</button>
+                <button id="btn-analysis-csv" class="btn"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i> 下載分析數據 CSV</button>
               </div>
             </section>
             <p class="hint dock-empty" id="analysis-empty">模擬完成後（或按單步走到結束）會在此顯示交通分析圖。</p>

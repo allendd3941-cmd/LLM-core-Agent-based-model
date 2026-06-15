@@ -126,14 +126,38 @@
           TrafficUI.toast(msg.message);
           handleStatus(msg.message);
           break;
+        case "detector_snap":
+          if (msg.ok) {
+            TrafficMap.addStagedDetector(msg.lat, msg.lng, msg.label);
+            TrafficUI.onDetectorPlaced(msg.label);
+          } else {
+            TrafficUI.toast("這裡不在路上，請點在道路上。");
+            TrafficUI.log("warn", "監測器放置失敗：點離道路過遠。");
+          }
+          break;
+        case "download":
+          triggerDownload(msg.url, msg.name);
+          TrafficUI.log("success", "已產生下載檔：" + (msg.label || msg.name));
+          break;
       }
     };
+  }
+
+  // 觸發瀏覽器下載（GIS shapefile zip 等）
+  function triggerDownload(url, name) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name || "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   // 啟動
   window.addEventListener("DOMContentLoaded", () => {
     TrafficMap.init((agent) => TrafficUI.inspectAgent(agent));
     TrafficMap.setViewReporter((v) => send("set_view", v));
+    TrafficMap.setDetectorReporter((lat, lng) => send("snap_detector", { lat, lng }));
     TrafficCharts.init();
     TrafficUI.bind(send);
     TrafficUI.log("info", "前端介面已就緒，連線中…");

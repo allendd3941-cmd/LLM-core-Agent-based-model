@@ -20,16 +20,35 @@ from ..simulation.engine import SimulationEngine
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_detectors(raw: Any) -> list[dict[str, Any]]:
+    """把前端送來的監測器點位清成 [{lat,lng}, ...]（上限保護、丟棄無效項）。"""
+    out: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for d in raw[:50]:
+            try:
+                out.append({"lat": float(d["lat"]), "lng": float(d["lng"])})
+            except (KeyError, TypeError, ValueError):
+                continue
+    return out
+
+
 class SimulationSession:
     """管理單一連線的模擬生命週期與控制迴圈。"""
 
     def __init__(self, websocket: WebSocket, base_cfg: SimulationConfig | None = None) -> None:
         self.ws = websocket
         self.cfg = base_cfg or DEFAULT_CONFIG
-        self.engine = SimulationEngine(self.cfg)
+        self._detector_specs: list[dict[str, Any]] = []   # 放置的監測器點位（套用設定時帶入引擎）
+        self.engine = self._make_engine()
         self.speed_multiplier = 1.0
         self._run_task: asyncio.Task | None = None
         self._send_lock = asyncio.Lock()   # 序列化送出：避免 run loop 與 set_view 快照並發 send 撞在一起
+
+    def _make_engine(self) -> SimulationEngine:
+        """建立引擎並套用目前的監測器點位（每次重建引擎都要重新套用）。"""
+        eng = SimulationEngine(self.cfg)
+        eng.set_detectors(self._detector_specs)
+        return eng
 
     # ------------------------------------------------------------------
     async def send(self, message: dict[str, Any]) -> None:
@@ -129,6 +148,15 @@ class SimulationSession:
             await self.status(msg)
             if self.engine.is_initialized:
                 await self.send(self.engine.snapshot_now().to_message())
+        elif action == "snap_detector":
+            v = value or {}
+            try:
+                res = self.engine.snap_point(float(v.get("lat")), float(v.get("lng")))
+            except (TypeError, ValueError):
+                res = {"ok": False}
+            await self.send({"type": "detector_snap", **res})
+        elif action == "export_gis":
+            await self._export_gis(str(value or "los"))
         else:
             logger.warning("未知控制指令: %s", action)
 
@@ -183,7 +211,7 @@ class SimulationSession:
         n = max(UI_CONFIG.agents_min, min(n, UI_CONFIG.agents_max))
         self.cfg = dataclasses.replace(self.cfg, nb_agents=n)
         await self._stop_run_task()
-        self.engine = SimulationEngine(self.cfg)
+        self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
         await self.status(f"agent 數設為 {n}")
@@ -207,8 +235,10 @@ class SimulationSession:
         self.cfg = dataclasses.replace(self.cfg, **changes)
         if v.get("ambient") is not None:
             config.set_runtime_ambient_count(max(0, min(int(v["ambient"]), config.AMBIENT_CONFIG.max_count)))
+        if v.get("detectors") is not None:
+            self._detector_specs = _sanitize_detectors(v.get("detectors"))
         await self._stop_run_task()
-        self.engine = SimulationEngine(self.cfg)
+        self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
         await self.status(
@@ -226,7 +256,7 @@ class SimulationSession:
             sm = step_minutes   # 不在允許清單就忽略，沿用原值
         self.cfg = dataclasses.replace(self.cfg, max_steps=ms, step_minutes=sm)
         await self._stop_run_task()
-        self.engine = SimulationEngine(self.cfg)
+        self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
         await self.status(f"已設定：{ms} 週期 × {sm} 分/週期")
@@ -239,7 +269,7 @@ class SimulationSession:
             return
         config.set_runtime_ambient_count(max(0, min(n, config.AMBIENT_CONFIG.max_count)))
         await self._stop_run_task()
-        self.engine = SimulationEngine(self.cfg)
+        self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
         await self.status(f"背景車數設為 {config.effective_ambient_count()}")
@@ -302,6 +332,24 @@ class SimulationSession:
             await self.send({"type": "analysis", **data})
         except Exception as e:  # noqa: BLE001
             logger.warning("分析資料產生失敗：%s", e)
+
+    async def _export_gis(self, layer: str) -> None:
+        """匯出 GIS 主題圖層 Shapefile（zip）→ 回下載連結。需先初始化（有路網）才能匯出。"""
+        from .. import config
+        if not self.engine.is_initialized:
+            await self.status("請先初始化模擬再匯出圖層。")
+            return
+        try:
+            path = await asyncio.to_thread(self.engine.export_gis_layer, layer, config.OUTPUT_DIR)
+        except ValueError as e:
+            await self.status(f"匯出失敗：{e}")
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.error("GIS 匯出錯誤：%s", e, exc_info=True)
+            await self.status("匯出失敗（伺服器錯誤）。")
+            return
+        await self.send({"type": "download", "url": f"/api/gis/{path.name}", "name": path.name,
+                         "label": f"GIS 圖層（{layer}）"})
 
     async def _set_llm(self, value: dict) -> None:
         """前端選模型：套用 runtime 後端/模型，並連動 max_model_len 與 ollama num_ctx（整套 LLM 共用）。"""
