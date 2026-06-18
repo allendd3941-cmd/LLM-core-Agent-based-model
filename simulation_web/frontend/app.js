@@ -103,7 +103,7 @@
           TrafficMap.updateAgents(msg.agents);
           TrafficMap.updateSignalPhase((msg.elapsed_minutes || 0) * 60);
           TrafficUI.updateStats(msg);
-          TrafficUI.updateDecisions(msg.decisions, msg.decision_health, msg.cycle);
+          TrafficUI.updateDecisions(msg.decisions, msg.decision_health, msg.cycle, msg.rag_provenance);
           TrafficCharts.update(msg);
           endBusy();
           TrafficUI.setRunState("running", msg.cycle);

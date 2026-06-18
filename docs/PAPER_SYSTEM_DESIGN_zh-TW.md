@@ -22,7 +22,7 @@
 | 套件 | 角色 | 主要模組 |
 |---|---|---|
 | `llm_abm_simulator` | 模擬器主體（擁有全部狀態與物理） | `domain`（agent/road/town/state/events）、`spatial`（road_network/routing/gis_loader/geojson/signals/build_*）、`mobility`（demand 重力）、`decisions`（registry/base/mock_policy/llm_adapter/response_parser/profile_pool）、`simulation`（engine/scheduler/metrics/random_seed）、`web`（FastAPI app + WebSocket session）、`config.py`、`scenarios.py`、`calibrate.py` |
-| `llm_server` | LLM pipeline（被模擬器在本進程直接呼叫） | `agent_profile`（人格生成）、`perception`（**確定性模板、不呼叫 LLM**）、`decision_making`（決策，唯一每批 LLM 呼叫，結構化輸出）、`llm_client`（Ollama/vLLM 統一入口）、`llm_config`/`model_registry`、`rag_store`（TF-IDF）、`sim_chat`/`sim_intervene`、`json_utils`（強韌解析）、`prompt_store` |
+| `llm_server` | LLM pipeline（被模擬器在本進程直接呼叫） | `agent_profile`（人格生成）、`perception`（**確定性模板、不呼叫 LLM**）、`decision_making`（決策，唯一每批 LLM 呼叫，結構化輸出）、`llm_client`（Ollama/vLLM 統一入口）、`llm_config`/`model_registry`、`rag_store`（通用 TF-IDF 檢索引擎 + RRF）、`rag_query`（領域查詢建構：路況/任務/人格子查詢）、`sim_chat`/`sim_intervene`、`json_utils`（強韌解析）、`prompt_store` |
 
 前端：`simulation_web/frontend/`（`index.html`/`index.css`/`map.js`/`charts.js`/`simulation.js`/`app.js`，Leaflet + Chart.js + WebSocket）。
 
@@ -275,7 +275,7 @@ ESRI 號誌點 snap 到最近路網節點；**方向相位**（bearing mod 180 �
 ---
 
 ## 14. 互動 demo 功能（`DEMO_FEATURES_zh-TW.md`）
-模型選擇器、可抽換場景/圖層、前端改 prompt、RAG 知識庫（TF-IDF，opt-in 切換）、NL 介入（受限動作集：避開某區/某區湧入 N 台）、
+模型選擇器、可抽換場景/圖層、前端改 prompt、RAG 知識庫（TF-IDF 多重查詢+RRF、provenance 可點看全文、opt-in）、NL 介入（受限動作集：避開某區/某區湧入 N 台）、
 上傳場景、暫停對話查詢、自訂時間（週期數/每週期分鐘）、分批出發、決策日誌即時化、**前端整體重設計（§18：頂列+大地圖+可收合底部面板、
 系統日誌/忙碌動畫/執行心跳、乾淨彩點 agent、多底圖+色調微調）**。
 
@@ -308,14 +308,19 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 ## 17. 誠實限制總表（paper 要主動標清）
 1. 號誌時相為**合成值**（台南無真實秒數）→ 非真實號誌孿生。
 2. 人口 CSV **近似值** → 正式 paper 換 MOI 官方。
-3. RAG 為 **TF-IDF**（非語意 embedding）、預設 opt-in；只在上傳「真正影響決策的知識」時有意義。
+3. RAG（**TF-IDF**、非語意 embedding、opt-in）：
+   (a) **只透過「LLM 選 active_mode」這條通道**影響模擬，**不修**路網容量/合成號誌/需求模型/人口近似——誤差若來自這些，RAG 幫不上；
+   (b) `vehicle_type` 由 persona 綁定，改運具分布應改 persona 而非 RAG；
+   (c) **每批全域檢索、無 per-agent 人格化**（per-archetype 為 future work）；
+   (d) 「準確率」宣稱需 **ground truth** 對照（真實散場清空時間/運具分布/路口流量），否則只能稱 grounding 的 **plausibility** 提升。
 4. NL 介入限**受限動作集**（避讓/需求突增），非任意控制。
 5. 路徑規劃仍**每台 Dijkstra**（②未做）；`nearby`/`current_town` 大規模用近似（邊界誤差，可切 exact）。
 6. Persona 重用 N>原型數時出現同名車（LLM 模式實務上規模小不觸發）。
 7. 背景車無法共用「終點樹」（各隨機終點）；大規模背景車路徑未輕量化。
 8. 上傳場景須**本專案格式 graphml**（非任意 OSM，瀏覽器端不建網）。
 9. vLLM 一機一模型、不可熱切換；極新 GPU（5090/sm_120）需較新 vllm + CUDA 12.8+ torch。
-11. 壅塞降速為**二元因子**（0.55），非連續 speed–density 關係。
+10. 壅塞降速為**二元因子**（0.55），非連續 speed–density 關係（連續基本圖 = B1 future work）。
+11. 車流為**中觀（mesoscopic）、無微觀跟車**：等紅燈以 **point-queue** 表示、前端做「空間排隊視覺化」（沿進場道依車距錯開，隊長為**示意**、非物理 spillback）。微觀車跟車（IDM）/ 接 SUMO 為 future work。
 12. 重力為**無約束**形式（非 Wilson doubly-constrained）；距離用**歐氏直線**（非網路距離）。
 
 ---
@@ -353,10 +358,34 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
   name/id/origin/reason 各有別名清單）；`normalize_town_name` **由長到短**比對區名（避免「安南區」被「南區」搶先命中）；
   支援 dict 含 `agents/decisions/initial_vehicles/requested_agents`、純 list、單 dict、含雜訊字串。
 
-### 20.2 RAG 知識庫（`llm_server/rag_store.py`）
-sklearn `TfidfVectorizer(analyzer="char_wb", ngram_range=(2,4), min_df=1)`（char n-gram 對中文友善、零額外依賴、離線）。
-切塊 size=400/overlap=80；`retrieve`：cosine 相似度 top-k(=3)、門檻 `>0.01`。`enabled` 預設 True 但**無上傳文件即無作用**；
-decision_making **每批**用「當前路況文字（perception）」當 query 全域檢索一次注入（不做 per-agent，控 token）。
+### 20.2 RAG 知識庫（`llm_server/rag_store.py` + `rag_query.py`）
+**檢索引擎（rag_store，通用、不認識交通）**：sklearn `TfidfVectorizer(analyzer="char_wb", ngram_range=(2,4), min_df=1)`
+（char n-gram 對中文友善、零額外依賴、離線）。**句/段感知切塊**：先以句末標點/換行斷句、再貪婪打包到 ~`CHUNK_SIZE=400` 字、
+塊間以整句重疊（≤`CHUNK_OVERLAP=80` 字）；無標點超長句（如 CSV 整列）硬切保底——好處是每塊為完整句集合，provenance 顯示乾淨。
+`_topk_with_scores` 為單一 query 檢索核心（cosine top-k、門檻 `>SIM_FLOOR=0.01`），`retrieve`/`retrieve_multi` 共用。
+`enabled` 預設 True 但**無上傳文件即無作用**。
+
+**多重查詢 + RRF（`retrieve_multi`）**：`rag_query.build_subqueries` 每批從模擬狀態組三條子查詢——
+路況（取【全域路況】）、任務（固定描述五種 active_mode，英文 key + 中文）、人格（聚合這批 persona 的職業/車種/特質高頻）；
+各自檢索 `PER_QUERY_K=5` 塊，依名次以 Reciprocal Rank Fusion（`RRF_C=60`）融合去重，取 `DEFAULT_K=4` 注入。
+被多條子查詢撈到的塊分數自動變高。回傳含 provenance（source/idx/via/scores）。
+`rag_store.query_mode`：`multi`（預設）/`single`（只用 perception 當 query，ablation 對照）。
+**仍是每批全域檢索、不做 per-agent**（控 token）。
+
+**provenance（可解釋性）**：每批 hit 的 `source/idx/via/scores` 隨**回傳值**往上帶（`run_decision_making → llm_adapter.decide_step_traced
+→ engine._llm_decide_batched`；**並行安全，不走模組全域**），在 engine 依 `(source,idx)` 去重（`_dedupe_provenance`，留 rrf 高者）
+後放進 snapshot `rag_provenance`，經 WebSocket 送前端決策日誌：每步顯示「本批參考知識 N 段」可收合清單（檢索面向色標 + 來源#塊號 + 預覽），
+點擊以 modal 看完整片段 + 相似度。讓操作者看到 LLM 決策的在地知識依據。
+
+**論文定位與引用**（誠實、不過度宣稱）：基底為 **Naive RAG（Lewis et al., 2020；分類見 Gao et al., 2023 survey「Naive/Advanced/Modular RAG」）**；
+查詢端用 **multi-query + RRF**（RAG-Fusion；RRF＝Cormack et al., 2009《Reciprocal Rank Fusion outperforms Condorcet…》），屬 survey 的
+**Advanced RAG → Query Transformation**；provenance 透明化承接 **Self-RAG（Asai et al., 2024）「檢索內容應可被檢視」** 的精神（未做整套反思）。
+HyDE（Gao et al., 2022）已實作為**長文件查詢增強的 opt-in**（`rag_query.hyde_expand`）：`rag_store.hyde_active()`＝`hyde_enabled`
+（**預設關閉**）且語料塊數 > `HYDE_GATE_CHUNKS=50` 時，先用 LLM 把各子查詢改寫成「假想手冊片段」再檢索（橋接 descriptive↔prescriptive；
+每子查詢多一次輕量生成，失敗自動降級回原 query）；短語料不划算 → 走純檢索。**引用年份/venue 入稿前請再核對**。
+
+**ablation（免改 code，靠旗標切換）**：四段對照——`無 RAG`（`enabled=False`）→ `single`（`query_mode="single"`，只用 perception）→
+`multi`（預設，多重查詢+RRF）→ `multi+HyDE`（`hyde_enabled=True` 且語料夠大）；固定 seed、同一情境，比同一指標（散場清空時間／停等分布是否更貼近上傳報告）。
 
 ### 20.3 persona 生成 / prompt（`agent_profile`/`prompt_store`）
 - `agent_profile`：**prompt 驅動、無 schema 驗證**；批次帶 `seed=42+idx`（同 seed+prompt→相同輸出，故不同 seed 保多樣又可重現）。

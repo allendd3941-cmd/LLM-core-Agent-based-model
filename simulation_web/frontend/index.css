@@ -163,6 +163,11 @@ body {
 .field b { color: var(--text); font-weight: 600; }
 .field em { color: var(--text-mut); font-style: normal; font-size: 11px; }
 .field input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.field input[type=number] {
+  width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 8px 10px; font-size: 13px; font-family: var(--font);
+}
+.field input[type=number]:hover, .field input[type=number]:focus { border-color: var(--accent); outline: none; }
 
 .select-wrap { position: relative; display: flex; align-items: center; }
 .select-wrap i { position: absolute; left: 9px; font-size: 15px; color: var(--text-mut); pointer-events: none; }
@@ -470,6 +475,26 @@ h3.sub.layer-tag { color: var(--text); border-left: 3px solid var(--accent); pad
 .dec-mode { color: var(--accent); font-weight: 600; }
 .dec-reason { margin: 2px 0 0; color: var(--text-mut); }
 
+/* ── RAG provenance（決策日誌內，批級可收合；點擊看全文）─────────── */
+.dec-rag { margin: 2px 0 6px; border-left: 2px solid var(--accent-deep); padding-left: 8px; }
+.dec-rag > summary { cursor: pointer; font-size: 11px; color: var(--text-dim); list-style: none;
+  display: flex; align-items: center; gap: 5px; user-select: none; }
+.dec-rag > summary::-webkit-details-marker { display: none; }
+.dec-rag > summary i { font-size: 13px; color: var(--accent); }
+.dec-rag > summary:hover { color: var(--text); }
+.rag-chip { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 4px 6px; margin: 4px 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); cursor: pointer; transition: .14s; }
+.rag-chip:hover { border-color: var(--accent); background: var(--elev); }
+.rag-tag { font-size: 9.5px; font-weight: 600; padding: 1px 6px; border-radius: 999px; letter-spacing: .3px; }
+.rag-situation { background: rgba(63, 182, 255, .16); color: #6fc8ff; }
+.rag-task { background: rgba(255, 193, 86, .16); color: #ffc156; }
+.rag-persona { background: rgba(187, 134, 252, .16); color: #bb86fc; }
+.rag-src { font-size: 10px; color: var(--text-dim); font-weight: 500; }
+.rag-preview { font-size: 10.5px; color: var(--text-mut); flex: 1 1 100%; }
+.rag-full { white-space: pre-wrap; word-break: break-word; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 10px 12px; font-size: 12px; line-height: 1.7; color: var(--text);
+  margin-top: 8px; font-family: var(--font); max-height: 50vh; overflow: auto; }
+
 /* ── Toast ────────────────────────────────────── */
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
@@ -478,6 +503,12 @@ h3.sub.layer-tag { color: var(--text); border-left: 3px solid var(--accent); pad
   pointer-events: none; z-index: 3000; box-shadow: var(--shadow); max-width: 80vw;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast i { vertical-align: -2px; margin-right: 5px; }
+.toast.toast-warn { border-color: var(--st-wait); color: var(--st-wait); }
+.field input[type=number].invalid {
+  border-color: var(--danger) !important; box-shadow: 0 0 0 2px rgba(255, 107, 107, .2); animation: shake .34s;
+}
+@keyframes shake { 10%,90%{transform:translateX(-1px)} 30%,70%{transform:translateX(2px)} 50%{transform:translateX(-3px)} 70%{transform:translateX(2px)} }
 
 /* ── Modal ────────────────────────────────────── */
 .modal { position: fixed; inset: 0; z-index: 4000; background: rgba(0, 0, 0, .62);

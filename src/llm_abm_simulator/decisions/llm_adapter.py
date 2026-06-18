@@ -49,7 +49,7 @@ class LLMDecisionPolicy:
     ) -> dict[str, InitAssignment]:
         self.available_towns = available_towns
         payload = self._build_init_payload(agents, available_towns)
-        body = self._call_inproc(payload)
+        body, _ = self._call_inproc(payload)   # init 不需 provenance
         if body is None:
             self.last_call_ok = False
             return {}
@@ -61,15 +61,25 @@ class LLMDecisionPolicy:
     def decide_step(
         self, agents: list[VehicleAgent], environment: dict[str, Any], cycle: int
     ) -> dict[str, StepDecision]:
+        """DecisionPolicy 介面：只回決策（與 mock 一致）。需要 provenance 用 decide_step_traced。"""
+        return self.decide_step_traced(agents, environment, cycle)[0]
+
+    def decide_step_traced(
+        self, agents: list[VehicleAgent], environment: dict[str, Any], cycle: int
+    ) -> tuple[dict[str, StepDecision], list[dict]]:
+        """同 decide_step，但一併回傳本批 RAG provenance。
+
+        **執行緒安全**：provenance 隨回傳值走（批次並行時不可用 self.xxx，會被互相蓋掉）。
+        """
         payload = self._build_step_payload(agents, environment, cycle)
-        body = self._call_inproc(payload, agents)
+        body, provenance = self._call_inproc(payload, agents)
         if body is None:
             self.last_call_ok = False
-            return {}
+            return {}, []
 
         rows = rp.parse_rows(body, self.available_towns, self.cfg.default_origin_town)
         self.last_call_ok = bool(rows)
-        return self._rows_to_step(rows, agents)
+        return self._rows_to_step(rows, agents), provenance
 
     # ------------------------------------------------------------------
     # payload 組裝（對齊 GAML）
@@ -155,18 +165,20 @@ class LLMDecisionPolicy:
     # ------------------------------------------------------------------
     # 傳輸層：在本進程直呼 llm_server pipeline
     # ------------------------------------------------------------------
-    def _call_inproc(self, payload: dict[str, Any], agents: list[VehicleAgent] | None = None) -> Any | None:
+    def _call_inproc(self, payload: dict[str, Any],
+                     agents: list[VehicleAgent] | None = None) -> tuple[Any | None, list[dict]]:
         """直接在本進程跑 llm_server pipeline（persona 池 → perception → decision_making）。
 
         ``agents`` 給定時（每步批次決策）→ 只送這批 agent 的 persona（與 payload 對齊）；
-        未給定時（init 或整批）→ 切前 nb_agents 個。回傳 LLM 原始文字，失敗回 None 交由上層 fallback。
+        未給定時（init 或整批）→ 切前 nb_agents 個。
+        回傳 ``(LLM 原始文字, RAG provenance)``；失敗回 ``(None, [])`` 交由上層 fallback。
         """
         try:
             from llm_server.decision_making import run_decision_making
             from llm_server.perception import run_perception
         except ImportError as e:
             logger.warning("in-process LLM pipeline 匯入失敗（檢查 llm_server 是否可匯入）：%s", e)
-            return None
+            return None, []
 
         try:
             from .. import config
@@ -181,4 +193,4 @@ class LLMDecisionPolicy:
             return run_decision_making(agent_profile, perception, output=True)
         except Exception as e:  # noqa: BLE001  pipeline 內可能丟各種錯，一律降級
             logger.warning("in-process LLM pipeline 執行失敗：%s", e)
-            return None
+            return None, []

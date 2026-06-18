@@ -89,14 +89,19 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 
 ## 7. RAG 知識庫（P2⑧）
 
-控制面板「📚 RAG 知識庫」→ Modal 上傳純文字/markdown/csv → decision 時**每批用當前路況檢索一次**
+控制面板「📚 RAG 知識庫」→ Modal 上傳純文字/markdown/csv → decision 時**每批用多重查詢檢索一次**
 相關片段注入決策 prompt（grounding LLM 決策在上傳的在地/權威知識）。
 
-- 後端 `llm_server/rag_store.py`：sklearn **TF-IDF（char_wb n-gram，對中文友善）**，免額外依賴、離線可跑。
-  `add_text` / `retrieve(query,k)` / `clear` / `stats` / `enabled`。
-- 注入點：`decision_making.run_decision_making` 用 `perception_data` 當 query 取 top-3 注入（每批一次，控 token）。
+- 後端 `llm_server/rag_store.py`（通用檢索引擎）：sklearn **TF-IDF（char_wb n-gram，對中文友善）**，免額外依賴、離線可跑。
+  句/段感知切塊；`retrieve`（single）/ `retrieve_multi`（多重查詢+RRF）/ `add_text` / `clear` / `stats` / `enabled` / `query_mode`。
+- 查詢建構 `llm_server/rag_query.py`：每批把模擬狀態組三條子查詢——**路況**（全域路況）、**任務**（五種 active_mode，英文+中文）、
+  **人格**（聚合這批 persona），各自檢索後以 RRF 融合取 top-4 注入（被多面向撈到的塊排前）。比舊「只用路況」涵蓋更廣，零額外 LLM 成本。
+- 注入點：`decision_making.run_decision_making` 回 `(LLM 文字, provenance)`；provenance 隨回傳值經 `llm_adapter → engine` 上送。
+- **provenance 顯示**：決策日誌每步顯示「本批參考知識 N 段」（面向色標+來源#塊號+預覽），**點擊看完整片段+相似度**——讓決策的在地知識依據可被檢視。
 - 協定：`GET /api/rag/status`、`POST /api/rag/add`{name,text}、`/api/rag/clear`、`/api/rag/toggle`。
-- 誠實定位：上傳「真正影響決策的知識」（交通管制計畫、疏運手冊）才有意義；可升級為 embedding 檢索（之後）。
+- HyDE（opt-in，`rag_store.hyde_enabled`，**預設關**）：語料夠大（塊數 > `HYDE_GATE_CHUNKS`）時，先把各子查詢改寫成「假想手冊片段」再檢索，
+  橋接「現狀描述↔文件規範」落差；每子查詢多一次輕量 LLM 生成，失敗自動降級。短語料不划算 → 自動走純檢索。
+- 誠實定位：上傳「真正影響決策的知識」（交通管制計畫、疏運手冊）才有意義；只透過「LLM 選 active_mode」影響模擬、不修路網/號誌/需求/人口。
 
 ## 8. 自然語言介入（P2⑨）
 
@@ -250,6 +255,8 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
 - **底部面板自適應**：對話/系統日誌/決策日誌內捲區改 flex 撐滿,隨拖動面板高度自適應(不再寫死 max-height)。
 - **地圖色調可開關**：右上小鈕(`ti-adjustments`)開/關色調面板,預設收起。`map.addAppearanceControl`(toggle)。
 - **滾輪縮放絲滑**：`zoomSnap:0` + 加大 `wheelPxPerZoomLevel` → 連續(小數)縮放、平滑。
+- **等紅燈「顯示用排隊」**(`engine._queue_layout_positions`,`[ui].queue_render`):停等紅燈的車原本全疊在路口節點同一點(point queue),拉近看像一坨;改成在**快照輸出時**把同一進場道的等候車**沿路往後依車距(~7m)錯開**,看起來排排站。**只動顯示經緯度、不碰物理**(agent.x/y、距離/鄰近/抵達/流量/熱點全不變;真實投影非最近節點近似;依 agent_id 排序→可重現)。誠實定位:底層仍是 **point-queue 中觀模型**,隊長為視覺示意(非物理 spillback);微觀跟車(IDM/SUMO)列 future work。
+- **移除速度滑桿 + 零等待**:刪掉播放速度拉桿,`_run_loop` 改 `asyncio.sleep(0)`(算完一步立刻推下一步;LLM 本來就慢、不需人工延遲)。並把前端各提示文字**濃縮精簡為專業 demo 風格**(不動功能/ID)。
 
 ## 20. 車流監測器 + GIS 主題圖層匯出（P3+，交通局交付）
 

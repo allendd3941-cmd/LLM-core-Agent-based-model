@@ -72,6 +72,7 @@ class SimulationState:
     status_distribution: dict[str, int] = field(default_factory=dict)
     decisions: list[dict[str, Any]] = field(default_factory=list)   # 本步重決的車：name/mode/reason（前端決策日誌）
     decision_health: dict[str, Any] = field(default_factory=dict)   # 解析健康度：triggered/decided/fallback/source
+    rag_provenance: list[dict[str, Any]] = field(default_factory=list)  # 本步 RAG 注入來源：chunk/source/idx/via/scores
 
     def to_message(self) -> dict[str, Any]:
         """轉成 WebSocket JSON 訊息。"""
@@ -90,4 +91,5 @@ class SimulationState:
             "status_distribution": self.status_distribution,
             "decisions": self.decisions,
             "decision_health": self.decision_health,
+            "rag_provenance": self.rag_provenance,
         }

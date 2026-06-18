@@ -94,6 +94,16 @@ def congestion_color(proxy: float) -> str:
     return "#D50000"
 
 
+def _dedupe_provenance(provenance: list[dict], cap: int = 6) -> list[dict]:
+    """合併本步各批的 RAG provenance：依 (source, idx) 去重、保留 rrf 較高者，依 rrf 排序取前 cap。"""
+    best: dict[tuple, dict] = {}
+    for h in provenance or []:
+        key = (h.get("source"), h.get("idx"))
+        if key not in best or h.get("rrf", 0) > best[key].get("rrf", 0):
+            best[key] = h
+    return sorted(best.values(), key=lambda h: h.get("rrf", 0), reverse=True)[:cap]
+
+
 class SimulationEngine:
     """單一模擬執行個體（每個 WebSocket 連線一個）。"""
 
@@ -131,6 +141,7 @@ class SimulationEngine:
         self._nearby_cell: float = 1.0
         self._view: dict[str, float] | None = None        # 前端回報的可視範圍（公尺框 + zoom）；大規模裁切用
         self._to_metric = None                            # lazy pyproj transformer（set_view 用）
+        self._to_wgs = None                               # lazy pyproj transformer（公尺→WGS84，排隊顯示用真實投影）
 
         # 車流監測器（detectors）：放在路上的被動計數器（不改物理、可重現）。GIS 流量圖層也用同一套計數。
         self._detector_specs: list[dict[str, Any]] = []   # 前端放置、套用設定時帶入的 {lat,lng}
@@ -145,6 +156,7 @@ class SimulationEngine:
         # Decision 即時日誌（走 WebSocket 取代讀 txt 檔）：本步重決的車 + 解析健康度
         self._decision_log: list[dict[str, Any]] = []
         self._decision_health: dict[str, Any] = {}
+        self._rag_provenance: list[dict[str, Any]] = []   # 本步 RAG 注入來源（多批去重後；前端決策日誌）
 
         # 決策核心（可選；見 decisions/registry.py）：規則式（rule）/ LLM 認知核心（llm）
         self._mock = MockDecisionPolicy(self.cfg, self.rng)   # 規則式核心（背景車流也用它）
@@ -677,6 +689,7 @@ class SimulationEngine:
         sc = config.SCALING_CONFIG
         self._decision_log = []     # 本步決策日誌（走 WS 給前端；每步重置）
         self._decision_health = {"triggered": 0, "decided": 0, "fallback": 0, "source": "rule"}
+        self._rag_provenance = []   # 本步 RAG 注入來源（每步重置；僅 LLM+多重查詢時有值）
         # 只決策「已進場」的事件車（尚未出發的不決策）
         event_agents = [a for a in self._event_agents() if not a.waiting_for_origin]
         ambient_agents = self._ambient_agents()
@@ -691,9 +704,10 @@ class SimulationEngine:
             return
 
         if not sc.event_triggered_decisions:  # 舊行為：每步決策全部事件車
-            decisions = self._llm.decide_step(event_agents, self._llm_environment(env), cycle)
+            decisions, provenance = self._llm.decide_step_traced(event_agents, self._llm_environment(env), cycle)
             if decisions and self._llm.last_call_ok:
                 self.last_decision_source = "llm"
+                self._rag_provenance = _dedupe_provenance(provenance)
             else:
                 decisions = self._mock.decide_step(event_agents, env, cycle)
                 self.last_decision_source = "rule"
@@ -710,7 +724,8 @@ class SimulationEngine:
         n_batches = math.ceil(len(triggered) / bsize)
         logger.info("step %d · LLM 重決 %d 台（壅塞觸發）→ %d 批 ×%d 並行（batch≤%d）",
                     cycle, len(triggered), n_batches, min(sc.concurrency, n_batches), bsize)
-        decisions = self._llm_decide_batched(triggered, self._llm_environment(env), cycle, bsize)
+        decisions, provenance = self._llm_decide_batched(triggered, self._llm_environment(env), cycle, bsize)
+        self._rag_provenance = _dedupe_provenance(provenance)   # 多批去重（並行安全：在主執行緒合併後處理）
         self._apply_decisions(decisions)
         self._record_decision_log(triggered, decisions, cycle)
 
@@ -795,27 +810,35 @@ class SimulationEngine:
         return max(1, min(hard_cap, fit))
 
     def _llm_decide_batched(self, agents: list[VehicleAgent], env: dict[str, Any],
-                            cycle: int, batch_size: int | None = None) -> dict[str, Any]:
-        """把觸發的 agent 分批、並行送 LLM（同步等齊再回傳合併決策）。
+                            cycle: int, batch_size: int | None = None
+                            ) -> tuple[dict[str, Any], list[dict]]:
+        """把觸發的 agent 分批、並行送 LLM（同步等齊再回傳合併決策 + 各批 RAG provenance）。
 
         batch_size 預設由 [llm_budget] token 預算決定（呼叫端算好傳入）；未給則退回 [scaling].batch_size。
+        provenance 隨各批回傳值收集、在主執行緒合併（並行安全）。
         """
         sc = config.SCALING_CONFIG
         bsize = batch_size or self._budget_batch_size(agents, sc.batch_size)
         batches = [agents[i:i + bsize] for i in range(0, len(agents), bsize)]
         merged: dict[str, Any] = {}
+        prov_all: list[dict] = []
         if len(batches) <= 1:
-            merged.update(self._llm.decide_step(batches[0], env, cycle) if batches else {})
-            return merged
+            if batches:
+                d, p = self._llm.decide_step_traced(batches[0], env, cycle)
+                merged.update(d)
+                prov_all.extend(p)
+            return merged, prov_all
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=min(sc.concurrency, len(batches))) as ex:
-            futures = [ex.submit(self._llm.decide_step, b, env, cycle) for b in batches]
+            futures = [ex.submit(self._llm.decide_step_traced, b, env, cycle) for b in batches]
             for f in futures:
                 try:
-                    merged.update(f.result())
+                    d, p = f.result()
+                    merged.update(d)
+                    prov_all.extend(p)
                 except Exception as e:  # noqa: BLE001  單批失敗 → 該批維持現有 mode
                     logger.warning("批次決策失敗：%s", e)
-        return merged
+        return merged, prov_all
 
     # ==================================================================
     # 感知 / 移動
@@ -1158,9 +1181,11 @@ class SimulationEngine:
     def _snapshot(self, cycle: int, env: dict[str, Any],
                   mode_dist: dict[str, int], status_dist: dict[str, int]) -> SimulationState:
         assert self.network is not None
+        queue_disp = self._queue_layout_positions()   # A：等紅燈車的顯示用排隊座標（只改畫面）
         agents_snap = []
         for a in self._visible_agents():
-            lat, lng = self._xy_to_latlng(a.x, a.y)
+            qd = queue_disp.get(a.agent_id)
+            lat, lng = qd if qd else self._xy_to_latlng(a.x, a.y)
             agents_snap.append(AgentSnapshot(
                 agent_id=a.agent_id, profile_name=a.profile_name, lat=lat, lng=lng,
                 route_status=str(a.route_status), active_mode=a.active_mode,
@@ -1208,6 +1233,7 @@ class SimulationEngine:
             },
             mode_distribution=mode_dist, status_distribution=status_dist,
             decisions=self._decision_log, decision_health=self._decision_health,
+            rag_provenance=self._rag_provenance,
         )
 
     def _xy_to_latlng(self, x: float, y: float) -> tuple[float, float]:
@@ -1216,6 +1242,48 @@ class SimulationEngine:
         if node is None:
             return (0.0, 0.0)
         return self.network.node_latlng(node)
+
+    def _metric_to_latlng(self, x: float, y: float) -> tuple[float, float]:
+        """公尺(EPSG:3826) → (lat,lng) 真實投影。排隊顯示需要精確位移，不能用 _xy_to_latlng 的最近節點近似。"""
+        from pyproj import Transformer
+        if self._to_wgs is None:
+            self._to_wgs = Transformer.from_crs(config.CRS_METRIC, config.CRS_WGS84, always_xy=True)
+        lng, lat = self._to_wgs.transform(x, y)
+        return (lat, lng)
+
+    def _queue_layout_positions(self) -> dict[str, tuple[float, float]]:
+        """A 方案：等紅燈排隊的「顯示座標」——沿進場道往後依車距(~7m)錯開。
+
+        只改快照顯示經緯度、不動 agent.x/y 與任何物理量（距離/鄰近/抵達/流量/熱點皆不受影響）。
+        隊首在停止線(節點)、其後每台往上游錯開；超過路段長則封頂在上游端。依 agent_id 排序→確定性。
+        底層仍是 point-queue 中觀模型,此處隊長為視覺示意(非物理 spillback)。可由 [ui].queue_render 關閉。
+        """
+        if not config.UI_CONFIG.queue_render or self.network is None:
+            return {}
+        SPACING = 7.0   # 公尺：塞車時車距(jam spacing)
+        groups: dict[tuple[str, str], list[VehicleAgent]] = {}
+        for a in self.agents:
+            if not a.waiting_at_signal:        # 只排「真的停等紅燈」的車（不動移動中的車）
+                continue
+            path = a.current_path
+            i = a.path_index
+            if not path or i <= 0 or i >= len(path):   # 需有上游節點(進場方向)
+                continue
+            groups.setdefault((path[i - 1], path[i]), []).append(a)
+        out: dict[str, tuple[float, float]] = {}
+        for (u, v), members in groups.items():
+            members.sort(key=lambda ag: ag.agent_id)   # 確定性排序
+            vx, vy = self.network.node_xy(v)
+            ux, uy = self.network.node_xy(u)
+            dx, dy = ux - vx, uy - vy          # 由停止線(v)往上游(u)的方向
+            length = math.hypot(dx, dy)
+            if length <= 1e-6:
+                continue
+            nx, ny = dx / length, dy / length
+            for k, ag in enumerate(members):
+                back = min(k * SPACING, max(0.0, length - 1.0))   # 不越過上游節點
+                out[ag.agent_id] = self._metric_to_latlng(vx + nx * back, vy + ny * back)
+        return out
 
     # ==================================================================
     # 控制

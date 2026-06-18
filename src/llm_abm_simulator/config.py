@@ -127,6 +127,7 @@ class UIConfig:
     # zoom < agent_min_zoom 時只送道路壅塞、不送車（見 engine._visible_agents）。
     render_individual_max: int = 1500
     agent_min_zoom: int = 14
+    queue_render: bool = True   # 等紅燈車「顯示用排隊」：沿進場道往後錯開(只改畫面、不動物理、可關)
     # 時間控制（前端可調「跑幾個週期 / 每週期幾分鐘」；改了需重設，比照 set_agents）
     steps_min: int = 6
     steps_max: int = 240

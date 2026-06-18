@@ -27,7 +27,7 @@
       <span class="logo" aria-hidden="true">⚾</span>
       <div class="brand-text">
         <h1>LLM-abm 互動式交通模擬平台</h1>
-        <p class="subtitle">Agent-Based 交通數位分身 · LLM / 規則式決策 · 臺南亞太棒球場情境</p>
+        <p class="subtitle">LLM 驅動的 Agent-Based 交通數位分身 · 特殊活動交通衝擊分析 · 臺南亞太棒球場</p>
       </div>
     </div>
 
@@ -63,7 +63,7 @@
           <span class="phase-step" id="phase-egress"><i class="ti ti-home" aria-hidden="true"></i> 散場</span>
         </div>
         <button id="btn-egress" class="btn btn-block btn-go"><i class="ti ti-door-exit" aria-hidden="true"></i> 宣告散場開始</button>
-        <p class="hint">事件車抵達球場後，按此宣告「比賽結束」→ 車輛陸續離場返家。</p>
+        <p class="hint">比賽結束後宣告散場 → 車輛陸續離場返家。</p>
       </section>
 
       <section class="card">
@@ -76,24 +76,19 @@
         <button id="btn-upload-scenario" class="btn btn-block"><i class="ti ti-upload" aria-hidden="true"></i> 上傳場景</button>
 
         <label class="field">
-          <span class="field-head">速度 <b id="speed-val">1.0×</b></span>
-          <input id="speed" type="range" min="0.5" max="5" step="0.5" value="1" />
+          <span class="field-head">事件車數量</span>
+          <input id="agents" type="number" inputmode="numeric" min="5" max="20000" step="5" value="10" />
         </label>
 
         <label class="field">
-          <span class="field-head">事件車數量 <b id="agents-val">10</b></span>
-          <input id="agents" type="range" min="5" max="80" step="5" value="10" />
-        </label>
-
-        <label class="field">
-          <span class="field-head">背景常態車流 <b id="ambient-val">40</b></span>
-          <input id="ambient" type="range" min="0" max="600" step="20" value="40" />
+          <span class="field-head">背景常態車流</span>
+          <input id="ambient" type="number" inputmode="numeric" min="0" max="600" step="20" value="40" />
           <p class="hint">常態背景車流（重力 OD）；0＝關閉。</p>
         </label>
 
         <label class="field">
-          <span class="field-head">週期數 <b id="steps-val">36</b></span>
-          <input id="steps" type="range" min="6" max="240" step="6" value="36" />
+          <span class="field-head">週期數</span>
+          <input id="steps" type="number" inputmode="numeric" min="6" max="240" step="6" value="36" />
         </label>
 
         <label class="field">
@@ -102,7 +97,7 @@
         </label>
 
         <button id="btn-apply" class="btn btn-block"><i class="ti ti-check" aria-hidden="true"></i> 套用設定</button>
-        <p class="hint">拖動上方滑桿後按此套用（進行中需先重設）。</p>
+        <p class="hint">調整參數後套用（進行中需先重設）。</p>
       </section>
 
       <section class="card">
@@ -113,7 +108,7 @@
           </div>
           <div class="det-dock-text">
             <b id="detector-count">已放置 0 隻監測器</b>
-            <span class="hint">按住相機圖示拖到地圖放開即可——會自動吸附到最近的道路（拖曳時道路會亮起）。放好後按「套用設定」生效，模擬結束在「分析」分頁看各類流量。</span>
+            <span class="hint">拖相機到地圖路上放開即放置（自動吸附最近道路）；放好後按「套用設定」生效。</span>
           </div>
         </div>
         <button id="btn-detector-clear" class="btn btn-block"><i class="ti ti-trash" aria-hidden="true"></i> 清除全部監測器</button>
@@ -125,7 +120,7 @@
           <button id="mode-mock" class="seg-btn" disabled title="demo 預設 LLM；規則式為內部 fallback / paper baseline"><i class="ti ti-settings-2" aria-hidden="true"></i> 規則式</button>
           <button id="mode-llm" class="seg-btn active"><i class="ti ti-sparkles" aria-hidden="true"></i> LLM</button>
         </div>
-        <p class="hint" id="mode-hint">LLM：依人格與感知決策（demo 預設）。規則式為內部 fallback／對照基線。</p>
+        <p class="hint" id="mode-hint">LLM：依人格與感知決策（預設）；規則式為 fallback／對照基線。</p>
 
         <div class="llm-only">
           <label class="field">
@@ -275,7 +270,7 @@
                 <button id="btn-analysis-csv" class="btn"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i> 下載分析數據 CSV</button>
               </div>
             </section>
-            <p class="hint dock-empty" id="analysis-empty">模擬完成後（或按單步走到結束）會在此顯示交通分析圖。</p>
+            <p class="hint dock-empty" id="analysis-empty">模擬完成後在此顯示交通分析。</p>
           </div>
 
           <div class="tab-pane" id="tab-chat">
@@ -284,7 +279,7 @@
                 <button id="chat-mode-ask" class="seg-btn active"><i class="ti ti-help-circle" aria-hidden="true"></i> 問（唯讀）</button>
                 <button id="chat-mode-act" class="seg-btn"><i class="ti ti-wand" aria-hidden="true"></i> 介入</button>
               </div>
-              <p class="hint" id="chat-hint">暫停時詢問當前路況（唯讀，用所選 LLM 回答）。</p>
+              <p class="hint" id="chat-hint">暫停時詢問當前路況（唯讀）。</p>
               <div class="chat-chips" id="chat-chips"></div>
               <div id="chat-log" class="chat-log"></div>
               <div class="chat-input">

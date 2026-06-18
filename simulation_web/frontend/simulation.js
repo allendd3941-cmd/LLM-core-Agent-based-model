@@ -28,6 +28,34 @@ const TrafficUI = (() => {
   function markPending() { const b = $("btn-apply"); if (b) b.classList.add("pending"); }
   function clearPending() { const b = $("btn-apply"); if (b) b.classList.remove("pending"); }
 
+  // 數值輸入防呆：超出 [min,max] 或非數字 → 跳專業提示（警示 toast + 系統日誌 + 欄位閃紅抖動）並夾回。
+  // 後端 apply_config 仍會再 clamp 一次保險。
+  const FIELD_LABELS = { agents: "事件車數量", ambient: "背景常態車流", steps: "週期數" };
+  function flagInvalid(el) {
+    el.classList.add("invalid");
+    clearTimeout(el._invTimer);
+    el._invTimer = setTimeout(() => el.classList.remove("invalid"), 700);
+  }
+  function clampField(el) {
+    const lo = parseInt(el.min, 10);
+    const hi = parseInt(el.max, 10);
+    const name = FIELD_LABELS[el.id] || "數值";
+    const v = parseInt(el.value, 10);
+    if (Number.isNaN(v)) {
+      el.value = lo; flagInvalid(el);
+      toast(`${name}需為數字，已重設為 ${lo}。`, "warn");
+      log("warn", `${name}輸入非數字 → 重設為 ${lo}`);
+    } else if (v > hi) {
+      el.value = hi; flagInvalid(el);
+      toast(`${name}已達上限 ${hi.toLocaleString()}，自動調整。`, "warn");
+      log("warn", `${name} 輸入 ${v} 超過上限 ${hi} → 調整為 ${hi}`);
+    } else if (v < lo) {
+      el.value = lo; flagInvalid(el);
+      toast(`${name}最小為 ${lo}，自動調整。`, "warn");
+      log("warn", `${name} 輸入 ${v} 低於下限 ${lo} → 調整為 ${lo}`);
+    }
+  }
+
   // ---- 按鈕忙碌 spinner ----
   function markBtnBusy(el) { clearBtnBusy(); if (el) { el.classList.add("loading"); busyBtn = el; } }
   function clearBtnBusy() { if (busyBtn) { busyBtn.classList.remove("loading"); busyBtn = null; } }
@@ -40,22 +68,16 @@ const TrafficUI = (() => {
     $("btn-step").onclick = (e) => { markBtnBusy(e.currentTarget); send("step"); };
     $("btn-reset").onclick = (e) => { markBtnBusy(e.currentTarget); send("reset"); };
 
-    const speed = $("speed");
-    speed.oninput = () => {
-      $("speed-val").textContent = parseFloat(speed.value).toFixed(1) + "×";
-      send("set_speed", parseFloat(speed.value));
-    };
-
     // 事件車數/背景車/週期數/每週期分鐘：拖動只是「預覽」（更新數字、標記待套用），不自動送出；
     // 按「套用設定」才一次送 apply_config。
     const agents = $("agents");
-    agents.oninput = () => { $("agents-val").textContent = agents.value; markPending(); };
+    if (agents) { agents.oninput = markPending; agents.onchange = () => clampField(agents); }
 
     const ambient = $("ambient");
-    if (ambient) ambient.oninput = () => { $("ambient-val").textContent = ambient.value; markPending(); };
+    if (ambient) { ambient.oninput = markPending; ambient.onchange = () => clampField(ambient); }
 
     const steps = $("steps");
-    if (steps) steps.oninput = () => { $("steps-val").textContent = steps.value; markPending(); };
+    if (steps) { steps.oninput = markPending; steps.onchange = () => clampField(steps); }
     const stepMin = $("step-minutes");
     if (stepMin) stepMin.onchange = markPending;
 
@@ -283,13 +305,6 @@ const TrafficUI = (() => {
 
     const ui = cfg.ui;
     if (ui) {
-      const speed = $("speed");
-      speed.min = ui.speed_min;
-      speed.max = ui.speed_max;
-      speed.step = ui.speed_step;
-      speed.value = ui.speed_default;
-      $("speed-val").textContent = parseFloat(ui.speed_default).toFixed(1) + "×";
-
       const agents = $("agents");
       agents.min = ui.agents_min;
       agents.max = ui.agents_max;
@@ -304,10 +319,9 @@ const TrafficUI = (() => {
     }
 
     $("agents").value = cfg.nb_agents;
-    $("agents-val").textContent = cfg.nb_agents;
 
     const stepsEl = $("steps");
-    if (stepsEl) { stepsEl.value = cfg.max_steps; $("steps-val").textContent = cfg.max_steps; }
+    if (stepsEl) stepsEl.value = cfg.max_steps;
     const smEl = $("step-minutes");
     if (smEl) smEl.value = cfg.step_minutes;
 
@@ -316,7 +330,6 @@ const TrafficUI = (() => {
       if (amb) {
         amb.max = cfg.ambient.max;
         amb.value = cfg.ambient.count;
-        $("ambient-val").textContent = cfg.ambient.count;
       }
       $("m-ambient").textContent = cfg.ambient.active != null ? cfg.ambient.active : 0;
     }
@@ -415,9 +428,13 @@ const TrafficUI = (() => {
 
   // ---- 決策日誌（即時，走 WebSocket）----
   // 逐步累積決策歷史（全程保留；reset 由 resetDecisions 清掉，不吃上次模擬）
-  function updateDecisions(decisions, health, cycle) {
+  // RAG 檢索面向 → CSS class 後綴（class 名用 ASCII，顯示文字仍用中文）
+  const RAG_TAG_CLASS = { "路況": "situation", "任務": "task", "人格": "persona" };
+
+  function updateDecisions(decisions, health, cycle, rag) {
     decisions = decisions || [];
     health = health || {};
+    rag = rag || [];
     const h = $("decision-health");
     if (h) {
       h.innerHTML = health.source === "rule"
@@ -430,14 +447,44 @@ const TrafficUI = (() => {
     if (!box.querySelector(".dec-step")) box.innerHTML = "";   // 首筆：清掉初始 placeholder
     const block = document.createElement("div");
     block.className = "dec-step";
+    // RAG 依據（批級；點擊看全文）。無注入則不顯示。
+    const ragHtml = rag.length
+      ? `<details class="dec-rag" open><summary><i class="ti ti-book-2" aria-hidden="true"></i> 本批參考知識 ${rag.length} 段</summary>`
+        + rag.map((r, i) =>
+            `<div class="rag-chip" data-i="${i}" title="點擊看完整片段">`
+            + (r.via || []).map((v) =>
+                `<span class="rag-tag rag-${RAG_TAG_CLASS[v] || "task"}">${escapeHtml(v)}</span>`).join("")
+            + `<span class="rag-src">${escapeHtml(r.source || "?")} #${r.idx}</span>`
+            + `<span class="rag-preview">${escapeHtml(String(r.chunk || "").slice(0, 40))}…</span>`
+            + `</div>`).join("")
+        + `</details>`
+      : "";
     block.innerHTML =
       `<div class="dec-step-h">第 ${cycle != null ? cycle : "?"} 步 · 重決 ${decisions.length} 台</div>`
+      + ragHtml
       + decisions.map((d) =>
         `<div class="dec-row"><b>${escapeHtml(d.name)}</b> → <span class="dec-mode">${escapeHtml(d.mode)}</span>`
         + `<p class="dec-reason">${escapeHtml(d.reason || "")}</p></div>`).join("");
+    // chip 點擊 → 重用 util-modal 看全文（rag 陣列由閉包捕獲）
+    block.querySelectorAll(".rag-chip").forEach((el) => {
+      el.onclick = () => openChunkModal(rag[+el.dataset.i]);
+    });
     box.appendChild(block);
     while (box.children.length > 500) box.removeChild(box.firstChild);  // 安全上限（一場通常幾十步）
     box.scrollTop = box.scrollHeight;
+  }
+
+  // RAG 片段全文檢視（重用工具 modal）
+  function openChunkModal(r) {
+    if (!r) return;
+    const scores = r.scores
+      ? Object.entries(r.scores).map(([k, v]) => `${k} ${v}`).join("／") : "";
+    $("util-title").textContent = `RAG 片段 · ${r.source || "?"} #${r.idx}`;
+    $("util-body").innerHTML =
+      `<div class="hint">檢索面向：${escapeHtml((r.via || []).join("、"))}`
+      + (scores ? `　相似度：${escapeHtml(scores)}` : "") + `</div>`
+      + `<pre class="rag-full">${escapeHtml(String(r.chunk || ""))}</pre>`;
+    $("util-modal").style.display = "flex";
   }
 
   // 重設時清掉決策歷史（避免吃到上次模擬的資料）
@@ -453,12 +500,14 @@ const TrafficUI = (() => {
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  function toast(msg) {
+  function toast(msg, level) {
     const t = $("toast");
-    t.textContent = msg;
+    t.className = "toast" + (level ? " toast-" + level : "");
+    const icon = level === "warn" ? '<i class="ti ti-alert-triangle" aria-hidden="true"></i>' : "";
+    t.innerHTML = icon + escapeHtml(String(msg));
     t.classList.add("show");
     clearTimeout(t._timer);
-    t._timer = setTimeout(() => t.classList.remove("show"), 2500);
+    t._timer = setTimeout(() => t.classList.remove("show"), level === "warn" ? 3000 : 2500);
   }
 
   function setConnected(ok) {

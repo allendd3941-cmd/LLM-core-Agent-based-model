@@ -244,6 +244,7 @@ agents_step = 5
 # zoom < agent_min_zoom 時只顯示道路壅塞、不送/不畫車（前端 zoom 進去才看到範圍內車流）。
 render_individual_max = 1500
 agent_min_zoom = 14
+queue_render = true   # 等紅燈車「顯示用排隊」：沿進場道往後依車距(~7m)錯開（只改畫面、不動物理；false=回到停在路口同點）
 # 時間控制（前端可調「跑幾個週期 / 每週期幾分鐘」；改了需重設）
 steps_min = 6
 steps_max = 240

@@ -176,7 +176,7 @@ class SimulationSession:
             while self.engine.running and not self.engine.scheduler.finished:
                 state = await asyncio.to_thread(self.engine.step)
                 await self.send(state.to_message())
-                await asyncio.sleep(max(0.15, 1.0 / self.speed_multiplier))
+                await asyncio.sleep(0)   # 零等待：算完一步立刻推下一步（只讓出事件迴圈）。LLM 本來就慢，不需人工延遲
         except Exception as e:  # noqa: BLE001
             logger.error("執行迴圈錯誤: %s", e, exc_info=True)
         finally:

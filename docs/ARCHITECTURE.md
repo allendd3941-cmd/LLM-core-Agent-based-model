@@ -46,7 +46,8 @@ the in-process pipeline described here.
 | `llm_client.py` | Unified Ollama/vLLM transport (`generate()`); structured output via Ollama `format` / vLLM `guided_json`. |
 | `llm_config.py` / `model_registry.py` | Backend/model connection settings from `.env`; vLLM candidate registry. |
 | `prompts/` | Prompt templates (system / decision-making / agent-profile / memory). |
-| `rag_store.py` | Lightweight TF-IDF retrieval — **opt-in** (toggled via `/api/rag`); when enabled, `decision_making` retrieves a few chunks per batch and injects them into the decision prompt. |
+| `rag_store.py` | Generic TF-IDF retrieval engine — **opt-in** (toggled via `/api/rag`). Sentence-aware chunking; `retrieve` (single) and `retrieve_multi` (multi-query + Reciprocal Rank Fusion) share one core. Returns provenance (source/idx/via/scores). |
+| `rag_query.py` | Domain query builder: turns each batch's sim state into 3 sub-queries (situation / task / persona) for `retrieve_multi`, keeping `rag_store` domain-agnostic. |
 | `sim_chat.py` / `sim_intervene.py` | Pause-time read-only Q&A; constrained NL intervention parsing. |
 
 ## Per-step data flow

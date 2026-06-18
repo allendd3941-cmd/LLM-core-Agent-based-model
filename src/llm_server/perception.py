@@ -51,6 +51,21 @@ def _fmt_agent(a: dict) -> str:
     )
 
 
+def global_situation_text(perception_text: str) -> str:
+    """從環境感知文字抽出【全域路況】區塊（不含各車狀況）。
+
+    供 RAG 多重查詢的「路況」子查詢使用：用全域壅塞情勢去搜知識庫，避免把
+    各車個別狀況（雜訊）也丟進查詢。找不到區塊時回整段（保底，不會壞）。
+    """
+    text = perception_text or ""
+    start = text.find("【全域路況】")
+    if start == -1:
+        return text.strip()
+    rest = text[start:]
+    nxt = rest.find("【各車當前狀況】")
+    return (rest if nxt == -1 else rest[:nxt]).strip()
+
+
 def run_perception(gama_body, output: bool = False) -> str:
     """把 step payload（{environment, agents_status}）確定性組成環境感知文字。"""
     global count
