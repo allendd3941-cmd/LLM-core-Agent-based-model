@@ -413,7 +413,7 @@ class SimulationEngine:
         讀 persona 池的 ``identity.residential_location``，正規化到實際行政區；對不到的略過
         （之後改用人口加權後備）。destination="origin" 時不需要、直接略過。"""
         self._persona_residence = {}
-        if config.EGRESS_CONFIG.destination != "residence":
+        if config.effective_egress().destination != "residence":
             return
         from ..decisions import profile_pool, response_parser
         towns = self._available_towns
@@ -431,7 +431,7 @@ class SimulationEngine:
         """設定事件車的散場目的地（home_town / home_node）。
         - destination="origin"：回出生地（來回程，home_node＝出生節點）。
         - destination="residence"：persona 居住地 → 對不到/規則式車則人口加權抽一個居住區。"""
-        if config.EGRESS_CONFIG.destination == "origin":
+        if config.effective_egress().destination == "origin":
             agent.home_town = agent.origin_town
             agent.home_node = origin_node
             return
@@ -455,7 +455,7 @@ class SimulationEngine:
         """散場排程 + 啟動：宣告後，停留中的事件車在視窗內依 profile 錯開離場、改往家、重算路徑。"""
         if self._egress_declared_cycle is None:
             return
-        eg = config.EGRESS_CONFIG
+        eg = config.effective_egress()
         window = max(0, round(eg.window_minutes / max(1, self.cfg.step_minutes)))
         declared = self._egress_declared_cycle
         for a in self._event_agents():
@@ -559,7 +559,7 @@ class SimulationEngine:
         `window_minutes=0` → 全部 0（同時出發＝舊行為）。未到 `departure_cycle` 的車標 `waiting_for_origin`
         （尚未進場：不移動、不算流量、不顯示）。背景車不分批。視窗 clamp 到 max_steps-1，確保都會出發。
         """
-        dc = config.DEPARTURE_CONFIG
+        dc = config.effective_departure()
         window = max(0, round(dc.window_minutes / max(1, self.cfg.step_minutes)))
         window = min(window, max(0, self.cfg.max_steps - 1))
         for a in self._event_agents():
@@ -1581,6 +1581,15 @@ class SimulationEngine:
                     "count": config.effective_ambient_count(),
                     "active": self._ambient_count,
                     "max": config.AMBIENT_CONFIG.max_count,
+                },
+                "departure": {
+                    "profile": config.effective_departure().profile,
+                    "window_minutes": config.effective_departure().window_minutes,
+                },
+                "egress": {
+                    "profile": config.effective_egress().profile,
+                    "window_minutes": config.effective_egress().window_minutes,
+                    "destination": config.effective_egress().destination,
                 },
                 "ui": config.UI_CONFIG.to_payload(),
                 "llm": self._llm_init_info(),

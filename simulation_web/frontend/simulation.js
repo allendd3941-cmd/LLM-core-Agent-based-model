@@ -30,7 +30,7 @@ const TrafficUI = (() => {
 
   // 數值輸入防呆：超出 [min,max] 或非數字 → 跳專業提示（警示 toast + 系統日誌 + 欄位閃紅抖動）並夾回。
   // 後端 apply_config 仍會再 clamp 一次保險。
-  const FIELD_LABELS = { agents: "事件車數量", ambient: "背景常態車流", steps: "週期數" };
+  const FIELD_LABELS = { agents: "事件車數量", ambient: "背景常態車流", steps: "週期數", "departure-window": "進場出發視窗", "egress-window": "散場離場視窗" };
   function flagInvalid(el) {
     el.classList.add("invalid");
     clearTimeout(el._invTimer);
@@ -81,6 +81,15 @@ const TrafficUI = (() => {
     const stepMin = $("step-minutes");
     if (stepMin) stepMin.onchange = markPending;
 
+    // 進出場時間型態：型態/目的地 select → 標記待套用；視窗數值 → 預覽 + 失焦夾回
+    ["departure-profile", "egress-profile", "egress-destination"].forEach((id) => {
+      const el = $(id); if (el) el.onchange = markPending;
+    });
+    ["departure-window", "egress-window"].forEach((id) => {
+      const el = $(id);
+      if (el) { el.oninput = markPending; el.onchange = () => clampField(el); }
+    });
+
     const applyBtn = $("btn-apply");
     if (applyBtn) applyBtn.onclick = (e) => {
       markBtnBusy(e.currentTarget);
@@ -89,6 +98,11 @@ const TrafficUI = (() => {
         ambient: parseInt($("ambient").value, 10),
         max_steps: parseInt($("steps").value, 10),
         step_minutes: parseInt($("step-minutes").value, 10),
+        departure_profile: $("departure-profile") && $("departure-profile").value,
+        departure_window: $("departure-window") ? parseInt($("departure-window").value, 10) : null,
+        egress_profile: $("egress-profile") && $("egress-profile").value,
+        egress_window: $("egress-window") ? parseInt($("egress-window").value, 10) : null,
+        egress_destination: $("egress-destination") && $("egress-destination").value,
         detectors: (typeof TrafficMap !== "undefined" && TrafficMap.getDetectors) ? TrafficMap.getDetectors() : [],
       });
       clearPending();
@@ -324,6 +338,16 @@ const TrafficUI = (() => {
     if (stepsEl) stepsEl.value = cfg.max_steps;
     const smEl = $("step-minutes");
     if (smEl) smEl.value = cfg.step_minutes;
+
+    if (cfg.departure) {
+      const dp = $("departure-profile"); if (dp) dp.value = cfg.departure.profile;
+      const dw = $("departure-window"); if (dw) dw.value = cfg.departure.window_minutes;
+    }
+    if (cfg.egress) {
+      const ep = $("egress-profile"); if (ep) ep.value = cfg.egress.profile;
+      const ew = $("egress-window"); if (ew) ew.value = cfg.egress.window_minutes;
+      const ed = $("egress-destination"); if (ed) ed.value = cfg.egress.destination;
+    }
 
     if (cfg.ambient) {
       const amb = $("ambient");

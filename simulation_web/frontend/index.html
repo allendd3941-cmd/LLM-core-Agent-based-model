@@ -101,6 +101,49 @@
       </section>
 
       <section class="card">
+        <h2><i class="ti ti-chart-dots-3" aria-hidden="true"></i> 進出場時間型態</h2>
+
+        <label class="field">
+          <span>進場出發型態</span>
+          <div class="select-wrap"><i class="ti ti-clock-play" aria-hidden="true"></i><select id="departure-profile">
+            <option value="uniform">均勻分散</option>
+            <option value="front_loaded">早到偏多</option>
+            <option value="peak">接近開賽尖峰</option>
+          </select></div>
+        </label>
+
+        <label class="field">
+          <span class="field-head">進場出發視窗（分鐘）</span>
+          <input id="departure-window" type="number" inputmode="numeric" min="0" max="240" step="5" value="0" />
+          <p class="hint">事件車在此視窗內陸續出發；0＝同時出發。</p>
+        </label>
+
+        <label class="field">
+          <span>散場離場型態</span>
+          <div class="select-wrap"><i class="ti ti-clock-pause" aria-hidden="true"></i><select id="egress-profile">
+            <option value="peak">一窩蜂</option>
+            <option value="uniform">均勻分散</option>
+            <option value="gradual">拖長疏散</option>
+          </select></div>
+        </label>
+
+        <label class="field">
+          <span class="field-head">散場離場視窗（分鐘）</span>
+          <input id="egress-window" type="number" inputmode="numeric" min="0" max="240" step="5" value="5" />
+        </label>
+
+        <label class="field">
+          <span>散場目的地</span>
+          <div class="select-wrap"><i class="ti ti-home-2" aria-hidden="true"></i><select id="egress-destination">
+            <option value="residence">回居住地</option>
+            <option value="origin">回出發地</option>
+          </select></div>
+        </label>
+
+        <p class="hint">改後按上方「套用設定」生效；散場開始時間用「活動階段」的宣告散場。</p>
+      </section>
+
+      <section class="card">
         <h2><i class="ti ti-current-location" aria-hidden="true"></i> 車流監測器</h2>
         <div class="det-dock">
           <div id="det-pegman" class="det-pegman" draggable="true" title="按住拖曳到地圖的路上放開即放置">

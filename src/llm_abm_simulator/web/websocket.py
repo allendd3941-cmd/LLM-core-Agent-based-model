@@ -235,15 +235,25 @@ class SimulationSession:
         self.cfg = dataclasses.replace(self.cfg, **changes)
         if v.get("ambient") is not None:
             config.set_runtime_ambient_count(max(0, min(int(v["ambient"]), config.AMBIENT_CONFIG.max_count)))
+        config.set_runtime_departure(
+            v.get("departure_profile"),
+            int(v["departure_window"]) if v.get("departure_window") is not None else None)
+        config.set_runtime_egress(
+            v.get("egress_profile"),
+            int(v["egress_window"]) if v.get("egress_window") is not None else None,
+            v.get("egress_destination"))
         if v.get("detectors") is not None:
             self._detector_specs = _sanitize_detectors(v.get("detectors"))
         await self._stop_run_task()
         self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
+        dep = config.effective_departure()
+        eg = config.effective_egress()
         await self.status(
             f"已套用：{self.cfg.nb_agents} 事件車 · 背景 {config.effective_ambient_count()} · "
-            f"{self.cfg.max_steps} 週期 × {self.cfg.step_minutes} 分")
+            f"{self.cfg.max_steps} 週期 × {self.cfg.step_minutes} 分 · "
+            f"進場 {dep.profile}/{dep.window_minutes}分 · 散場 {eg.profile}/{eg.window_minutes}分→{eg.destination}")
 
     async def _set_time(self, max_steps: int | None = None, step_minutes: int | None = None) -> None:
         """設定「跑幾個週期 / 每週期幾分鐘」（比照 set_agents：進行中先擋，改了重新初始化）。"""

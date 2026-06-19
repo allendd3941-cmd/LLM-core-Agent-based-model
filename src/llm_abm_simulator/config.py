@@ -623,3 +623,53 @@ def effective_ambient_count() -> int:
         return 0
     n = AMBIENT_CONFIG.count if _RUNTIME_AMBIENT_COUNT is None else _RUNTIME_AMBIENT_COUNT
     return max(0, min(int(n), AMBIENT_CONFIG.max_count))
+
+
+# runtime 可覆寫的進場出發型態／視窗（前端「套用設定」帶入；None＝用 [departure]）
+_RUNTIME_DEPARTURE: dict | None = None
+
+
+def set_runtime_departure(profile: str | None = None, window_minutes: int | None = None) -> None:
+    global _RUNTIME_DEPARTURE
+    if profile is None and window_minutes is None:
+        _RUNTIME_DEPARTURE = None
+        return
+    _RUNTIME_DEPARTURE = {"profile": profile, "window_minutes": window_minutes}
+
+
+def effective_departure() -> DepartureConfig:
+    """有效進場出發設定：runtime 覆寫優先，否則 [departure]；非法值回退原預設。"""
+    d = DEPARTURE_CONFIG
+    o = _RUNTIME_DEPARTURE
+    if not o:
+        return d
+    profile = o.get("profile") if o.get("profile") in ("uniform", "front_loaded", "peak") else d.profile
+    win = o.get("window_minutes")
+    win = d.window_minutes if win is None else max(0, int(win))
+    return dataclasses.replace(d, profile=profile, window_minutes=win)
+
+
+# runtime 可覆寫的散場型態／視窗／目的地（前端「套用設定」帶入；None＝用 [egress]）
+_RUNTIME_EGRESS: dict | None = None
+
+
+def set_runtime_egress(profile: str | None = None, window_minutes: int | None = None,
+                       destination: str | None = None) -> None:
+    global _RUNTIME_EGRESS
+    if profile is None and window_minutes is None and destination is None:
+        _RUNTIME_EGRESS = None
+        return
+    _RUNTIME_EGRESS = {"profile": profile, "window_minutes": window_minutes, "destination": destination}
+
+
+def effective_egress() -> EgressConfig:
+    """有效散場設定：runtime 覆寫優先，否則 [egress]；非法值回退原預設。"""
+    e = EGRESS_CONFIG
+    o = _RUNTIME_EGRESS
+    if not o:
+        return e
+    profile = o.get("profile") if o.get("profile") in ("peak", "uniform", "gradual") else e.profile
+    dest = o.get("destination") if o.get("destination") in ("residence", "origin") else e.destination
+    win = o.get("window_minutes")
+    win = e.window_minutes if win is None else max(0, int(win))
+    return dataclasses.replace(e, profile=profile, window_minutes=win, destination=dest)

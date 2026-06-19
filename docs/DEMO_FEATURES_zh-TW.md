@@ -205,6 +205,7 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 `profile` 抽樣(seeded、可重現)。狀態列新增「未出發 N」,分析面板的抵達曲線加一條**「每步出發」**對照。
 - 設定 `[departure].window_minutes`(0＝全部同時出發＝舊行為,向後相容)、`profile`(uniform / front_loaded / peak)。
 - 背景車不分批(本即穩態連續流)。後端 `engine._assign_departures` / `_activate_due_departures`;完整見下方設定與 `OVERVIEW`。
+- **前端可調(2026-06)**:左面板「進出場時間型態」卡的「進場出發型態／進場出發視窗」即對應 `[departure].profile / window_minutes`,按「套用設定」生效(runtime 覆寫 `config.set_runtime_departure`／`effective_departure`,進行中需先重設)。
 
 ## 18. 前端整體重設計（專業化版面 + 系統日誌 + 多底圖）（P3+）
 
@@ -250,6 +251,7 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
 - **散場疏運評估**（完整見 `EGRESS_zh-TW.md`）：左面板「活動階段」卡（進場 ▸ 散場 + **宣告散場開始**鈕,
   `control{action:"declare_egress"}`）;停留車依 `[egress]` 錯開離場回**居住地**;KPI 加「已返家」;
   分析面板加**③ 散場層**(疏散曲線/散場旅時/返家 OD/**清場時間**)。`charts.renderEgress`、`engine.declare_egress/_handle_egress/_egress_analysis`。
+- **前端可調(2026-06)**:「進出場時間型態」卡的「散場離場型態／散場離場視窗／散場目的地」對應 `[egress].profile / window_minutes / destination`,按「套用設定」生效(`config.set_runtime_egress`／`effective_egress`);散場**開始時間**仍由「宣告散場」鈕觸發。
 - **規則式核心暗掉**：demo 預設 LLM(`[llm].use_llm=true`),前端規則式按鈕 `disabled` 變暗;規則式仍是 LLM 失敗 fallback、背景車核心、paper baseline(config 可跑)。
 - **決策日誌歷史化**：改成**逐步累積**(每步「第 N 步 · 重決 X 台」+ 該步重決車),可往上捲看整場;重設清空(不吃上次模擬)。`simulation.js updateDecisions/resetDecisions`(帶 cycle)。
 - **底部面板自適應**：對話/系統日誌/決策日誌內捲區改 flex 撐滿,隨拖動面板高度自適應(不再寫死 max-height)。
