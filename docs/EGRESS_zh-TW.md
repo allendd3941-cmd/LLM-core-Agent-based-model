@@ -58,7 +58,10 @@ ingress（往球場） → dwell（抵達球場停留） → egress（往家） 
 destination = "residence"   # residence（回居住地）| origin（回出生地，來回程）
 window_minutes = 5          # 宣告散場後的錯開視窗（分鐘）
 profile = "peak"            # peak（一窩蜂）| uniform | gradual
+carry_ingress_memory = true # true＝散場保留進場累積的旅次記憶（跨旅次記憶，影響散場 LLM 決策）；false＝兩段獨立（ablation）
 ```
+
+> **跨旅次記憶（2026-06）**：`carry_ingress_memory`（前端「進出場時間型態」卡可即時開關，亦可 `config.set_runtime_egress`）。開啟時 `agent.begin_egress_leg(carry_memory=True)` 不重置進場記憶累積器，散場 LLM 決策因此看得到進場經驗（例如「來時哪裡塞 → 回家避開」）。散場旅時/OD/清場分析用獨立的 `egress_start_cycle / egress_arrival_cycle`，**不受此旗標影響**。搭配「點 agent 看整趟路徑」（`get_agent_path`）可同 seed 開/關對照散場路徑差異。
 
 ## 7. 可重現性與誠實限制
 - **可重現**：居住地抽樣、散場錯開時間全走注入的 seeded RNG → 同 seed 同軌跡。

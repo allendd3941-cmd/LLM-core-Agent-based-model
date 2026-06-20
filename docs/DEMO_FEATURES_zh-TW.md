@@ -252,6 +252,8 @@ simulation.js 只新增),故不影響可重現性與既有功能(功能 0 刪減
   `control{action:"declare_egress"}`）;停留車依 `[egress]` 錯開離場回**居住地**;KPI 加「已返家」;
   分析面板加**③ 散場層**(疏散曲線/散場旅時/返家 OD/**清場時間**)。`charts.renderEgress`、`engine.declare_egress/_handle_egress/_egress_analysis`。
 - **前端可調(2026-06)**:「進出場時間型態」卡的「散場離場型態／散場離場視窗／散場目的地」對應 `[egress].profile / window_minutes / destination`,按「套用設定」生效(`config.set_runtime_egress`／`effective_egress`);散場**開始時間**仍由「宣告散場」鈕觸發。
+- **跨旅次記憶(2026-06)**:`[egress].carry_ingress_memory`(同卡可開關)。開＝散場保留進場累積的旅次記憶,讓散場 LLM 決策看得到進場經驗(`agent.begin_egress_leg(carry_memory=…)` 不重置累積器;散場旅時/分析用獨立 cycle 欄位,不受影響);關＝兩段獨立,可作 ablation。同 seed 開/關對照即可看出散場路徑差異。
+- **整趟路徑視覺化(2026-06)**:點事件車 → `control{action:"get_agent_path"}` → 回該車整趟走過節點(進場/散場分段)→ 地圖畫 polyline(進場藍實線、散場粉紅虛線)。`agent.visited_nodes`(只記事件車、進場+散場連續累積)、`engine.get_agent_path`、`map.drawAgentPath`。用來檢驗散場是否受進場記憶影響。
 - **規則式核心暗掉**：demo 預設 LLM(`[llm].use_llm=true`),前端規則式按鈕 `disabled` 變暗;規則式仍是 LLM 失敗 fallback、背景車核心、paper baseline(config 可跑)。
 - **決策日誌歷史化**：改成**逐步累積**(每步「第 N 步 · 重決 X 台」+ 該步重決車),可往上捲看整場;重設清空(不吃上次模擬)。`simulation.js updateDecisions/resetDecisions`(帶 cycle)。
 - **底部面板自適應**：對話/系統日誌/決策日誌內捲區改 flex 撐滿,隨拖動面板高度自適應(不再寫死 max-height)。

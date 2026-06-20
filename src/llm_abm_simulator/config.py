@@ -287,6 +287,7 @@ class EgressConfig:
     destination: str = "residence"   # residence（回居住地）| origin（回出生地，來回程）
     window_minutes: int = 5          # 散場錯開視窗（分鐘）：宣告散場後車輛在此視窗內陸續離場
     profile: str = "peak"            # peak（一窩蜂，最前面密集）| uniform（均勻）| gradual（拖長）
+    carry_ingress_memory: bool = True  # True＝散場保留進場累積的旅次記憶（跨旅次記憶，影響散場決策）；False＝兩段獨立（ablation）
 
 
 @dataclass(frozen=True)
@@ -654,12 +655,13 @@ _RUNTIME_EGRESS: dict | None = None
 
 
 def set_runtime_egress(profile: str | None = None, window_minutes: int | None = None,
-                       destination: str | None = None) -> None:
+                       destination: str | None = None, carry_memory: bool | None = None) -> None:
     global _RUNTIME_EGRESS
-    if profile is None and window_minutes is None and destination is None:
+    if profile is None and window_minutes is None and destination is None and carry_memory is None:
         _RUNTIME_EGRESS = None
         return
-    _RUNTIME_EGRESS = {"profile": profile, "window_minutes": window_minutes, "destination": destination}
+    _RUNTIME_EGRESS = {"profile": profile, "window_minutes": window_minutes,
+                       "destination": destination, "carry_memory": carry_memory}
 
 
 def effective_egress() -> EgressConfig:
@@ -672,4 +674,7 @@ def effective_egress() -> EgressConfig:
     dest = o.get("destination") if o.get("destination") in ("residence", "origin") else e.destination
     win = o.get("window_minutes")
     win = e.window_minutes if win is None else max(0, int(win))
-    return dataclasses.replace(e, profile=profile, window_minutes=win, destination=dest)
+    carry = o.get("carry_memory")
+    carry = e.carry_ingress_memory if carry is None else bool(carry)
+    return dataclasses.replace(e, profile=profile, window_minutes=win, destination=dest,
+                               carry_ingress_memory=carry)

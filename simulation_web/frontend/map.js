@@ -10,6 +10,7 @@ const TrafficMap = (() => {
   let roadById = {};          // road_id → Leaflet polyline（用於即時上色）
   let flowOverlay = {};       // road_id → 動態疊畫的 polyline（底圖沒有的非主要道路）
   let agentMarkers = {};      // agent_id → marker（一律 canvas 彩點）
+  let agentPathLayer = null;  // 被選取 agent 的整趟行走軌跡（進場/散場分色）
   let stadiumMarker = null;
   let onAgentSelect = null;
   let ambientOn = true;       // 背景常態車流顯示開關
@@ -283,6 +284,7 @@ const TrafficMap = (() => {
     if (signalLayer) { map.removeLayer(signalLayer); signalLayer = null; }
     Object.values(agentMarkers).forEach((m) => map.removeLayer(m));
     Object.values(flowOverlay).forEach((l) => map.removeLayer(l));
+    clearAgentPath();
     agentMarkers = {};
     flowOverlay = {};
     roadById = {};
@@ -483,7 +485,37 @@ const TrafficMap = (() => {
     });
   }
 
+  // ---- 被選取 agent 的整趟行走軌跡（點 agent 時畫；進場藍實線、散場粉紅虛線）----
+  function clearAgentPath() {
+    if (agentPathLayer) { map.removeLayer(agentPathLayer); agentPathLayer = null; }
+  }
+
+  function drawAgentPath(ingress, egress) {
+    clearAgentPath();
+    if (!map) return;
+    const grp = L.layerGroup();
+    if (ingress && ingress.length > 1) {
+      L.polyline(ingress, { color: "#3FB6FF", weight: 4, opacity: 0.9 }).addTo(grp);
+    }
+    if (egress && egress.length > 1) {
+      L.polyline(egress, { color: "#FF7AC6", weight: 4, opacity: 0.9, dashArray: "6 5" }).addTo(grp);
+    }
+    const start = (ingress && ingress[0]) || (egress && egress[0]);
+    if (start) {
+      L.circleMarker(start, { radius: 5, color: "#fff", weight: 1.5, fillColor: "#2FD17A", fillOpacity: 1 })
+        .bindTooltip("出發地", { direction: "top" }).addTo(grp);
+    }
+    const endArr = (egress && egress.length) ? egress : ingress;
+    const end = endArr && endArr[endArr.length - 1];
+    if (end) {
+      L.circleMarker(end, { radius: 5, color: "#fff", weight: 1.5, fillColor: "#ff3b3b", fillOpacity: 1 })
+        .bindTooltip(egress && egress.length ? "返家終點" : "目前位置／目的地", { direction: "top" }).addTo(grp);
+    }
+    grp.addTo(map);
+    agentPathLayer = grp;
+  }
+
   return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient,
            setViewReporter, resize, setDetectorReporter, setupDetectorDrag, addStagedDetector,
-           getDetectors, detectorCount, clearDetectors };
+           getDetectors, detectorCount, clearDetectors, drawAgentPath, clearAgentPath };
 })();

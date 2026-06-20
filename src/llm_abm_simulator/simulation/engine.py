@@ -361,6 +361,8 @@ class SimulationEngine:
             self._assign_home(agent, origin_node)   # 散場目的地（居住地 / 出生地）
 
         agent.current_node = origin_node
+        if agent.role == "event":
+            agent.visited_nodes = [origin_node]   # 軌跡起點（整趟路徑視覺化用）
         agent.destination_node = dest_node
         agent.x, agent.y = self.network.node_xy(origin_node)
 
@@ -475,7 +477,7 @@ class SimulationEngine:
             if cycle >= a.egress_cycle and a.home_node:      # 到點 → 開始散場
                 path = self._route(a.current_node, a.home_node, a.routing_strategy())
                 if len(path) > 1:
-                    a.begin_egress_leg(cycle)
+                    a.begin_egress_leg(cycle, carry_memory=eg.carry_ingress_memory)
                     a.phase = "egress"
                     a.destination_town = a.home_town
                     a.destination_node = a.home_node
@@ -925,6 +927,8 @@ class SimulationEngine:
                 agent.path_index += 1
                 agent.edge_progress = 0.0
                 agent.current_node = v
+                if agent.role == "event":
+                    agent.visited_nodes.append(v)   # 累積整趟實際走過的節點（含重算後路線、進場+散場連續）
                 agent.x, agent.y = self.network.node_xy(v)
             else:
                 # 在邊上部分前進：累積 edge_progress 並線性內插座標
@@ -1590,6 +1594,7 @@ class SimulationEngine:
                     "profile": config.effective_egress().profile,
                     "window_minutes": config.effective_egress().window_minutes,
                     "destination": config.effective_egress().destination,
+                    "carry_ingress_memory": config.effective_egress().carry_ingress_memory,
                 },
                 "ui": config.UI_CONFIG.to_payload(),
                 "llm": self._llm_init_info(),
@@ -1653,6 +1658,30 @@ class SimulationEngine:
         env = self._environment_summary(cyc)
         mode_dist, status_dist = metrics.distributions(self._event_agents())
         return self._snapshot(cyc, env, mode_dist, status_dist)
+
+    def get_agent_path(self, agent_id: str) -> dict[str, Any]:
+        """回傳某事件車整趟走過的節點軌跡（lat/lng），分進場/散場兩段供前端上色。
+
+        ingress＝進場段；egress＝散場段（與進場共用銜接節點）；無資料回空清單。
+        點擊 agent 時才呼叫（不進每步快照），用於檢驗散場路徑是否受進場記憶影響。
+        """
+        empty = {"agent_id": agent_id, "ingress": [], "egress": []}
+        if self.network is None:
+            return empty
+        agent = next((a for a in self.agents if a.agent_id == agent_id), None)
+        if agent is None or not agent.visited_nodes:
+            return empty
+        latlng: list[list[float]] = []
+        for n in agent.visited_nodes:
+            try:
+                lat, lng = self.network.node_latlng(n)
+            except KeyError:
+                continue
+            latlng.append([lat, lng])
+        split = agent.egress_path_split
+        if split <= 0 or split >= len(latlng):
+            return {"agent_id": agent_id, "ingress": latlng, "egress": []}
+        return {"agent_id": agent_id, "ingress": latlng[:split], "egress": latlng[split - 1:]}
 
     def chat_context(self) -> str:
         """把當前模擬狀態組成精簡文字，供「暫停對話查詢」的 LLM 回答（唯讀）。"""

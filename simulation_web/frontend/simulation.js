@@ -82,7 +82,7 @@ const TrafficUI = (() => {
     if (stepMin) stepMin.onchange = markPending;
 
     // 進出場時間型態：型態/目的地 select → 標記待套用；視窗數值 → 預覽 + 失焦夾回
-    ["departure-profile", "egress-profile", "egress-destination"].forEach((id) => {
+    ["departure-profile", "egress-profile", "egress-destination", "egress-carry-memory"].forEach((id) => {
       const el = $(id); if (el) el.onchange = markPending;
     });
     ["departure-window", "egress-window"].forEach((id) => {
@@ -103,6 +103,7 @@ const TrafficUI = (() => {
         egress_profile: $("egress-profile") && $("egress-profile").value,
         egress_window: $("egress-window") ? parseInt($("egress-window").value, 10) : null,
         egress_destination: $("egress-destination") && $("egress-destination").value,
+        egress_carry_memory: $("egress-carry-memory") ? ($("egress-carry-memory").value === "1") : undefined,
         detectors: (typeof TrafficMap !== "undefined" && TrafficMap.getDetectors) ? TrafficMap.getDetectors() : [],
       });
       clearPending();
@@ -347,6 +348,7 @@ const TrafficUI = (() => {
       const ep = $("egress-profile"); if (ep) ep.value = cfg.egress.profile;
       const ew = $("egress-window"); if (ew) ew.value = cfg.egress.window_minutes;
       const ed = $("egress-destination"); if (ed) ed.value = cfg.egress.destination;
+      const ec = $("egress-carry-memory"); if (ec) ec.value = cfg.egress.carry_ingress_memory ? "1" : "0";
     }
 
     if (cfg.ambient) {
@@ -396,6 +398,8 @@ const TrafficUI = (() => {
   }
 
   function inspectAgent(a) {
+    // 點事件車 → 向後端要整趟行走軌跡，在地圖上畫出來（檢驗散場是否受進場記憶影響）
+    if (a && a.agent_id && a.role !== "ambient" && send) send("get_agent_path", { agent_id: a.agent_id });
     const rows = [
       ["ID", a.agent_id],
       ["姓名", a.profile_name || "—"],

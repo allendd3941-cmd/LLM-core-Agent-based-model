@@ -148,6 +148,12 @@ class SimulationSession:
             await self.status(msg)
             if self.engine.is_initialized:
                 await self.send(self.engine.snapshot_now().to_message())
+        elif action == "get_agent_path":
+            v = value or {}
+            aid = str(v.get("agent_id", ""))
+            if aid and self.engine.is_initialized:
+                res = self.engine.get_agent_path(aid)
+                await self.send({"type": "agent_path", **res})
         elif action == "snap_detector":
             v = value or {}
             try:
@@ -241,7 +247,8 @@ class SimulationSession:
         config.set_runtime_egress(
             v.get("egress_profile"),
             int(v["egress_window"]) if v.get("egress_window") is not None else None,
-            v.get("egress_destination"))
+            v.get("egress_destination"),
+            v.get("egress_carry_memory"))
         if v.get("detectors") is not None:
             self._detector_specs = _sanitize_detectors(v.get("detectors"))
         await self._stop_run_task()

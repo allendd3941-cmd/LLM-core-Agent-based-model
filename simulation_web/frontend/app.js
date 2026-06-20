@@ -140,6 +140,11 @@
           triggerDownload(msg.url, msg.name);
           TrafficUI.log("success", "已產生下載檔：" + (msg.label || msg.name));
           break;
+        case "agent_path":
+          if (typeof TrafficMap !== "undefined" && TrafficMap.drawAgentPath) {
+            TrafficMap.drawAgentPath(msg.ingress, msg.egress);
+          }
+          break;
       }
     };
   }

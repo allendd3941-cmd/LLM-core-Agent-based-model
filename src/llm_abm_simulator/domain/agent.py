@@ -163,6 +163,9 @@ class VehicleAgent:
     egress_cycle: int | None = None      # 排定的離場週期（宣告散場後錯開分派）
     egress_start_cycle: int | None = None  # 散場那一腿開始移動的週期（量散場旅時）
     egress_arrival_cycle: int | None = None  # 散場抵達家的週期
+    # 整趟行走軌跡（點 agent 看路徑用；只對事件車記錄，進場→散場連續累積）
+    visited_nodes: list[str] = field(default_factory=list)  # 實際走過的節點序列
+    egress_path_split: int = 0            # visited_nodes 中散場起點的索引（前端分段上色用）
 
     # === 路網位置（公尺座標 EPSG:3826）===
     x: float = 0.0
@@ -445,8 +448,18 @@ class VehicleAgent:
             "overall_smoothness": _smoothness_label(avg_proxy, cfg),
         }
 
-    def begin_egress_leg(self, cycle: int) -> None:
-        """切到散場時重置記憶累積器，讓散場那一腿的旅次摘要/旅時獨立量測（新的一段旅程）。"""
+    def begin_egress_leg(self, cycle: int, carry_memory: bool = False) -> None:
+        """切到散場那一腿。
+
+        - ``egress_start_cycle`` 與 ``egress_path_split`` 一律設定（散場旅時分析、整趟路徑分段用），
+          不受 carry_memory 影響。
+        - carry_memory=True（跨旅次記憶）：保留進場累積的記憶與累積器，讓散場決策看得到進場經驗。
+        - carry_memory=False：重置累積器與 memory，使兩段獨立量測（＝原行為，可作 ablation 對照）。
+        """
+        self.egress_start_cycle = cycle
+        self.egress_path_split = len(self.visited_nodes)
+        if carry_memory:
+            return
         self._start_cycle = None
         self._prev_distance = None
         self._prev_mode = ""
@@ -455,7 +468,6 @@ class VehicleAgent:
         self._smoothness_sum = 0.0
         self._smoothness_n = 0
         self.memory = {}
-        self.egress_start_cycle = cycle
 
     def _compose_summary(
         self, elapsed_steps: int, step_minutes: int, avg_proxy: float,
