@@ -204,15 +204,16 @@ class ScalingConfig:
     """
 
     event_triggered_decisions: bool = True  # 關閉＝退回「每步對全部 agent 決策」的舊行為
-    cooldown_steps: int = 5                  # 同車觸發後幾步內不重複觸發（去抖動）
+    cooldown_minutes: float = 10.0           # LLM 決策 cooldown：同車觸發後幾「模擬分鐘」內不重決（與 step_minutes 無關）
+    reroute_cooldown_minutes: float = 10.0   # 重算路徑 cooldown：同車幾「模擬分鐘」內不重算路徑
     batch_size: int = 30                     # B：每批最多幾個 agent（吃 context 預算）
     concurrency: int = 4                     # C：同時並行幾批（搭配後端真並行上限）
     cache_network: bool = True               # 跨連線/重設快取已解析的 graphml 圖+節點索引（不改結果，省 24MB 重解析）
     init_workers: int = 0                    # init 路由並行程序數（0/1＝單程序；>1 才開 multiprocessing，不改結果）
     parallel_init_min_agents: int = 200      # 車數達此門檻才啟用並行 init（量少時 pool 啟動成本不划算）
-    route_tree_min_agents: int = 5000        # 車數達此門檻才用「終點樹」init 路由（城市尺度秒級；0＝停用）。
-    # 終點樹會改結果：同 mode+終點走相同自由流路徑(無 per-car jitter)、背景車終點收斂到區代表節點。
-    # 小規模(測試/demo<門檻)走原本逐車 find_path → 行為與結果不變。
+    route_trees: bool = True                 # 用「反向終點樹」做路由（init + 中途重算）；false＝退回逐車 find_path（對照/除錯）。
+    # 終點樹會改結果：同 mode+終點走相同(當前壅塞下)最短路(無 per-car jitter)、背景車終點收斂到區代表節點；
+    # 含當前壅塞與 avoid_circles 權重，與 find_path 等價(只差 jitter)。城市尺度把每步重算從上萬次 networkx 降到數十棵樹。
     profile_steps: bool = True               # 每步分段計時（decide/move/reroute/flow/…）印一行；純量測、不改結果。
 
 
@@ -463,12 +464,12 @@ def _build_scaling_config(raw: dict[str, Any]) -> ScalingConfig:
     overrides = {k: v for k, v in raw.get("scaling", {}).items()
                  if k in {f.name for f in fields(ScalingConfig)}}
     sc = dataclasses.replace(ScalingConfig(), **overrides)
-    if sc.cooldown_steps < 0 or sc.batch_size < 1 or sc.concurrency < 1:
-        raise ValueError("設定檔 [scaling]：cooldown_steps≥0、batch_size≥1、concurrency≥1")
+    if sc.cooldown_minutes < 0 or sc.reroute_cooldown_minutes < 0:
+        raise ValueError("設定檔 [scaling]：cooldown_minutes / reroute_cooldown_minutes 不可為負")
+    if sc.batch_size < 1 or sc.concurrency < 1:
+        raise ValueError("設定檔 [scaling]：batch_size≥1、concurrency≥1")
     if sc.init_workers < 0 or sc.parallel_init_min_agents < 1:
         raise ValueError("設定檔 [scaling]：init_workers≥0、parallel_init_min_agents≥1")
-    if sc.route_tree_min_agents < 0:
-        raise ValueError("設定檔 [scaling]：route_tree_min_agents 不可為負（0＝停用終點樹路由）")
     return sc
 
 

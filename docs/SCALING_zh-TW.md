@@ -67,17 +67,20 @@ vllm serve <HF模型> \
 
 ---
 
-## 1.5 城市尺度 init 路由 + 連線存活（✅ 已實作）
+## 1.5 城市尺度路由（反向終點樹）+ 連線存活（✅ 已實作）
 
-**終點樹 init 路由**（`[scaling].route_tree_min_agents`，預設 5000；0＝停用）：
-車數達門檻時,init 不再逐車跑 `networkx.shortest_path`,改用 **scipy `csgraph.dijkstra` 反向最短路樹**:
-同一 active_mode 共用一張靜態權重圖(congestion=0),每個終點只算一次反向樹,每車沿前驅讀路徑。
-事件車全去球場(1 終點)、背景車終點收斂到**區代表節點**(形心最近節點,~區數個終點)。
-→ 數萬車 init 從數十分鐘降到秒~分鐘級(見 `spatial/routing.py` `DestinationTrees`、`engine._place_routes_via_trees`)。
-- **會改結果**:同 mode+終點的車走相同自由流路徑(無 per-car jitter;車流分散改由壅塞重算補回);
-  背景車去區代表節點而非區內隨機點。**小規模(<門檻)走原本逐車最短路,行為/結果不變、測試不需重建基準。**
-- 路由是 CPU(非 GPU)工作;5090 對 init 沒幫助,靠演算法(樹)或多核平行(`init_workers`)。
-- 中途壅塞重算、背景車抵達重生仍走逐車 `find_path`(只算被觸發/抵達的車)。
+**反向終點樹路由**（`[scaling].route_trees`，預設 true；false＝退回逐車 `find_path` 對照/除錯）：
+**init 與「中途壅塞重算」都用** scipy `csgraph.dijkstra` 反向最短路樹——同一 active_mode 共用一張權重圖、
+每個終點只算一次反向樹、每車沿前驅讀路徑(惰性只建用到的 mode×終點)。事件車去球場(1 終點)、背景車終點
+收斂到**區代表節點**(~區數個終點)。權重 = mode + **當前壅塞** + road_class_bias + **avoid_circles** + 固定 salt,
+與 `find_path` **共用同一成本公式**(`spatial/routing.py` `_edge_cost`)→ 兩者等價,只差 per-car jitter。
+- **init**(`engine._place_routes_via_trees`)：congestion=0、無 avoid_circles → 自由流樹。
+- **中途重算**(`engine._reroute_via_trees`，每步移動前批次)：用當前壅塞 + avoid_circles 建樹,取代逐車
+  networkx。把「每步上萬次 Dijkstra」→「數十棵樹」(城市尺度每步從分鐘級 → 秒級)。
+- **reroute cooldown**：同車 `[scaling].reroute_cooldown_minutes`(預設 10 分鐘)內不重算,降 churn。事件+背景一視同仁。
+- **會改結果**:同 mode+終點走相同(當前壅塞下)最短路、無 jitter;背景車去區代表節點。`route_trees=false` 可回到逐車對照。
+- 路由是 CPU(非 GPU)工作;5090 對路由沒幫助,靠演算法(樹)。
+- **cooldown 改「模擬分鐘」**：`cooldown_minutes`(LLM 決策)、`reroute_cooldown_minutes`(重算)皆以分鐘計、與 step_minutes 無關。
 
 **WebSocket init keepalive**(`web/websocket.py`)：`initialize` 放背景執行緒跑、每隔幾秒送進度,
 避免長 init(無資料流動)被瀏覽器/代理 idle timeout 斷線;並接住斷線後的 `RuntimeError`,安靜收尾不噴 traceback。

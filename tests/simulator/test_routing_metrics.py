@@ -43,12 +43,12 @@ def test_path_length_positive():
     assert routing.path_length_m(net, path) > 0
 
 
-def _path_cost(net, path, strategy, seed=0):
+def _path_cost(net, path, strategy, seed=0, avoid_circles=None):
     total = 0.0
     for a, b in zip(path, path[1:]):
         road = net.road_between(a, b)
         assert road is not None, f"邊不存在: {a}->{b}"
-        total += routing._static_edge_cost(road, a, b, strategy, seed)
+        total += routing._edge_cost(net, a, b, road, strategy, seed, avoid_circles)
     return total
 
 
@@ -67,6 +67,23 @@ def test_destination_tree_matches_find_path():
         assert tp and tp[0] == o and tp[-1] == dest        # 樹路徑連通到終點
         assert fp and fp[0] == o and fp[-1] == dest
         assert abs(_path_cost(net, tp, strategy) - _path_cost(net, fp, strategy)) < 1e-6
+
+
+def test_destination_tree_matches_find_path_with_avoid_circles():
+    """終點樹吃 avoid_circles（取代逐車退回）：與 find_path 在同樣避讓圈下仍是同成本最短路。"""
+    net = _synthetic_network()
+    nodes = list(net.graph.nodes())
+    strategy = {"time": 0.45, "distance": 0.25, "comfort": 0.20, "capacity": 0.10, "randomness": 0.0}
+    o, dest = nodes[0], nodes[-1]
+    mid = nodes[len(nodes) // 2]
+    mx, my = net.node_xy(mid)
+    circles = [(mx, my, 1.0)]   # 在中間節點放一個避讓圈（進入該節點的邊 ×懲罰）
+    tp = routing.DestinationTrees(net, strategy, seed=42, avoid_circles=circles).paths_to(dest, [o])[o]
+    fp = routing.find_path(net, o, dest, strategy, seed=42, avoid_circles=circles)
+    assert tp and tp[0] == o and tp[-1] == dest
+    assert fp and fp[0] == o and fp[-1] == dest
+    assert abs(_path_cost(net, tp, strategy, avoid_circles=circles)
+               - _path_cost(net, fp, strategy, avoid_circles=circles)) < 1e-6
 
 
 def test_destination_tree_edge_cases():

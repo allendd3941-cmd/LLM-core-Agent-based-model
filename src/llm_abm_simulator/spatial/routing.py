@@ -61,53 +61,13 @@ def find_path(
         return [origin_node]
 
     s = strategy or {}
-    w_time = s.get("time", _DEFAULT_WEIGHTS["time"])
-    w_distance = s.get("distance", _DEFAULT_WEIGHTS["distance"])
-    w_comfort = s.get("comfort", _DEFAULT_WEIGHTS["comfort"])
-    w_capacity = s.get("capacity", _DEFAULT_WEIGHTS["capacity"])
-    congestion_penalty = float(s.get("congestion_penalty", 0.0))
-    avoid_threshold = float(s.get("avoid_threshold", 1.0))
-    road_class_bias = float(s.get("road_class_bias", 0.0))
-    randomness = float(s.get("randomness", 0.0))
-    salt = str(s.get("salt", ""))
     graph = network.graph
 
     def _weight(u: Any, v: Any, _data: dict) -> float:
         road = network.road_between(u, v)
         if road is None:
             return 1.0
-        length = max(road.length, 1.0)
-        speed = max(road.speed_car, 1.0)
-        congestion = road.congestion_proxy
-        time_factor = length / speed                # 越慢成本越高
-        comfort_factor = 1.0 + congestion * 1.5     # 壅塞降低舒適
-        congestion_factor = 1.0 + congestion * 2.0  # 直接反映壅塞（鏡像 GAML flow 加權）
-        cost = length * (
-            w_time * time_factor / 100.0
-            + w_distance * 1.0
-            + w_comfort * comfort_factor
-            + w_capacity * congestion_factor
-        )
-        # --- active_mode 路徑策略旗標 ---
-        if congestion_penalty:                       # 額外壅塞懲罰（avoid 用）
-            cost *= 1.0 + congestion_penalty * congestion
-        if congestion > avoid_threshold:             # 硬避開高壅塞邊（近乎封路）
-            cost *= _AVOID_MULTIPLIER
-        if road_class_bias:                          # 偏好幹道、懲罰小路（comfortable 用）
-            hw = road.highway.split(",")[0].strip().strip("[]'\" ")
-            if hw in _MAJOR_HIGHWAYS:
-                cost *= max(1e-3, 1.0 - road_class_bias)
-            elif hw in _MINOR_HIGHWAYS:
-                cost *= 1.0 + road_class_bias
-        if randomness:                               # 確定性微擾，分散車流
-            cost *= _edge_jitter(u, v, seed, salt, randomness)
-        if avoid_circles:                            # NL 介入：避讓區（圓）內的邊近乎封路
-            vx, vy = network.node_xy(v)
-            for cx, cy, r in avoid_circles:
-                if (vx - cx) ** 2 + (vy - cy) ** 2 <= r * r:
-                    cost *= _AVOID_MULTIPLIER
-                    break
-        return max(cost, 1e-3)
+        return _edge_cost(network, u, v, road, s, seed, avoid_circles)   # 與終點樹共用同一成本公式
 
     try:
         return list(nx.shortest_path(graph, source=origin_node, target=dest_node, weight=_weight))
@@ -144,20 +104,30 @@ def strategy_signature(s: dict[str, Any]) -> tuple:
     )
 
 
-def _static_edge_cost(road, u: str, v: str, s: dict[str, Any], seed: int) -> float:
-    """find_path 成本公式在 congestion=0 的靜態版（終點樹用）。
+def _edge_cost(network: RoadNetwork, u: str, v: str, road, s: dict[str, Any],
+               seed: int, avoid_circles=None) -> float:
+    """單邊成本公式：含「當前壅塞」(road.congestion_proxy) + active_mode 旗標 + jitter + avoid_circles。
 
-    與 find_path._weight 在 congestion=0 一致：comfort/congestion factor=1、congestion_penalty/
-    avoid_threshold 不作用；jitter 用「固定 salt」→ 每邊確定性、同 mode 的所有車一致（非 per-car）。
+    find_path 與終點樹**共用同一個公式** → 兩者等價(終點樹只是把 salt 固定成 ""＝不分車、無 per-car jitter)。
+    init 時各路段 congestion=0 → 自然退化成自由流成本。
     """
-    w_time = s.get("time", _DEFAULT_WEIGHTS["time"])
-    w_distance = s.get("distance", _DEFAULT_WEIGHTS["distance"])
-    w_comfort = s.get("comfort", _DEFAULT_WEIGHTS["comfort"])
-    w_capacity = s.get("capacity", _DEFAULT_WEIGHTS["capacity"])
     length = max(road.length, 1.0)
     speed = max(road.speed_car, 1.0)
+    congestion = road.congestion_proxy
     time_factor = length / speed
-    cost = length * (w_time * time_factor / 100.0 + w_distance + w_comfort + w_capacity)
+    comfort_factor = 1.0 + congestion * 1.5
+    congestion_factor = 1.0 + congestion * 2.0
+    cost = length * (
+        s.get("time", _DEFAULT_WEIGHTS["time"]) * time_factor / 100.0
+        + s.get("distance", _DEFAULT_WEIGHTS["distance"]) * 1.0
+        + s.get("comfort", _DEFAULT_WEIGHTS["comfort"]) * comfort_factor
+        + s.get("capacity", _DEFAULT_WEIGHTS["capacity"]) * congestion_factor
+    )
+    congestion_penalty = float(s.get("congestion_penalty", 0.0))
+    if congestion_penalty:
+        cost *= 1.0 + congestion_penalty * congestion
+    if congestion > float(s.get("avoid_threshold", 1.0)):
+        cost *= _AVOID_MULTIPLIER
     road_class_bias = float(s.get("road_class_bias", 0.0))
     if road_class_bias:
         hw = road.highway.split(",")[0].strip().strip("[]'\" ")
@@ -167,7 +137,13 @@ def _static_edge_cost(road, u: str, v: str, s: dict[str, Any], seed: int) -> flo
             cost *= 1.0 + road_class_bias
     randomness = float(s.get("randomness", 0.0))
     if randomness:
-        cost *= _edge_jitter(u, v, seed, "", randomness)
+        cost *= _edge_jitter(u, v, seed, str(s.get("salt", "")), randomness)
+    if avoid_circles:
+        vx, vy = network.node_xy(v)
+        for cx, cy, r in avoid_circles:
+            if (vx - cx) ** 2 + (vy - cy) ** 2 <= r * r:
+                cost *= _AVOID_MULTIPLIER
+                break
     return max(cost, 1e-3)
 
 
@@ -179,12 +155,14 @@ class DestinationTrees:
     每個起點沿前驅讀出路徑。無法到達回 ``[]``（呼叫端可退回逐車 find_path）。
     """
 
-    def __init__(self, network: RoadNetwork, strategy: dict[str, Any], seed: int = 0) -> None:
+    def __init__(self, network: RoadNetwork, strategy: dict[str, Any], seed: int = 0,
+                 avoid_circles=None) -> None:
         import numpy as np
         from scipy.sparse import csr_matrix
 
         self._idx = network._id_to_idx
         self._node_ids = network._node_ids
+        s = {**strategy, "salt": ""}   # 樹不分車：固定 salt → 去掉 per-car jitter
         n = len(self._node_ids)
         rows: list[int] = []
         cols: list[int] = []
@@ -196,7 +174,7 @@ class DestinationTrees:
                 continue
             rows.append(ui)
             cols.append(vi)
-            data.append(_static_edge_cost(road, u, v, strategy, seed))
+            data.append(_edge_cost(network, u, v, road, s, seed, avoid_circles))
         csr = csr_matrix(
             (np.asarray(data, dtype=float), (np.asarray(rows), np.asarray(cols))),
             shape=(n, n),

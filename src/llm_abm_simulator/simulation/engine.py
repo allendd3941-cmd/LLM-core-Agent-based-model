@@ -421,11 +421,8 @@ class SimulationEngine:
     # 終點樹 init 路由（城市尺度；達門檻才啟用，小規模/測試走原本逐車 find_path）
     # ------------------------------------------------------------------
     def _use_route_trees(self) -> bool:
-        """是否用終點樹 init 路由：車數達門檻、無 NL 避讓區、有真實路網時啟用。
-        小規模(< 門檻)走原本逐車 find_path → 行為/結果不變。會改結果故以門檻 gate。"""
-        threshold = config.SCALING_CONFIG.route_tree_min_agents
-        return (threshold > 0 and len(self.agents) >= threshold
-                and not self._avoid_circles and self.network is not None)
+        """是否用反向終點樹做路由（init + 中途重算）。route_trees=false → 退回逐車 find_path（對照/除錯）。"""
+        return config.SCALING_CONFIG.route_trees and self.network is not None
 
     def _town_rep_node(self, town_name: str) -> str | None:
         """行政區代表節點（形心最近節點；確定性、不抽 rng）。終點樹把背景車終點收斂到此 → 終點數＝區數。"""
@@ -439,41 +436,66 @@ class SimulationEngine:
         self._town_rep_cache[town_name] = node
         return node
 
-    def _place_routes_via_trees(self) -> None:
-        """終點樹 init 路由：背景車終點收斂到區代表節點；同 active_mode 共用一張靜態權重圖、
-        每個終點只算一次反向 Dijkstra；每車沿樹讀路徑。無法到達者退回逐車 find_path。
-        只在 ``_use_route_trees()`` 為真時呼叫。只改 init 路徑、不碰每步物理。"""
+    def _tree_routes(self, agents: list[VehicleAgent], avoid_circles=None) -> dict[str, list[str]]:
+        """對一批車用反向終點樹算「current_node→destination_node」路徑（含當前壅塞 + avoid_circles）。
+
+        同 active_mode 共用一張 CSR、每個終點一棵反向樹；惰性只建這批用到的 (mode, 終點)。回 {agent_id: path}。
+        樹找得到路 ⟺ 路存在（avoid_circles 是加權非刪邊），故不需 per-car 退回。
+        """
         from ..spatial import routing
-        # 背景車終點 → 區代表節點（收斂終點數；事件車維持球場終點）。
+        groups: dict[tuple, tuple[dict[str, Any], list[VehicleAgent]]] = {}
+        for a in agents:
+            strategy = a.routing_strategy()
+            groups.setdefault(routing.strategy_signature(strategy), (strategy, []))[1].append(a)
+        out: dict[str, list[str]] = {}
+        for _sig, (strategy, members) in groups.items():
+            trees = routing.DestinationTrees(self.network, strategy, self.cfg.seed,
+                                             avoid_circles=avoid_circles)
+            by_dest: dict[str, list[VehicleAgent]] = {}
+            for a in members:
+                by_dest.setdefault(a.destination_node, []).append(a)
+            for dest, das in by_dest.items():
+                paths = trees.paths_to(dest, [a.current_node for a in das])
+                for a in das:
+                    out[a.agent_id] = paths.get(a.current_node) or []
+        return out
+
+    def _place_routes_via_trees(self) -> None:
+        """終點樹 init 路由：背景車終點收斂到區代表節點；每車沿樹讀路徑。init 時 congestion=0、無 avoid_circles。"""
         for a in self.agents:
             if a.role == "ambient":
                 rep = self._town_rep_node(a.destination_town)
                 if rep is not None:
                     a.destination_node = rep
-        # 依 active_mode 策略簽章分組（同簽章共用一張 CSR）。
-        groups: dict[tuple, tuple[dict[str, Any], list[VehicleAgent]]] = {}
+        paths = self._tree_routes(self.agents, avoid_circles=None)
         for a in self.agents:
-            strategy = a.routing_strategy()
-            sig = routing.strategy_signature(strategy)
-            groups.setdefault(sig, (strategy, []))[1].append(a)
-        n_trees = 0
-        fallback = 0
-        for _sig, (strategy, members) in groups.items():
-            trees = routing.DestinationTrees(self.network, strategy, self.cfg.seed)
-            by_dest: dict[str, list[VehicleAgent]] = {}
-            for a in members:
-                by_dest.setdefault(a.destination_node, []).append(a)
-            for dest, dest_agents in by_dest.items():
-                paths = trees.paths_to(dest, [a.current_node for a in dest_agents])
-                n_trees += 1
-                for a in dest_agents:
-                    path = paths.get(a.current_node) or []
-                    if len(path) <= 1 and a.current_node != a.destination_node:
-                        path = self._route(a.current_node, a.destination_node, a.routing_strategy())
-                        fallback += 1
-                    self._finalize_agent_route(a, path)
-        logger.info("終點樹 init 路由：%d 台車、%d 棵樹（%d 種 mode）、%d 台退回逐車",
-                    len(self.agents), n_trees, len(groups), fallback)
+            self._finalize_agent_route(a, paths.get(a.agent_id) or [])
+        logger.info("終點樹 init 路由：%d 台車", len(self.agents))
+
+    def _reroute_via_trees(self, cycle: int) -> None:
+        """中途壅塞重算（批次、走樹）：挑「crowded + recompute_on_crowded + 過 reroute cooldown」的車，
+        用「當前壅塞 + avoid_circles」權重的反向樹讀新路徑，取代逐車 networkx。事件+背景一視同仁。"""
+        sc = config.SCALING_CONFIG
+        cool = max(1, round(sc.reroute_cooldown_minutes / max(1, self.cfg.step_minutes)))
+        cands = [
+            a for a in self.agents
+            if not a.waiting_for_origin
+            and a.route_status == RouteStatus.MOVING
+            and a.is_crowded and a.recompute_on_crowded
+            and a.current_node and a.destination_node
+            and (cycle - a.last_reroute_cycle) >= cool
+        ]
+        if not cands:
+            return
+        with self._profiler.phase("reroute"):
+            paths = self._tree_routes(cands, avoid_circles=self._avoid_circles or None)
+        for a in cands:
+            p = paths.get(a.agent_id) or []
+            if len(p) > 1:
+                a.current_path, a.path_index, a.edge_progress = p, 0, 0.0
+                a.selected_action = "goto_destination_recompute_path"
+            a.last_reroute_cycle = cycle
+        self._profiler.count("reroute_n", len(cands))
 
     # ==================================================================
     # 散場（egress）：居住地指派 / 階段推進
@@ -689,10 +711,16 @@ class SimulationEngine:
         # 3. 感知速度 + 移動（壅塞時重算路徑）；尚未進場的車不動；背景車抵達即以新 OD 重生
         with prof.phase("move"):
             self._step_entered_edges = {}   # 本步從頭收集每台車走過的邊（_advance_along_path 填）
+            # 先算全部車的速度 + is_crowded（reroute 批次需要先知道誰塞）
+            for agent in self.agents:
+                if not agent.waiting_for_origin:
+                    self._perceive_speed(agent)
+            # 批次重算（走樹）：route_trees 開時在這裡一次處理所有 crowded 車；_move_agent 不再逐車重算
+            if self._use_route_trees():
+                self._reroute_via_trees(cycle)
             for agent in self.agents:
                 if agent.waiting_for_origin:
                     continue
-                self._perceive_speed(agent)
                 self._move_agent(agent)
             self._respawn_arrived_ambient()
 
@@ -866,6 +894,7 @@ class SimulationEngine:
     def _triggered_agents(self, cycle: int, agents: list[VehicleAgent]) -> list[VehicleAgent]:
         """回傳本步「需要重決」的 agent：壅塞訊號上升緣 + 過了 cooldown（只在傳入的事件車中找）。"""
         sc = config.SCALING_CONFIG
+        cool = max(1, round(sc.cooldown_minutes / max(1, self.cfg.step_minutes)))  # 分鐘→週期
         thr = self.cfg.crowded_road_threshold
         out: list[VehicleAgent] = []
         for a in agents:
@@ -878,7 +907,7 @@ class SimulationEngine:
             signal = (a.congestion_proxy >= thr) or (a.road_ahead not in ("", agent_mod.AHEAD_CLEAR))
             if signal and not a._prev_congestion_signal and cycle >= a._decision_cooldown_until:
                 out.append(a)
-                a._decision_cooldown_until = cycle + sc.cooldown_steps
+                a._decision_cooldown_until = cycle + cool
             a._prev_congestion_signal = signal
         return out
 
@@ -985,8 +1014,10 @@ class SimulationEngine:
             return
         agent.waiting_at_signal = False   # 每步先清，_advance_along_path 停在紅燈時才設 True
 
-        # 壅塞 → 重算路徑（避開壅塞）；tolerate_congestion 的 recompute_on_crowded=False 不重算
-        if agent.is_crowded and agent.recompute_on_crowded and agent.current_node and agent.destination_node:
+        # 壅塞 → 重算路徑（避開壅塞）。route_trees 開時已由 _reroute_via_trees 批次處理 → 這裡跳過逐車；
+        # 只有 route_trees=false（對照/除錯）才走逐車 networkx 重算。tolerate_congestion 的 recompute_on_crowded=False 不重算。
+        if (not config.SCALING_CONFIG.route_trees and agent.is_crowded and agent.recompute_on_crowded
+                and agent.current_node and agent.destination_node):
             _prof = self._profiler
             _t0 = time.perf_counter() if _prof.enabled else 0.0
             new_path = self._route(agent.current_node, agent.destination_node, agent.routing_strategy())

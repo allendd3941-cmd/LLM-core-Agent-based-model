@@ -156,16 +156,17 @@ pool_size = 500                 # persona 原型數上限（建議數百；車�
 # 詳見 docs/SCALING_zh-TW.md。
 [scaling]
 event_triggered_decisions = true   # 關閉＝退回「每步對全部 agent 決策」舊行為
-cooldown_steps = 5                 # 同車觸發後幾步內不重複觸發
+cooldown_minutes = 10              # LLM 決策 cooldown：同車幾「模擬分鐘」內不重決（與 step_minutes 無關）
+reroute_cooldown_minutes = 10      # 重算路徑 cooldown：同車幾「模擬分鐘」內不重算路徑
 batch_size = 30                    # 每批最多幾個 agent（上限；實際會被 [llm_budget] 的 token 預算再壓低）
 concurrency = 64                    # 同時並行幾批
 # ----- 引擎初始化效能（皆不改模擬結果；可關閉以對拍驗證）-----
 cache_network = true               # 跨連線/重設快取已解析的 graphml 圖+節點索引（省 24MB 重解析）
 init_workers = 16                   # init 路由並行程序數（0/1=單程序；>1 才開 multiprocessing。Linux 受益最大）
 parallel_init_min_agents = 200     # 車數達此門檻才啟用並行 init（量少時 pool 啟動成本不划算）
-route_tree_min_agents = 5000        # 車數達此門檻改用「終點樹」init 路由（城市尺度秒級；0=停用）。
-# ⚠ 終點樹「會改結果」：同 mode+終點走相同自由流路徑(無 per-car jitter)、背景車終點收斂到區代表節點；
-#   小規模(<門檻)走原本逐車最短路、行為不變。城市尺度(數萬車)用它把 init 從數十分鐘降到秒級。
+route_trees = true                  # 用「反向終點樹」做路由（init + 中途重算）；false=退回逐車 find_path（對照/除錯）。
+# ⚠ 終點樹「會改結果」：同 mode+終點走相同(當前壅塞下)最短路(無 per-car jitter)、背景車終點收斂到區代表節點；
+#   含當前壅塞 + avoid_circles 權重,與 find_path 等價(只差 jitter)。把每步重算從上萬次 networkx 降到數十棵樹。
 profile_steps = true                # 每步分段計時：印一行 decide/move(reroute)/flow/perceive/detect/snap 耗時。純量測、不改結果。
 
 # ----- LLM token 預算（依預算動態切批，避免 prompt 溢位 vLLM context）-----

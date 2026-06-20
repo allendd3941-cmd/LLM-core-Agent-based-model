@@ -193,6 +193,7 @@ class VehicleAgent:
     selected_action: str = "none"
     decision_reason: str = ""            # LLM/mock 選擇此 active_mode 的原因（前端顯示）
     last_decision_cycle: int | None = None  # 上次「重新決策」的週期（前端 inspect / 決策日誌用）
+    last_reroute_cycle: int = -(10**9)      # 上次「重算路徑」的週期（reroute cooldown 用；預設極小＝首次必可重算）
 
     # === 送 LLM 的環境感知質性標籤（由 engine 每步算好填入；詳見 docs/ENVIRONMENT_zh-TW.md）===
     traffic_here: str = ""               # 腳下壅塞感（順暢/普通/壅塞）
