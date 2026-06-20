@@ -210,6 +210,9 @@ class ScalingConfig:
     cache_network: bool = True               # 跨連線/重設快取已解析的 graphml 圖+節點索引（不改結果，省 24MB 重解析）
     init_workers: int = 0                    # init 路由並行程序數（0/1＝單程序；>1 才開 multiprocessing，不改結果）
     parallel_init_min_agents: int = 200      # 車數達此門檻才啟用並行 init（量少時 pool 啟動成本不划算）
+    route_tree_min_agents: int = 5000        # 車數達此門檻才用「終點樹」init 路由（城市尺度秒級；0＝停用）。
+    # 終點樹會改結果：同 mode+終點走相同自由流路徑(無 per-car jitter)、背景車終點收斂到區代表節點。
+    # 小規模(測試/demo<門檻)走原本逐車 find_path → 行為與結果不變。
 
 
 @dataclass(frozen=True)
@@ -463,6 +466,8 @@ def _build_scaling_config(raw: dict[str, Any]) -> ScalingConfig:
         raise ValueError("設定檔 [scaling]：cooldown_steps≥0、batch_size≥1、concurrency≥1")
     if sc.init_workers < 0 or sc.parallel_init_min_agents < 1:
         raise ValueError("設定檔 [scaling]：init_workers≥0、parallel_init_min_agents≥1")
+    if sc.route_tree_min_agents < 0:
+        raise ValueError("設定檔 [scaling]：route_tree_min_agents 不可為負（0＝停用終點樹路由）")
     return sc
 
 

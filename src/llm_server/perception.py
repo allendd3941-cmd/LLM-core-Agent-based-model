@@ -66,6 +66,19 @@ def global_situation_text(perception_text: str) -> str:
     return (rest if nxt == -1 else rest[:nxt]).strip()
 
 
+def agents_situation_text(perception_text: str) -> str:
+    """從環境感知文字抽出【各車當前狀況】區塊（不含全域路況）。
+
+    與 global_situation_text 互補：decision prompt 把「每步相同的全域路況」放到共用前綴、
+    「每批不同的各車狀況」放後面，提高 vLLM prefix cache 命中率。找不到區塊時回整段（保底）。
+    """
+    text = perception_text or ""
+    start = text.find("【各車當前狀況】")
+    if start == -1:
+        return text.strip()
+    return text[start:].strip()
+
+
 def run_perception(gama_body, output: bool = False) -> str:
     """把 step payload（{environment, agents_status}）確定性組成環境感知文字。"""
     global count

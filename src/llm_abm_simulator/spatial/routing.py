@@ -123,3 +123,128 @@ def path_length_m(network: RoadNetwork, path: list[str]) -> float:
         road = network.road_between(a, b)
         total += road.length if road else 0.0
     return total
+
+
+# ---------------------------------------------------------------------------
+# 終點樹路由（城市尺度 init 用）：同一 active_mode 用一張靜態權重圖，對每個終點只算一次
+# 反向 Dijkstra（scipy C 層），每車沿前驅讀路徑 → 取代逐車 networkx 搜尋。
+# 語意：同 mode+終點的車走相同路徑（無 per-car jitter）；congestion=0 時與 find_path 等價（salt 除外）。
+# ---------------------------------------------------------------------------
+def strategy_signature(s: dict[str, Any]) -> tuple:
+    """同一 active_mode 的策略簽章（不含 per-agent salt）——終點樹分組用。"""
+    return (
+        s.get("time", _DEFAULT_WEIGHTS["time"]),
+        s.get("distance", _DEFAULT_WEIGHTS["distance"]),
+        s.get("comfort", _DEFAULT_WEIGHTS["comfort"]),
+        s.get("capacity", _DEFAULT_WEIGHTS["capacity"]),
+        float(s.get("congestion_penalty", 0.0)),
+        float(s.get("avoid_threshold", 1.0)),
+        float(s.get("road_class_bias", 0.0)),
+        float(s.get("randomness", 0.0)),
+    )
+
+
+def _static_edge_cost(road, u: str, v: str, s: dict[str, Any], seed: int) -> float:
+    """find_path 成本公式在 congestion=0 的靜態版（終點樹用）。
+
+    與 find_path._weight 在 congestion=0 一致：comfort/congestion factor=1、congestion_penalty/
+    avoid_threshold 不作用；jitter 用「固定 salt」→ 每邊確定性、同 mode 的所有車一致（非 per-car）。
+    """
+    w_time = s.get("time", _DEFAULT_WEIGHTS["time"])
+    w_distance = s.get("distance", _DEFAULT_WEIGHTS["distance"])
+    w_comfort = s.get("comfort", _DEFAULT_WEIGHTS["comfort"])
+    w_capacity = s.get("capacity", _DEFAULT_WEIGHTS["capacity"])
+    length = max(road.length, 1.0)
+    speed = max(road.speed_car, 1.0)
+    time_factor = length / speed
+    cost = length * (w_time * time_factor / 100.0 + w_distance + w_comfort + w_capacity)
+    road_class_bias = float(s.get("road_class_bias", 0.0))
+    if road_class_bias:
+        hw = road.highway.split(",")[0].strip().strip("[]'\" ")
+        if hw in _MAJOR_HIGHWAYS:
+            cost *= max(1e-3, 1.0 - road_class_bias)
+        elif hw in _MINOR_HIGHWAYS:
+            cost *= 1.0 + road_class_bias
+    randomness = float(s.get("randomness", 0.0))
+    if randomness:
+        cost *= _edge_jitter(u, v, seed, "", randomness)
+    return max(cost, 1e-3)
+
+
+class DestinationTrees:
+    """某 active_mode 的反向最短路樹群：建一次靜態權重 CSR，對多個終點重用。
+
+    用法：``DestinationTrees(net, strategy, seed).paths_to(dest, origins)``。
+    對每個終點在「轉置圖」上以終點為源跑一次 ``scipy.csgraph.dijkstra``（得到「各點→終點」的樹），
+    每個起點沿前驅讀出路徑。無法到達回 ``[]``（呼叫端可退回逐車 find_path）。
+    """
+
+    def __init__(self, network: RoadNetwork, strategy: dict[str, Any], seed: int = 0) -> None:
+        import numpy as np
+        from scipy.sparse import csr_matrix
+
+        self._idx = network._id_to_idx
+        self._node_ids = network._node_ids
+        n = len(self._node_ids)
+        rows: list[int] = []
+        cols: list[int] = []
+        data: list[float] = []
+        for (u, v), road in network.roads.items():
+            ui = self._idx.get(u)
+            vi = self._idx.get(v)
+            if ui is None or vi is None:
+                continue
+            rows.append(ui)
+            cols.append(vi)
+            data.append(_static_edge_cost(road, u, v, strategy, seed))
+        csr = csr_matrix(
+            (np.asarray(data, dtype=float), (np.asarray(rows), np.asarray(cols))),
+            shape=(n, n),
+        )
+        # 轉置：之後以「終點為源」跑 → 得到每個節點「到該終點」的最短路樹。
+        self._csr_t = csr.T.tocsr()
+        self._pred_cache: dict[int, Any] = {}
+
+    def _predecessors(self, dest_idx: int):
+        from scipy.sparse.csgraph import dijkstra
+
+        pred = self._pred_cache.get(dest_idx)
+        if pred is None:
+            _, pred = dijkstra(self._csr_t, directed=True, indices=dest_idx,
+                               return_predecessors=True)
+            self._pred_cache[dest_idx] = pred
+        return pred
+
+    def paths_to(self, dest_node: str, origins) -> dict[str, list[str]]:
+        """回 ``{origin: [origin..dest]}``；終點/起點不在圖內或無法到達 → 該 origin 為 ``[]``。"""
+        d = self._idx.get(dest_node)
+        if d is None:
+            return {o: [] for o in set(origins)}
+        pred = self._predecessors(d)
+        out: dict[str, list[str]] = {}
+        lim = len(self._node_ids) + 1
+        for o in set(origins):
+            oi = self._idx.get(o)
+            if oi is None:
+                out[o] = []
+                continue
+            if oi == d:
+                out[o] = [o]
+                continue
+            path = [o]
+            cur = oi
+            ok = True
+            guard = 0
+            while cur != d:
+                p = int(pred[cur])
+                if p < 0:                     # 無法到達
+                    ok = False
+                    break
+                cur = p
+                path.append(self._node_ids[cur])
+                guard += 1
+                if guard > lim:               # 防護（理論上不會發生）
+                    ok = False
+                    break
+            out[o] = path if ok else []
+        return out

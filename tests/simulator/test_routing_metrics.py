@@ -43,6 +43,41 @@ def test_path_length_positive():
     assert routing.path_length_m(net, path) > 0
 
 
+def _path_cost(net, path, strategy, seed=0):
+    total = 0.0
+    for a, b in zip(path, path[1:]):
+        road = net.road_between(a, b)
+        assert road is not None, f"邊不存在: {a}->{b}"
+        total += routing._static_edge_cost(road, a, b, strategy, seed)
+    return total
+
+
+def test_destination_tree_matches_find_path():
+    """終點樹路徑：connected 到終點，且 randomness=0 時與 find_path 同為最小成本路徑。"""
+    net = _synthetic_network()
+    nodes = list(net.graph.nodes())
+    strategy = {"time": 0.45, "distance": 0.25, "comfort": 0.20, "capacity": 0.10, "randomness": 0.0}
+    dest = nodes[-1]
+    origins = [nodes[0], nodes[1], nodes[2]]
+    trees = routing.DestinationTrees(net, strategy, seed=42)
+    paths = trees.paths_to(dest, origins)
+    for o in origins:
+        tp = paths[o]
+        fp = routing.find_path(net, o, dest, strategy, seed=42)
+        assert tp and tp[0] == o and tp[-1] == dest        # 樹路徑連通到終點
+        assert fp and fp[0] == o and fp[-1] == dest
+        assert abs(_path_cost(net, tp, strategy) - _path_cost(net, fp, strategy)) < 1e-6
+
+
+def test_destination_tree_edge_cases():
+    net = _synthetic_network()
+    nodes = list(net.graph.nodes())
+    trees = routing.DestinationTrees(net, {"randomness": 0.0}, seed=0)
+    assert trees.paths_to(nodes[0], [nodes[0]])[nodes[0]] == [nodes[0]]   # 起點＝終點
+    assert trees.paths_to("nope", [nodes[0]])[nodes[0]] == []             # 終點不在圖內
+    assert trees.paths_to(nodes[0], ["nope"])["nope"] == []              # 起點不在圖內
+
+
 def test_overall_environment_counts():
     net = _synthetic_network()
     roads = net.all_roads()

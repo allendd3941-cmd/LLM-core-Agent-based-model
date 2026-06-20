@@ -71,7 +71,9 @@ class SimulationSession:
     async def handle(self) -> None:
         await self.ws.accept()
         await self.status("正在載入 GIS 資料與路網…")
-        await asyncio.to_thread(self.engine.initialize)
+        # init 在大規模(數萬車逐車路由)可能很久；放背景執行緒跑、同時每隔幾秒送 keepalive 進度，
+        # 避免長時間無資料流動被瀏覽器/代理 idle timeout 斷線。
+        await self._initialize_with_keepalive()
         await self.send(self.engine.init_payload())
         await self.status("初始化完成，可開始模擬。")
 
@@ -82,8 +84,23 @@ class SimulationSession:
                     await self._on_control(data.get("action", ""), data.get("value"))
         except WebSocketDisconnect:
             logger.info("WebSocket 連線結束")
+        except RuntimeError as e:
+            # 連線已關（如長操作後 client/proxy 斷線）→ receive_json 會丟 RuntimeError；安靜收尾不噴 traceback
+            logger.info("WebSocket 已關閉，結束本連線：%s", e)
         finally:
             await self._stop_run_task()
+
+    async def _initialize_with_keepalive(self, interval_s: float = 3.0) -> None:
+        """背景跑 engine.initialize，同時定期送進度，維持連線存活。init 內的例外照常往上拋。"""
+        init_task = asyncio.create_task(asyncio.to_thread(self.engine.initialize))
+        elapsed = 0.0
+        while not init_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(init_task), timeout=interval_s)
+            except asyncio.TimeoutError:
+                elapsed += interval_s
+                await self.status(f"初始化中…（已 {int(elapsed)} 秒；大規模路網/車流首次計算較久）")
+        await init_task   # 取結果並讓 init 內的例外正常傳遞
 
     # ------------------------------------------------------------------
     async def _on_control(self, action: str, value: Any) -> None:

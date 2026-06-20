@@ -41,8 +41,11 @@ uv pip install --python .vllm-env vllm ninja   # ninja 給 FlashInfer 取樣 ker
 # activate 後 .vllm-env/bin 才進 PATH（vllm 與 ninja 都才找得到）
 source .vllm-env/bin/activate
 vllm serve <HF模型> \
-  --port 8001 --max-model-len 8192 \
-  --gpu-memory-utilization 0.9 --max-num-seqs 64
+  --port 8001 \
+  --max-model-len 8192 \
+  --gpu-memory-utilization 0.95 \
+  --max-num-seqs 64 \
+  --enable-prefix-caching
 ```
 > ⚠️ **不要用 `uv run --python .vllm-env vllm serve`**：在專案目錄裡 `uv run` 是「專案感知」的，會去
 > 動/重建專案自己的 `.venv`（裡面沒有 vllm/ninja）而非用 `.vllm-env`，導致 `Failed to spawn: vllm`。
@@ -52,11 +55,32 @@ vllm serve <HF模型> \
 > JIT 還需要 `nvcc`（CUDA toolkit）；若補完 ninja 又報缺 nvcc，可改用**不編譯**的後備：
 > `VLLM_USE_FLASHINFER_SAMPLER=0 vllm serve …`（改用 PyTorch 原生取樣，免 ninja/nvcc，最省事）。
 > `--max-num-seqs` 是真並行度上限；`--max-model-len` 設小可留更多 VRAM 給並行。模型用 HF 格式（非 GGUF）。
+> **`--enable-prefix-caching`**：重用「跨請求共用的 prompt 前綴」KV，城市尺度（同步上千個共用前綴的決策請求）可省大量 prefill；
+> ✅ **已實作（Option A）**：決策 prompt 已把「每步都一樣的全域路況」移到 system＋template 之後當共用前綴
+> （`decision_making.py`：`global_situation_text` 放前、per-batch RAG 與各車狀況放後）→ 整步所有批共用此前綴、可被快取。
+> 要再往上拉命中率：縮短各車狀況/persona、或把 RAG 也改每步一次（Option B）——這些會改 LLM 行為，建議先用 `calibrate.py` 量再決定。
+> 若前綴快取命中率偏低（如僅 ~20%），多半是 prompt 把每批/每車變動內容放太前面、或 KV 太小被逐出 → 拉高 `--gpu-memory-utilization`（0.9→0.95）給 KV 更多空間。
+> **與專案對齊**：server `--max-model-len` 要 ≥ `config/simulation.toml [llm_budget].max_model_len`；`--max-num-seqs` 要 ≥ `[scaling].concurrency`。
 > 很新的 GPU（如 RTX 5090 / Blackwell, sm_120）需較新的 vllm + CUDA 12.8+ 的 torch；若見 `no kernel image`/
 > `sm_120 not supported` 即為版本太舊，需升級 vllm/torch。
 > vLLM 是現成的高吞吐推論伺服器，**不是本專案的研究貢獻**；貢獻在「應用層的事件觸發 + 並行批次整合」。
 
 ---
+
+## 1.5 城市尺度 init 路由 + 連線存活（✅ 已實作）
+
+**終點樹 init 路由**（`[scaling].route_tree_min_agents`，預設 5000；0＝停用）：
+車數達門檻時,init 不再逐車跑 `networkx.shortest_path`,改用 **scipy `csgraph.dijkstra` 反向最短路樹**:
+同一 active_mode 共用一張靜態權重圖(congestion=0),每個終點只算一次反向樹,每車沿前驅讀路徑。
+事件車全去球場(1 終點)、背景車終點收斂到**區代表節點**(形心最近節點,~區數個終點)。
+→ 數萬車 init 從數十分鐘降到秒~分鐘級(見 `spatial/routing.py` `DestinationTrees`、`engine._place_routes_via_trees`)。
+- **會改結果**:同 mode+終點的車走相同自由流路徑(無 per-car jitter;車流分散改由壅塞重算補回);
+  背景車去區代表節點而非區內隨機點。**小規模(<門檻)走原本逐車最短路,行為/結果不變、測試不需重建基準。**
+- 路由是 CPU(非 GPU)工作;5090 對 init 沒幫助,靠演算法(樹)或多核平行(`init_workers`)。
+- 中途壅塞重算、背景車抵達重生仍走逐車 `find_path`(只算被觸發/抵達的車)。
+
+**WebSocket init keepalive**(`web/websocket.py`)：`initialize` 放背景執行緒跑、每隔幾秒送進度,
+避免長 init(無資料流動)被瀏覽器/代理 idle timeout 斷線;並接住斷線後的 `RuntimeError`,安靜收尾不噴 traceback。
 
 ## 2. 事件觸發決策（✅ 已實作）
 

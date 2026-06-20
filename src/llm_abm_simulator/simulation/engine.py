@@ -137,6 +137,7 @@ class SimulationEngine:
         # 規模化：節點→行政區索引、鄰近空間網格、前端可視範圍
         self._town_nodes: dict[str, list[str]] = {}       # 區名 → 覆蓋它的節點清單（init 一次性建，放置 O(1)）
         self._node_town: dict[str, str] = {}              # 節點 → 所屬區（同一索引反向；current_town O(1)）
+        self._town_rep_cache: dict[str, str | None] = {}  # 區名 → 代表節點（終點樹路由：背景車終點收斂到此）
         self._nearby_grid: dict[tuple[int, int], int] | None = None  # 每步重建的鄰近計數網格
         self._nearby_cell: float = 1.0
         self._view: dict[str, float] | None = None        # 前端回報的可視範圍（公尺框 + zoom）；大規模裁切用
@@ -385,6 +386,9 @@ class SimulationEngine:
         路徑運算（無 rng、純函式）可選擇用 multiprocessing 並行（[scaling].init_workers）。"""
         for agent in self.agents:
             self._place_agent_setup(agent)
+        if self._use_route_trees():
+            self._place_routes_via_trees()
+            return
         tasks = [(a.current_node, a.destination_node, a.routing_strategy()) for a in self.agents]
         paths = self._compute_init_routes(tasks)
         for agent, path in zip(self.agents, paths):
@@ -409,6 +413,64 @@ class SimulationEngine:
         except Exception as e:  # noqa: BLE001  並行失敗一律安全退回單程序
             logger.warning("並行 init 路由失敗（%s），改用單程序", e)
             return seq()
+
+    # ------------------------------------------------------------------
+    # 終點樹 init 路由（城市尺度；達門檻才啟用，小規模/測試走原本逐車 find_path）
+    # ------------------------------------------------------------------
+    def _use_route_trees(self) -> bool:
+        """是否用終點樹 init 路由：車數達門檻、無 NL 避讓區、有真實路網時啟用。
+        小規模(< 門檻)走原本逐車 find_path → 行為/結果不變。會改結果故以門檻 gate。"""
+        threshold = config.SCALING_CONFIG.route_tree_min_agents
+        return (threshold > 0 and len(self.agents) >= threshold
+                and not self._avoid_circles and self.network is not None)
+
+    def _town_rep_node(self, town_name: str) -> str | None:
+        """行政區代表節點（形心最近節點；確定性、不抽 rng）。終點樹把背景車終點收斂到此 → 終點數＝區數。"""
+        rep = self._town_rep_cache.get(town_name, "__miss__")
+        if rep != "__miss__":
+            return rep
+        t = self._town_by_name(town_name)
+        node: str | None = None
+        if t is not None and t.centroid_metric is not None and self.network is not None:
+            node = self.network.nearest_node(t.centroid_metric.x, t.centroid_metric.y)
+        self._town_rep_cache[town_name] = node
+        return node
+
+    def _place_routes_via_trees(self) -> None:
+        """終點樹 init 路由：背景車終點收斂到區代表節點；同 active_mode 共用一張靜態權重圖、
+        每個終點只算一次反向 Dijkstra；每車沿樹讀路徑。無法到達者退回逐車 find_path。
+        只在 ``_use_route_trees()`` 為真時呼叫。只改 init 路徑、不碰每步物理。"""
+        from ..spatial import routing
+        # 背景車終點 → 區代表節點（收斂終點數；事件車維持球場終點）。
+        for a in self.agents:
+            if a.role == "ambient":
+                rep = self._town_rep_node(a.destination_town)
+                if rep is not None:
+                    a.destination_node = rep
+        # 依 active_mode 策略簽章分組（同簽章共用一張 CSR）。
+        groups: dict[tuple, tuple[dict[str, Any], list[VehicleAgent]]] = {}
+        for a in self.agents:
+            strategy = a.routing_strategy()
+            sig = routing.strategy_signature(strategy)
+            groups.setdefault(sig, (strategy, []))[1].append(a)
+        n_trees = 0
+        fallback = 0
+        for _sig, (strategy, members) in groups.items():
+            trees = routing.DestinationTrees(self.network, strategy, self.cfg.seed)
+            by_dest: dict[str, list[VehicleAgent]] = {}
+            for a in members:
+                by_dest.setdefault(a.destination_node, []).append(a)
+            for dest, dest_agents in by_dest.items():
+                paths = trees.paths_to(dest, [a.current_node for a in dest_agents])
+                n_trees += 1
+                for a in dest_agents:
+                    path = paths.get(a.current_node) or []
+                    if len(path) <= 1 and a.current_node != a.destination_node:
+                        path = self._route(a.current_node, a.destination_node, a.routing_strategy())
+                        fallback += 1
+                    self._finalize_agent_route(a, path)
+        logger.info("終點樹 init 路由：%d 台車、%d 棵樹（%d 種 mode）、%d 台退回逐車",
+                    len(self.agents), n_trees, len(groups), fallback)
 
     # ==================================================================
     # 散場（egress）：居住地指派 / 階段推進

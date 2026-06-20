@@ -5,7 +5,7 @@ from . import prompt_store
 from . import rag_store
 from . import rag_query
 from .agent_profile import run_agent_profile
-from .perception import run_perception
+from .perception import run_perception, global_situation_text, agents_situation_text
 from .output_engine import output_process
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -80,8 +80,14 @@ def run_decision_making(agent_profile_data, perception_data, output: bool= False
         if chunks:
             rag_ctx = "【參考知識（RAG，請在合理時納入考量）】\n" + "\n---\n".join(chunks) + "\n\n"
 
+    # Option A 前綴快取：把「每步都相同」的全域路況放到最前面（system＋template＋全域路況＝共用前綴，
+    # 整步所有批 byte 相同 → vLLM prefix cache 命中）；每批不同的 RAG 與各車狀況放後面。
+    # RAG 仍維持 per-batch 多重查詢（不變），只是位置移到全域路況之後，不再擋住全域路況被快取。
+    global_block = global_situation_text(perception_data)
+    agents_block = agents_situation_text(perception_data)
     user_prompt = f'''{prompt_store.get("decision_making")} \n
-    {rag_ctx}{perception_data}\n
+    {global_block}\n
+    {rag_ctx}{agents_block}\n
     "agent profile資料"如下:\n
     {agent_profile_data}
     '''
