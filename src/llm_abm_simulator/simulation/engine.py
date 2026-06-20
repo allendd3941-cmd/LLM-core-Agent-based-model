@@ -1263,18 +1263,21 @@ class SimulationEngine:
         return (lat, lng)
 
     def _queue_layout_positions(self) -> dict[str, tuple[float, float]]:
-        """A 方案：等紅燈排隊的「顯示座標」——沿進場道往後依車距(~7m)錯開。
+        """排隊顯示的「顯示座標」——把停在節點上會疊成一點的車，沿其進場道往上游依車距(~7m)錯開。
 
-        只改快照顯示經緯度、不動 agent.x/y 與任何物理量（距離/鄰近/抵達/流量/熱點皆不受影響）。
+        涵蓋所有「停在節點」的車：等紅燈、已抵達、塞在路口都算（edge_progress==0＝人在節點上）。
+        移動中的車在邊上各有位置（edge_progress>0）、本就不會疊，故不動。
+        只改快照顯示經緯度、不動 agent.x/y 與任何物理量（距離/鄰近/抵達/流量/熱點/偵測器計數皆不受影響）。
         隊首在停止線(節點)、其後每台往上游錯開；超過路段長則封頂在上游端。依 agent_id 排序→確定性。
-        底層仍是 point-queue 中觀模型,此處隊長為視覺示意(非物理 spillback)。可由 [ui].queue_render 關閉。
+        底層仍是 point-queue 中觀模型，此處隊長為視覺示意(非物理 spillback)。可由 [ui].queue_render 關閉。
         """
         if not config.UI_CONFIG.queue_render or self.network is None:
             return {}
         SPACING = 7.0   # 公尺：塞車時車距(jam spacing)
         groups: dict[tuple[str, str], list[VehicleAgent]] = {}
         for a in self.agents:
-            if not a.waiting_at_signal:        # 只排「真的停等紅燈」的車（不動移動中的車）
+            # 尚未進場 / 還在邊上移動（edge_progress>0，各有位置不疊點）→ 不排
+            if a.waiting_for_origin or a.edge_progress > 0.0:
                 continue
             path = a.current_path
             i = a.path_index

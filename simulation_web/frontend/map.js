@@ -376,23 +376,26 @@ const TrafficMap = (() => {
     return "moving";
   }
 
-  // 把座標相同的 agent 散開成小圈（spiderfy），避免疊成一點。只動顯示座標，真實資料不變。
+  // 把座標相同的 agent 排成整齊的方格列（排排站），避免疊成一點。只動顯示座標，真實資料不變。
+  // 後端已把停在節點的車沿馬路排隊；這裡只是後備，處理少數仍落在同一點的車（不再排成圓圈）。
   function spreadPositions(agents) {
     const groups = {};
     agents.forEach((a) => {
       const key = a.lat.toFixed(5) + "," + a.lng.toFixed(5);
       (groups[key] = groups[key] || []).push(a);
     });
-    const R = 0.00013; // 約 14 公尺
+    const SP = 0.00008; // 約 9 公尺：每台間距
     const pos = {};
     Object.values(groups).forEach((list) => {
       if (list.length === 1) {
         pos[list[0].agent_id] = [list[0].lat, list[0].lng];
         return;
       }
+      list.sort((p, q) => String(p.agent_id).localeCompare(String(q.agent_id))); // 確定性、不跳動
+      const perRow = Math.max(1, Math.ceil(Math.sqrt(list.length)));   // 排成近正方的列陣
       list.forEach((a, i) => {
-        const ang = (2 * Math.PI * i) / list.length;
-        pos[a.agent_id] = [a.lat + R * Math.sin(ang), a.lng + R * Math.cos(ang)];
+        const r = Math.floor(i / perRow), c = i % perRow;
+        pos[a.agent_id] = [a.lat - SP * r, a.lng + SP * c];
       });
     });
     return pos;
