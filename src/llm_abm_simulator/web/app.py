@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sys
 
@@ -27,15 +28,20 @@ from .websocket import SimulationSession
 logger = logging.getLogger(__name__)
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    """為本專案 logger 設一個乾淨、有時間戳的 console handler。
+def configure_logging(level: int | None = None) -> None:
+    """為本專案 logger 設一個乾淨、有時間戳、帶連線 id 的 console handler。
 
-    uvicorn 預設不會顯示 app logger 的 INFO，且 pipeline 原本用 print 在併發批次下會交錯亂印。
-    這裡給 ``llm_abm_simulator`` 與 ``llm_server`` 各掛一個格式化 handler、關掉 propagate（不重複），
-    讓「運行中狀態」乾淨呈現：每步決策摘要走 INFO、單次 LLM 呼叫走 DEBUG、卡住的呼叫走 WARNING。
+    層級由 ``LOG_LEVEL`` 環境變數決定（預設 INFO）。格式帶 ``[sess xxxx]``（連線 id，多連線不交錯）。
+    給 ``llm_abm_simulator`` 與 ``llm_server`` 各掛此 handler、關掉 propagate（不重複）。
+    層級慣例：每步摘要 / LLM 進度走 INFO、單呼叫細節走 DEBUG、可復原異常走 WARNING、失敗走 ERROR。
+    落檔交給 shell 重導向（見 docs），程式本身只輸出 stdout。
     """
+    from .logctx import SessionIdFilter
+    if level is None:
+        level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s][sess %(sid)s] %(message)s", "%H:%M:%S"))
+    handler.addFilter(SessionIdFilter())   # 注入 record.sid 供 %(sid)s 使用
     for name in ("llm_abm_simulator", "llm_server"):
         lg = logging.getLogger(name)
         lg.handlers = [handler]

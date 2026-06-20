@@ -166,6 +166,7 @@ parallel_init_min_agents = 200     # 車數達此門檻才啟用並行 init（�
 route_tree_min_agents = 5000        # 車數達此門檻改用「終點樹」init 路由（城市尺度秒級；0=停用）。
 # ⚠ 終點樹「會改結果」：同 mode+終點走相同自由流路徑(無 per-car jitter)、背景車終點收斂到區代表節點；
 #   小規模(<門檻)走原本逐車最短路、行為不變。城市尺度(數萬車)用它把 init 從數十分鐘降到秒級。
+profile_steps = true                # 每步分段計時：印一行 decide/move(reroute)/flow/perceive/detect/snap 耗時。純量測、不改結果。
 
 # ----- LLM token 預算（依預算動態切批，避免 prompt 溢位 vLLM context）-----
 # 每批 decision prompt ≈ prompt_overhead + batch×(每 agent status+persona) + 輸出。

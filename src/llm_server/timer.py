@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 
 def time_counter(func):
     def _heartbeat(start_time, done_event, label, interval=30):
-        # 呼叫超過 interval 秒仍未回 → 週期性 WARNING（抓 hang，不洗版）
+        # 單一呼叫過久 → DEBUG 心跳（預設不顯示）。高並行下「整體進度」改由上層
+        # engine._llm_decide_batched 的單一 step 級 watchdog 聚合輸出，避免每呼叫各自洗版。
         while not done_event.wait(interval):
-            logger.warning("⏳ %s 仍在等待 LLM 回應… 已 %.0fs", label, time.perf_counter() - start_time)
+            logger.debug("⏳ %s 仍在等待 LLM 回應… 已 %.0fs", label, time.perf_counter() - start_time)
 
     def wrapper(url, payload, file_name: str):
         done_event = threading.Event()

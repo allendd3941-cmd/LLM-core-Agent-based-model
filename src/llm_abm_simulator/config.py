@@ -213,6 +213,7 @@ class ScalingConfig:
     route_tree_min_agents: int = 5000        # 車數達此門檻才用「終點樹」init 路由（城市尺度秒級；0＝停用）。
     # 終點樹會改結果：同 mode+終點走相同自由流路徑(無 per-car jitter)、背景車終點收斂到區代表節點。
     # 小規模(測試/demo<門檻)走原本逐車 find_path → 行為與結果不變。
+    profile_steps: bool = True               # 每步分段計時（decide/move/reroute/flow/…）印一行；純量測、不改結果。
 
 
 @dataclass(frozen=True)

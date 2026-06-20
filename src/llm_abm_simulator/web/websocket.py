@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import uuid
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -17,6 +18,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from ..config import DEFAULT_CONFIG, UI_CONFIG, SimulationConfig
 from ..simulation.engine import SimulationEngine
 from ..spatial import gis_loader
+from .logctx import session_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,7 @@ class SimulationSession:
 
     # ------------------------------------------------------------------
     async def handle(self) -> None:
+        session_id_var.set(uuid.uuid4().hex[:4])   # 本連線短 id（log 帶 [sess xxxx]，多連線不交錯）
         await self.ws.accept()
         await self.status("正在載入 GIS 資料與路網…")
         # init 在大規模(數萬車逐車路由)可能很久；放背景執行緒跑、同時每隔幾秒送 keepalive 進度，

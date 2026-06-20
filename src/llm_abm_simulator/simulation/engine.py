@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from typing import Any
 
 from .. import config
@@ -35,6 +36,7 @@ from ..spatial import gis_loader, geojson, routing
 from ..spatial import signals as signals_mod
 from ..spatial.road_network import RoadNetwork, load_road_network
 from . import metrics
+from .profiling import StepProfiler
 from .random_seed import make_rng
 from .scheduler import Scheduler
 
@@ -112,6 +114,7 @@ class SimulationEngine:
         self.rng = make_rng(self.cfg.seed)
         self.scheduler = Scheduler(self.cfg.max_steps, self.cfg.step_minutes)
         self.recorder = metrics.MetricsRecorder(self.cfg)
+        self._profiler = StepProfiler(config.SCALING_CONFIG.profile_steps)   # 每步分段計時（opt-in）
 
         self.network: RoadNetwork | None = None
         self.signals: signals_mod.SignalSystem = signals_mod.SignalSystem({}, 90.0, 3.0, enabled=False)
@@ -604,7 +607,11 @@ class SimulationEngine:
             dtown = self._town_by_name(dest) if dest else None
             dnode = (self._node_in_town(dest)
                      if dtown is not None else self._dest_node)
+            _t0 = time.perf_counter() if self._profiler.enabled else 0.0
             path = self._route(a.current_node, dnode, a.routing_strategy())
+            if self._profiler.enabled:
+                self._profiler.add("respawn", time.perf_counter() - _t0)
+                self._profiler.count("respawn_n")
             if len(path) <= 1:
                 continue
             a.origin_town = a.current_town or a.origin_town
@@ -662,39 +669,48 @@ class SimulationEngine:
         self._elapsed_seconds = cycle * self.cfg.step_minutes * 60.0  # 號誌相位基準時間
         self._activate_due_departures(cycle)   # 分批出發：到 departure_cycle 的事件車進場
         self._handle_egress(cycle)             # 散場：宣告後停留車陸續離場回家（改往 home_node）
+        prof = self._profiler
 
         # 1. 感知快照（用上一步遺留的道路壅塞；尚未進場的車跳過）
-        if self.cfg.nearby_mode == "grid":
-            self._build_nearby_grid()
-        for agent in self.agents:
-            if not agent.waiting_for_origin:
-                self._refresh_agent_perception(agent, pre_move=True)
+        with prof.phase("perceive"):
+            if self.cfg.nearby_mode == "grid":
+                self._build_nearby_grid()
+            for agent in self.agents:
+                if not agent.waiting_for_origin:
+                    self._refresh_agent_perception(agent, pre_move=True)
 
         # 2. 決策（LLM 或 mock；LLM 失敗 fallback）
         env = self._environment_summary(cycle)
-        self._apply_step_decisions(env, cycle)
+        _t_decide = time.perf_counter()
+        with prof.phase("decide"):
+            self._apply_step_decisions(env, cycle)
+        llm_s = time.perf_counter() - _t_decide
 
         # 3. 感知速度 + 移動（壅塞時重算路徑）；尚未進場的車不動；背景車抵達即以新 OD 重生
-        self._step_entered_edges = {}   # 本步從頭收集每台車走過的邊（_advance_along_path 填）
-        for agent in self.agents:
-            if agent.waiting_for_origin:
-                continue
-            self._perceive_speed(agent)
-            self._move_agent(agent)
-        self._respawn_arrived_ambient()
+        with prof.phase("move"):
+            self._step_entered_edges = {}   # 本步從頭收集每台車走過的邊（_advance_along_path 填）
+            for agent in self.agents:
+                if agent.waiting_for_origin:
+                    continue
+                self._perceive_speed(agent)
+                self._move_agent(agent)
+            self._respawn_arrived_ambient()
 
         # 4. 重算道路 flow / congestion / weight（含背景車 → 路網層負載 + 瓶頸累積）
-        self._recompute_flows()
+        with prof.phase("flow"):
+            self._recompute_flows()
 
         # 5. 移動後感知快照（供 memory / 輸出；尚未進場的車跳過）
-        if self.cfg.nearby_mode == "grid":
-            self._build_nearby_grid()
-        for agent in self.agents:
-            if not agent.waiting_for_origin:
-                self._refresh_agent_perception(agent, pre_move=False)
+        with prof.phase("perceive"):
+            if self.cfg.nearby_mode == "grid":
+                self._build_nearby_grid()
+            for agent in self.agents:
+                if not agent.waiting_for_origin:
+                    self._refresh_agent_perception(agent, pre_move=False)
 
         # 5.5 監測器 / 全路網流量累積（被動量測、進入新邊計一次；不改物理）
-        self._update_detectors(cycle)
+        with prof.phase("detect"):
+            self._update_detectors(cycle)
 
         # 6. 指標 + 分佈（事件 KPI 只算事件車；路網層壅塞/流量含背景車）
         event_agents = self._event_agents()
@@ -722,12 +738,26 @@ class SimulationEngine:
         # 記下本步全市平均壅塞，供「下一步」算 congestion_trend
         self._prev_avg_congestion = env["average_congestion_proxy"]
 
+        # 每步結構化摘要（always-on, INFO）：規模 + LLM 決策健康 + 壅塞，一行可解析、可 grep 做 paper 圖表
+        dh = self._decision_health
+        logger.info(
+            "step=%d t=%dmin on_net=%d(evt=%d,amb=%d) llm=%s/trig%d/dec%d/fb%d llm_s=%.0f congest=%.2f sig_wait=%d",
+            cycle, cycle * self.cfg.step_minutes,
+            env["event_on_network"] + env["ambient_on_network"],
+            env["event_on_network"], env["ambient_on_network"],
+            dh.get("source", "?"), dh.get("triggered", 0), dh.get("decided", 0), dh.get("fallback", 0),
+            llm_s, env["average_congestion_proxy"], env.get("signal_waiting", 0),
+        )
+
         # 7. memory（只給已進場的事件車；LLM 核心的摘要已於決策時重寫）
         for agent in event_agents:
             if not agent.waiting_for_origin:
                 agent.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
 
-        return self._snapshot(cycle, env, mode_dist, status_dist)
+        with prof.phase("snap"):
+            result = self._snapshot(cycle, env, mode_dist, status_dist)
+        prof.flush(cycle)
+        return result
 
     def _llm_environment(self, env: dict[str, Any]) -> dict[str, Any]:
         """給 LLM 決策用的精簡質性全域環境。
@@ -896,16 +926,35 @@ class SimulationEngine:
                 merged.update(d)
                 prov_all.extend(p)
             return merged, prov_all
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=min(sc.concurrency, len(batches))) as ex:
-            futures = [ex.submit(self._llm.decide_step_traced, b, env, cycle) for b in batches]
-            for f in futures:
-                try:
-                    d, p = f.result()
-                    merged.update(d)
-                    prov_all.extend(p)
-                except Exception as e:  # noqa: BLE001  單批失敗 → 該批維持現有 mode
-                    logger.warning("批次決策失敗：%s", e)
+        # 單一 step 級進度 watchdog：每 interval 秒印「一行」聚合進度（取代每呼叫各自洗版的 heartbeat）。
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        total = len(batches)
+        done = 0
+        t_start = time.perf_counter()
+        stop = threading.Event()
+
+        def _watch(interval: float = 30.0) -> None:
+            while not stop.wait(interval):
+                logger.info("step %d · LLM 進行中… 完成 %d/%d 批、已 %.0fs",
+                            cycle, done, total, time.perf_counter() - t_start)
+
+        watcher = threading.Thread(target=_watch, daemon=True)
+        watcher.start()
+        try:
+            with ThreadPoolExecutor(max_workers=min(sc.concurrency, total)) as ex:
+                futures = [ex.submit(self._llm.decide_step_traced, b, env, cycle) for b in batches]
+                for f in as_completed(futures):
+                    try:
+                        d, p = f.result()
+                        merged.update(d)
+                        prov_all.extend(p)
+                    except Exception as e:  # noqa: BLE001  單批失敗 → 該批維持現有 mode
+                        logger.warning("批次決策失敗：%s", e)
+                    done += 1
+        finally:
+            stop.set()
+            watcher.join(timeout=1)
         return merged, prov_all
 
     # ==================================================================
@@ -938,7 +987,12 @@ class SimulationEngine:
 
         # 壅塞 → 重算路徑（避開壅塞）；tolerate_congestion 的 recompute_on_crowded=False 不重算
         if agent.is_crowded and agent.recompute_on_crowded and agent.current_node and agent.destination_node:
+            _prof = self._profiler
+            _t0 = time.perf_counter() if _prof.enabled else 0.0
             new_path = self._route(agent.current_node, agent.destination_node, agent.routing_strategy())
+            if _prof.enabled:
+                _prof.add("reroute", time.perf_counter() - _t0)
+                _prof.count("reroute_n")
             if len(new_path) > 1:
                 agent.current_path = new_path
                 agent.path_index = 0

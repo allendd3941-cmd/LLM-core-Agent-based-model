@@ -100,6 +100,19 @@ $env:PYTHONPATH = "src"; uvicorn llm_abm_simulator.web.app:app --port 8080
 #   PYTHONPATH=src uvicorn llm_abm_simulator.web.app:app --port 8080
 ```
 
+### 城市尺度 / 長跑啟動（keepalive + 落檔，建議在 server 用）
+長 init / 慢步時,放寬 WebSocket ping 逾時避免切視窗被踢;並把 stdout 重導向落檔(程式本身不寫檔):
+```bash
+mkdir -p output/logs && \
+PYTHONUNBUFFERED=1 uv run uvicorn llm_abm_simulator.web.app:app --host 0.0.0.0 --port 8080 \
+  --ws-ping-interval 30 --ws-ping-timeout 86400 \
+  2>&1 | tee -a output/logs/run_$(date +%F_%H%M).log
+```
+- `--ws-ping-timeout 86400`:背景分頁被凍結也不掉線(切回視窗那場跑還在)。大跑之間重啟,別累積殭屍連線。
+- `2>&1 | tee -a output/logs/...`:邊看畫面邊存檔。log 是結構化的(`step=… llm=… congest=…`),可 `grep`/`awk` 做 paper 圖表。
+- **log 層級**:`LOG_LEVEL=WARNING uv run uvicorn …`(安靜)或 `DEBUG`(除錯);預設 INFO。每行帶 `[sess xxxx]` 連線 id。
+- **每步分段計時**:`config/simulation.toml [scaling].profile_steps`(預設 true)→ 每步多印一行 `step N prof: decide=… move=…(reroute=… n=…) …`,看時間花在哪;設 false 關閉。
+
 瀏覽器開啟 <http://localhost:8080>，即可看到模擬儀表板：
 
 | 控制 | 說明 |
