@@ -74,8 +74,9 @@ road **service level (LOS, A–F)**, **volume** (cumulative passages by car/moto
 `to_file(driver="ESRI Shapefile")`), zipped and served via `GET /api/gis/<name>`.
 
 - **CRS** EPSG:4326 (with `.prj`/`.cpg`); field names ≤10 chars (DBF limit).
-- **Detectors** are user-placed, on-road (snapped) **passive counters** — they count vehicle **passages**
-  (edge-entry events, independent of `step_minutes`), broken down by vehicle type × role; they do not
+- **Detectors** are default-bundled (the 55 validation cameras, see below) and/or user-placed, on-road
+  (snapped) **passive counters** — they count vehicle **passages** by replaying every edge each vehicle
+  traverses per step (independent of `step_minutes`), broken down by vehicle type × role; they do not
   affect the simulation (deterministic, reproducible).
 - These are runtime artifacts (under `output/`, git-ignored); not versioned.
 
@@ -103,6 +104,33 @@ Repository policy for this folder:
   Taipei/Penghu and does not join by ID). The simulation therefore uses **synthetic** cycle/yellow
   values from `[signals]`; this is documented in `spatial/signals.py` and must not be presented as a
   digital twin of real signal timing.
+
+## Validation Cameras (default detectors)
+
+`data/validation_cameras.csv` (`device_group_id,camera_name,lon,lat,distance_to_stadium_km`) bundles the
+**55 iTraView intersection cameras within 5 km of the stadium** — the set used for case-based validation
+against real traffic counts. `device_group_id` is the camera UUID and matches `device_group_id` in the
+observed report CSVs, i.e. the join key for pairing each real camera with its simulated counterpart.
+
+- Loaded by `gis_loader.load_default_detectors()` → `[{lat, lng, ext_id, ext_name}, …]` and set as the
+  **default detectors** on every web session (`SimulationSession`), so the demo monitors these 55 points
+  out of the box. Each registered detector carries `ext_id` (the camera UUID) so its simulated passage
+  counts map back to the matching real camera.
+- Manual place/clear in the frontend still works; applying frontend detectors overrides the default set.
+- Derived from the validation handoff's `tainan_devices_fin.csv` (filtered to `distance_to_stadium_km ≤ 5`,
+  deduped by id; `lon`=`locationWgsX`, `lat`=`locationWgsY`). If the file is missing, sessions start with no
+  detectors (prior behavior). Cameras farther than the snap threshold from any road are skipped at
+  registration, so the active count can be slightly below 55.
+
+**Exporting validation CSVs.** After running a scenario in the demo, the "匯出驗證 CSV" control
+(`export_validation` WS action → `engine.export_validation_csv(case)`) writes a zip containing
+`<case>_gameday.csv` (per-camera 5-minute **event-vehicle** passage counts, keyed by `device_group_id`=UUID),
+`<case>_nogameday.csv` (all zeros — the model produces no event traffic on a non-game day), and
+`<case>_run_params.csv` (the run's parameters, for paper annotation). `case`∈{weekend,weekday} sets the
+clock window (14:00 / 16:30) and filename that the validation script expects; the simulation itself only
+needs to cover two hours (relative time is mapped to the window at export). Run weekend-game and
+weekday-game once each, unzip the four CSVs into the validation handoff's `simulation_result/`, and run
+`python main.py --max-distance-km 5`.
 
 ## Generated Outputs
 

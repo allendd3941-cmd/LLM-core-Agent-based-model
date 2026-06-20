@@ -238,7 +238,7 @@ speed_max = 5.0             # 播放速度倍率上限
 speed_step = 0.5
 speed_default = 1.0
 agents_min = 5              # agent 數下限
-agents_max = 20000           # agent 數上限（同時是後端 clamp 上限）
+agents_max = 25000           # agent 數上限（同時是後端 clamp 上限）
 agents_step = 5
 # 大規模渲染：車數 ≤ render_individual_max → 逐台送/畫（任何 zoom）；超過 → 依 zoom/可視範圍裁切。
 # zoom < agent_min_zoom 時只顯示道路壅塞、不送/不畫車（前端 zoom 進去才看到範圍內車流）。

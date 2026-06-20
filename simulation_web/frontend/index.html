@@ -320,6 +320,15 @@
                 <button id="btn-gis-export" class="btn"><i class="ti ti-download" aria-hidden="true"></i> 下載 Shapefile</button>
                 <button id="btn-analysis-csv" class="btn"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i> 下載分析數據 CSV</button>
               </div>
+
+              <h3 class="sub layer-tag">⑥ 匯出驗證 CSV（對比真實監視器）</h3>
+              <div class="gis-export">
+                <div class="select-wrap"><i class="ti ti-calendar" aria-hidden="true"></i><select id="val-case">
+                  <option value="weekend">週末 weekend（14:00 起）</option>
+                  <option value="weekday">平日 weekday（16:30 起）</option>
+                </select></div>
+                <button id="btn-val-export" class="btn"><i class="ti ti-download" aria-hidden="true"></i> 下載驗證 CSV（事件車）</button>
+              </div>
             </section>
             <p class="hint dock-empty" id="analysis-empty">模擬完成後在此顯示交通分析。</p>
           </div>

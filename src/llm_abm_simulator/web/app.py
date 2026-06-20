@@ -99,6 +99,17 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(p, media_type="application/zip", filename=name)
 
+    @app.get("/api/validation/{name}", response_model=None)
+    async def get_validation_export(name: str):
+        """下載匯出的驗證 CSV zip（由 WS export_validation 動作產生於 output/）。"""
+        # 防路徑穿越：只允許 output/ 內、validation_*.zip 命名的檔案
+        if "/" in name or "\\" in name or ".." in name or not re.fullmatch(r"validation_[\w.]+\.zip", name):
+            return JSONResponse({"error": "invalid name"}, status_code=400)
+        p = config.OUTPUT_DIR / name
+        if not p.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(p, media_type="application/zip", filename=name)
+
     @app.get("/api/llm/models")
     async def list_llm_models(backend: str = "ollama") -> JSONResponse:
         """列出可選模型：ollama→即時查 /api/tags 的實裝模型；vllm→候選登錄表。"""

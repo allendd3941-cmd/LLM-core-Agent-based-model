@@ -16,15 +16,20 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from ..config import DEFAULT_CONFIG, UI_CONFIG, SimulationConfig
 from ..simulation.engine import SimulationEngine
+from ..spatial import gis_loader
 
 logger = logging.getLogger(__name__)
 
 
 def _sanitize_detectors(raw: Any) -> list[dict[str, Any]]:
-    """把前端送來的監測器點位清成 [{lat,lng}, ...]（上限保護、丟棄無效項）。"""
+    """把前端送來的監測器點位清成 [{lat,lng}, ...]（上限保護、丟棄無效項）。
+
+    上限放寬到 100：預設已內建 55 台驗證相機，前端「套用設定」會把目前地圖上的偵測器
+    （含這 55 台）整批回送，故須容得下 55 台 + 使用者手動加放的數台，避免被截斷。
+    """
     out: list[dict[str, Any]] = []
     if isinstance(raw, list):
-        for d in raw[:50]:
+        for d in raw[:100]:
             try:
                 out.append({"lat": float(d["lat"]), "lng": float(d["lng"])})
             except (KeyError, TypeError, ValueError):
@@ -38,7 +43,8 @@ class SimulationSession:
     def __init__(self, websocket: WebSocket, base_cfg: SimulationConfig | None = None) -> None:
         self.ws = websocket
         self.cfg = base_cfg or DEFAULT_CONFIG
-        self._detector_specs: list[dict[str, Any]] = []   # 放置的監測器點位（套用設定時帶入引擎）
+        # 預設內建驗證用真實監視器（球場 5km 內 55 台）；前端「套用設定」送 detectors 時才被覆寫。
+        self._detector_specs: list[dict[str, Any]] = gis_loader.load_default_detectors()
         self.engine = self._make_engine()
         self.speed_multiplier = 1.0
         self._run_task: asyncio.Task | None = None
@@ -163,6 +169,8 @@ class SimulationSession:
             await self.send({"type": "detector_snap", **res})
         elif action == "export_gis":
             await self._export_gis(str(value or "los"))
+        elif action == "export_validation":
+            await self._export_validation(str(value or ""))
         else:
             logger.warning("未知控制指令: %s", action)
 
@@ -367,6 +375,31 @@ class SimulationSession:
             return
         await self.send({"type": "download", "url": f"/api/gis/{path.name}", "name": path.name,
                          "label": f"GIS 圖層（{layer}）"})
+
+    async def _export_validation(self, case: str) -> None:
+        """匯出組員 validation 腳本可直接吃的 CSV（gameday 事件車 + nogameday 全0 + 參數檔，打包 zip）。
+
+        case = weekend / weekday（決定時間視窗起點與檔名）。需先初始化且已跑過至少一步。
+        """
+        from .. import config
+        case = case.strip().lower()
+        if case not in ("weekend", "weekday"):
+            await self.status("請選擇 weekend 或 weekday 再匯出。")
+            return
+        if not self.engine.is_initialized or self.engine.scheduler.cycle <= 0:
+            await self.status("請先跑模擬（至少一步）再匯出驗證 CSV。")
+            return
+        try:
+            path = await asyncio.to_thread(self.engine.export_validation_csv, case, config.OUTPUT_DIR)
+        except ValueError as e:
+            await self.status(f"匯出失敗：{e}")
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.error("驗證 CSV 匯出錯誤：%s", e, exc_info=True)
+            await self.status("匯出失敗（伺服器錯誤）。")
+            return
+        await self.send({"type": "download", "url": f"/api/validation/{path.name}", "name": path.name,
+                         "label": f"驗證 CSV（{case}）"})
 
     async def _set_llm(self, value: dict) -> None:
         """前端選模型：套用 runtime 後端/模型，並連動 max_model_len 與 ollama num_ctx（整套 LLM 共用）。"""

@@ -147,6 +147,41 @@ def load_stadium_point() -> tuple[Point, tuple[float, float]]:
     return metric, (wgs.y, wgs.x)
 
 
+def load_default_detectors(path=None) -> list[dict]:
+    """載入預設偵測器點位＝驗證用真實監視器（球場 5km 內 55 台）。
+
+    讀 ``data/validation_cameras.csv`` → ``[{lat, lng, ext_id, ext_name}, ...]``：
+    ``ext_id`` 為相機 UUID（= 觀測資料的 device_group_id，做對比配對用），``ext_name`` 為相機名稱。
+    CSV 的 lon=經度、lat=緯度（locationWgsX/Y），此處已正確對映到偵測器要的 lng/lat。
+    供 web 連線預設放置與驗證 runner 共用。檔案不存在/壞掉回 ``[]``（等同無預設偵測器、不影響既有行為）。
+    """
+    path = path or config.VALIDATION_CAMERAS_CSV
+    if not path.exists():
+        logger.info("找不到預設偵測器檔 %s，啟動時不放置預設監測器。", path)
+        return []
+    import csv
+    out: list[dict] = []
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                try:
+                    lat = float(row["lat"])   # locationWgsY = 緯度
+                    lng = float(row["lon"])   # locationWgsX = 經度
+                except (KeyError, ValueError):
+                    continue
+                out.append({
+                    "lat": lat,
+                    "lng": lng,
+                    "ext_id": (row.get("device_group_id") or "").strip(),
+                    "ext_name": (row.get("camera_name") or "").strip(),
+                })
+        logger.info("載入預設偵測器 %d 台（驗證用真實監視器）", len(out))
+        return out
+    except OSError as e:
+        logger.warning("讀取預設偵測器檔失敗：%s", e)
+        return []
+
+
 def load_county_boundary_wgs84() -> BaseGeometry:
     """載入「整個縣市界」polygon（WGS84），供 OSM 路網下載界定範圍。
 

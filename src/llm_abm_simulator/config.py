@@ -37,6 +37,7 @@ STADIUM_SHP = GIS_DIR / "亞太棒球場_point.shp"
 # 註：舊的「亞太棒球場_研究範圍.shp」已移除——OSM 下載邊界改用 TOWN_MOI 縣界 union（全台南市）。
 TOWN_POPULATION_CSV = GIS_DIR / "town_population.csv"   # 各區人口（重力模型需求生成；近似值可替換）
 ROAD_GRAPHML = DATA_DIR / "tainan_roads.graphml"   # bundle 的真實 OSM 路網（重現用）
+VALIDATION_CAMERAS_CSV = DATA_DIR / "validation_cameras.csv"   # 驗證用真實監視器點位（球場 5km 內 55 台，預設偵測器）
 
 # CRS：TOWN_MOI 與球場 point 皆為 EPSG:3826（TWD97 TM Taiwan，公尺）。
 # 距離/空間運算一律使用公尺投影座標；前端地圖使用 WGS84。

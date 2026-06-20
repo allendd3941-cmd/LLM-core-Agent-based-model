@@ -130,6 +130,14 @@ const TrafficUI = (() => {
     const csvBtn = $("btn-analysis-csv");
     if (csvBtn) csvBtn.onclick = () => TrafficCharts.downloadAnalysisCSV();
 
+    // 匯出驗證 CSV（對比真實監視器）：跑完後把目前這次模擬的相機計數輸出成 main.py 可吃的格式
+    const valBtn = $("btn-val-export");
+    if (valBtn) valBtn.onclick = () => {
+      const cas = ($("val-case") && $("val-case").value) || "weekend";
+      send("export_validation", cas);
+      log("info", "請求匯出驗證 CSV：" + cas);
+    };
+
     $("mode-mock").onclick = () => setMode("rule");
     $("mode-llm").onclick = () => setMode("llm");
 

@@ -146,9 +146,11 @@ class SimulationEngine:
         # 車流監測器（detectors）：放在路上的被動計數器（不改物理、可重現）。GIS 流量圖層也用同一套計數。
         self._detector_specs: list[dict[str, Any]] = []   # 前端放置、套用設定時帶入的 {lat,lng}
         self._detectors: list[dict[str, Any]] = []        # 已吸附到路段、註冊好的監測器
-        self._detector_series: dict[str, list[int]] = {}  # 監測器 id → 每步通過數（時間曲線）
+        self._detector_series: dict[str, list[int]] = {}  # 監測器 id → 每步通過數（時間曲線；總量＝事件+背景）
+        self._detector_series_event: dict[str, list[int]] = {}  # 監測器 id → 每步「事件車」通過數（驗證匯出 doc_count 用）
         self._road_volume: dict[str, dict[str, int]] = {}  # 全路網每條有向邊累積通過數（流量圖層用）
-        self._agent_prev_road: dict[str, str] = {}        # agent_id → 上一個所在邊 road_id（偵測「進入新邊」）
+        self._agent_prev_road: dict[str, str] = {}        # agent_id → 上一個計過的邊 road_id（連續停同邊去重）
+        self._step_entered_edges: dict[str, list[str]] = {}  # 本步每台車「實際走過的邊」road_id 序列（移動時收集，監測器計數用）→ 通過數與 step_minutes 無關
         self._edge_ids: list[str] = []                    # 監測器吸附用：邊 road_id 清單
         self._edge_uv: list[tuple[str, str]] = []         # 對應 (u, v)
         self._edge_xy = None                              # numpy (N,4)：每邊端點公尺座標 ax,ay,bx,by
@@ -189,6 +191,7 @@ class SimulationEngine:
         self._ambient_vehsteps = 0
         self._road_volume = {}
         self._agent_prev_road = {}
+        self._step_entered_edges = {}
         self._register_detectors()      # 把暫存的監測器點位吸附到路段並註冊（計數歸零）
 
         self._build_agents()
@@ -610,6 +613,7 @@ class SimulationEngine:
         self._apply_step_decisions(env, cycle)
 
         # 3. 感知速度 + 移動（壅塞時重算路徑）；尚未進場的車不動；背景車抵達即以新 OD 重生
+        self._step_entered_edges = {}   # 本步從頭收集每台車走過的邊（_advance_along_path 填）
         for agent in self.agents:
             if agent.waiting_for_origin:
                 continue
@@ -919,6 +923,9 @@ class SimulationEngine:
             u = path[agent.path_index]
             v = path[agent.path_index + 1]
             road = self.network.road_between(u, v)
+            if road is not None:
+                # 記下本步走上的每條邊（含中途穿越的邊）；通過計數據此回放，故大 step 也不漏算。
+                self._step_entered_edges.setdefault(agent.agent_id, []).append(road.road_id)
             edge_len = max(road.length if road else 1.0, 1.0)
             left_in_edge = edge_len - agent.edge_progress  # 這條邊還剩多少（支援跨步推進長邊）
             if left_in_edge <= remaining:
@@ -1380,6 +1387,7 @@ class SimulationEngine:
         from pyproj import Transformer
         self._detectors = []
         self._detector_series = {}
+        self._detector_series_event = {}
         if not self._detector_specs or self.network is None:
             return
         to_m = Transformer.from_crs(config.CRS_WGS84, config.CRS_METRIC, always_xy=True)
@@ -1401,6 +1409,8 @@ class SimulationEngine:
             plng, plat = to_wgs.transform(px, py)
             self._detectors.append({
                 "id": f"D{len(self._detectors) + 1}",
+                "ext_id": spec.get("ext_id"),       # 對應真實相機 UUID（= device_group_id），做對比配對用
+                "ext_name": spec.get("ext_name"),   # 真實相機名稱
                 "label": (road.road_name if road and road.road_name else rid),
                 "lat": round(plat, 6), "lng": round(plng, 6),
                 "dir_a": rid, "dir_b": f"{v}_{u}",
@@ -1409,6 +1419,7 @@ class SimulationEngine:
             })
         for d in self._detectors:
             self._detector_series[d["id"]] = []
+            self._detector_series_event[d["id"]] = []
         if self._detectors:
             logger.info("已註冊 %d 個車流監測器", len(self._detectors))
 
@@ -1418,37 +1429,53 @@ class SimulationEngine:
         return ("m" if agent.vehicle_type == "機車" else "c") + ("a" if agent.role == "ambient" else "e")
 
     def _update_detectors(self, cycle: int) -> None:
-        """每步：以「進入新邊」事件累積全路網流量 + 監測器計數。
+        """每步：回放每台車本步「實際走過的邊」累積全路網流量 + 監測器計數。
 
-        被動量測、不改物理、確定性；計的是「通過次數」(背景車重生再經過再計=真實流量)，
-        且以 edge-entry 觸發 → 與每步分鐘數 step_minutes 完全無關。
+        被動量測、不改物理、確定性。計的是「通過次數」(throughput)：有通過就計，不是停留才計。
+        逐一回放 ``_step_entered_edges`` 內每台車走過的每條邊（含一步跨多條邊時的中途邊），
+        每條邊以 ``_agent_prev_road`` 去重（連續停在同一邊只計一次）→ 與 step_minutes 無關，
+        大步進跨越路口也不漏算。方向由有向邊 road_id 決定（u→v=dir_a、v→u=dir_b）；
+        同一條邊上多台監測器各自計數（不互相覆蓋）。背景車重生再經過再計＝真實流量。
         """
-        step_counts = {d["id"]: 0 for d in self._detectors}
-        det_a = {d["dir_a"]: d for d in self._detectors}
-        det_b = {d["dir_b"]: d for d in self._detectors}
+        step_counts = {d["id"]: 0 for d in self._detectors}        # 每步總通過數（事件+背景）
+        step_event = {d["id"]: 0 for d in self._detectors}         # 每步「事件車」通過數
+        det_a: dict[str, list[dict[str, Any]]] = {}
+        det_b: dict[str, list[dict[str, Any]]] = {}
+        for d in self._detectors:
+            det_a.setdefault(d["dir_a"], []).append(d)
+            det_b.setdefault(d["dir_b"], []).append(d)
         for agent in self.agents:
             if agent.waiting_for_origin:
                 continue
-            rid = agent.current_road_id
-            if not rid or self._agent_prev_road.get(agent.agent_id) == rid:
+            edges = self._step_entered_edges.get(agent.agent_id)
+            if not edges:
                 continue
-            self._agent_prev_road[agent.agent_id] = rid   # 進入新邊
             leaf = self._vehicle_leaf(agent)
-            rv = self._road_volume.get(rid)
-            if rv is None:
-                rv = {"ce": 0, "ca": 0, "me": 0, "ma": 0}
-                self._road_volume[rid] = rv
-            rv[leaf] += 1
-            d = det_a.get(rid)
-            if d is not None:
-                d["a"][leaf] += 1
-                step_counts[d["id"]] += 1
-            d = det_b.get(rid)
-            if d is not None:
-                d["b"][leaf] += 1
-                step_counts[d["id"]] += 1
+            is_event = leaf.endswith("e")   # leaf 結尾 e＝事件車、a＝背景車
+            prev = self._agent_prev_road.get(agent.agent_id)
+            for rid in edges:
+                if rid == prev:        # 連續停在同一邊（含承接上一步的邊）→ 不重複計
+                    continue
+                prev = rid
+                rv = self._road_volume.get(rid)
+                if rv is None:
+                    rv = {"ce": 0, "ca": 0, "me": 0, "ma": 0}
+                    self._road_volume[rid] = rv
+                rv[leaf] += 1
+                for d in det_a.get(rid, ()):
+                    d["a"][leaf] += 1
+                    step_counts[d["id"]] += 1
+                    if is_event:
+                        step_event[d["id"]] += 1
+                for d in det_b.get(rid, ()):
+                    d["b"][leaf] += 1
+                    step_counts[d["id"]] += 1
+                    if is_event:
+                        step_event[d["id"]] += 1
+            self._agent_prev_road[agent.agent_id] = prev
         for d in self._detectors:
             self._detector_series[d["id"]].append(step_counts[d["id"]])
+            self._detector_series_event[d["id"]].append(step_event[d["id"]])
 
     @staticmethod
     def _expand_counts(c: dict[str, int]) -> dict[str, int]:
@@ -1468,7 +1495,8 @@ class SimulationEngine:
 
     def detectors_payload(self) -> list[dict[str, Any]]:
         """給前端：已註冊監測器的位置（畫標記用）。"""
-        return [{"id": d["id"], "label": d["label"], "lat": d["lat"], "lng": d["lng"]}
+        return [{"id": d["id"], "ext_id": d.get("ext_id"), "label": d["label"],
+                 "lat": d["lat"], "lng": d["lng"]}
                 for d in self._detectors]
 
     def snap_point(self, lat: float, lng: float) -> dict[str, Any]:
@@ -1555,6 +1583,119 @@ class SimulationEngine:
         """建指定主題圖層的 Shapefile 並打包成 zip，回傳 zip 路徑。lazy 匯入 gis_export。"""
         from ..spatial import gis_export
         return gis_export.export_layer_zip(self, layer, out_dir)
+
+    # ==================================================================
+    # 驗證 CSV 匯出（給組員 validation 腳本 main.py 直接吃）
+    # ==================================================================
+    def _validation_run_params(self, case: str, n_bins: int, camera_count: int,
+                               steps_per_bin: int) -> list[tuple[str, object]]:
+        """蒐集本次模擬的所有關鍵參數（供 paper 標註；寫成 <case>_run_params.csv）。"""
+        from datetime import datetime
+        dep = config.effective_departure()
+        params: list[tuple[str, object]] = [
+            ("export_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("case", case),
+            ("scenario", scenarios.active().name),
+            ("event_cars_nb_agents", self.cfg.nb_agents),
+            ("ambient_count", config.effective_ambient_count()),
+            ("seed", self.cfg.seed),
+            ("step_minutes", self.cfg.step_minutes),
+            ("max_steps", self.cfg.max_steps),
+            ("cycles_run", self.scheduler.cycle),
+            ("steps_per_5min_bin", steps_per_bin),
+            ("time_bins_5min", n_bins),
+            ("departure_profile", dep.profile),
+            ("departure_window_minutes", dep.window_minutes),
+            ("use_llm", self.cfg.use_llm),
+            ("demand_beta", config.DEMAND_CONFIG.beta),
+            ("demand_decay", config.DEMAND_CONFIG.decay),
+            ("crowded_road_threshold", self.cfg.crowded_road_threshold),
+            ("validation_cameras_exported", camera_count),
+        ]
+        try:  # LLM 後端/模型（若可取得；取不到不影響匯出）
+            from llm_server import llm_config
+            params.append(("llm_backend", getattr(llm_config, "LLM_BACKEND", "")))
+            getter = getattr(llm_config, "current_model", None)
+            params.append(("llm_model", getter() if callable(getter) else getattr(llm_config, "LLM_MODEL", "")))
+        except Exception:  # noqa: BLE001
+            pass
+        return params
+
+    def export_validation_csv(self, case: str, out_dir) -> "Any":
+        """把目前這次模擬的偵測器計數，輸出成組員 validation 腳本可直接吃的 CSV（打包成 zip）。
+
+        ``case`` ∈ {"weekend","weekday"}：決定時間視窗起點（weekend 14:00 / weekday 16:30）與檔名。
+        zip 內含三檔：
+          - ``<case>_gameday.csv``    每相機每 5 分鐘「事件車-only」通過數（= doc_count；對應 observed impact）。
+          - ``<case>_nogameday.csv``  同結構、doc_count 全 0（模型在非球賽日無事件車流；供 main.py game−nogame）。
+          - ``<case>_run_params.csv`` 本次模擬所有參數（供 paper 標註）。
+        欄位對齊 observed report：``camera_name,device_group_id,stream_id,time_start,doc_count,avg_speed``。
+        只匯出帶 ext_id（相機 UUID）的偵測器，以 ``device_group_id=UUID`` 與真實相機配對。
+        """
+        import csv as _csv
+        import uuid as _uuid
+        import zipfile
+        from datetime import datetime, timedelta
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        if case not in ("weekend", "weekday"):
+            raise ValueError("case 必須為 'weekend' 或 'weekday'")
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 視窗起點時鐘時間（對齊 main.py 寫死的時段；日期沿用 observed 球賽日，main.py 只看小時）
+        window_start = (datetime(2026, 3, 29, 14, 0, 0) if case == "weekend"
+                        else datetime(2026, 4, 22, 16, 30, 0))
+
+        # 相對步 → 5 分鐘格：每格累加它涵蓋的步（step_minutes=5→1步1格；=1→5步1格）。最多 24 格（2 小時）。
+        step_min = max(1, int(self.cfg.step_minutes))
+        steps_per_bin = max(1, round(5 / step_min))
+        n_steps = int(self.scheduler.cycle)
+        n_bins = min(24, -(-n_steps // steps_per_bin)) if n_steps else 0
+
+        def binned(series: list[int]) -> list[int]:
+            return [int(sum(series[k * steps_per_bin:(k + 1) * steps_per_bin])) for k in range(n_bins)]
+
+        cams = [d for d in self._detectors if d.get("ext_id")]
+        fields = ["camera_name", "device_group_id", "stream_id", "time_start", "doc_count", "avg_speed"]
+
+        def build_rows(zero: bool) -> list[dict[str, object]]:
+            rows: list[dict[str, object]] = []
+            for d in cams:
+                ev = binned(self._detector_series_event.get(d["id"], []))
+                for k in range(n_bins):
+                    ts = window_start + timedelta(minutes=5 * k)
+                    rows.append({
+                        "camera_name": d.get("ext_name") or d.get("label", ""),
+                        "device_group_id": d["ext_id"],
+                        "stream_id": "",
+                        "time_start": ts.strftime("%Y-%m-%d %H:%M:%S"),
+                        "doc_count": 0 if zero else ev[k],
+                        "avg_speed": "",
+                    })
+            return rows
+
+        params = self._validation_run_params(case, n_bins, len(cams), steps_per_bin)
+        token = _uuid.uuid4().hex[:8]
+        zip_path = out_dir / f"validation_{case}_{token}.zip"
+
+        def _write(tdp: Path, name: str, rows: list[dict], fnames: list[str]) -> None:
+            with (tdp / name).open("w", encoding="utf-8-sig", newline="") as f:
+                w = _csv.DictWriter(f, fieldnames=fnames)
+                w.writeheader()
+                w.writerows(rows)
+
+        with TemporaryDirectory() as td:
+            tdp = Path(td)
+            _write(tdp, f"{case}_gameday.csv", build_rows(zero=False), fields)
+            _write(tdp, f"{case}_nogameday.csv", build_rows(zero=True), fields)
+            _write(tdp, f"{case}_run_params.csv",
+                   [{"param": k, "value": v} for k, v in params], ["param", "value"])
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for p in sorted(tdp.glob("*.csv")):
+                    zf.write(p, p.name)
+        return zip_path
 
     def init_payload(self) -> dict[str, Any]:
         assert self.network is not None
