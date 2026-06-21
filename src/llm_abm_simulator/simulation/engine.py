@@ -225,7 +225,7 @@ class SimulationEngine:
         """指派 profile/起點/車種/初始 mode。
 
         事件觸發模式（預設）：用規則式（mock）建立確定性基線，再用 persona 池**確定性覆寫**
-        name/車種（不呼叫 LLM 做初始決策、開場不爆量）；初始 active_mode 維持規則式。
+        name/車種（不呼叫 LLM 做初始決策、開場不爆量）；初始 action_mode 維持規則式。
         關閉事件觸發（舊行為）：用 LLM init 決策；失敗 fallback mock。
         """
         sc = config.SCALING_CONFIG
@@ -249,12 +249,12 @@ class SimulationEngine:
             agent.profile_name = a.profile_name or agent.agent_id
             agent.origin_town = a.origin_town or self.cfg.default_origin_town
             agent.apply_vehicle_type(a.vehicle_type)
-            if a.active_mode:
-                agent.apply_active_mode(a.active_mode)   # 套用 mode 的數值 + 路徑策略
+            if a.action_mode:
+                agent.apply_action_mode(a.action_mode)   # 套用 mode 的數值 + 路徑策略
             agent.api_status = "init_response_applied" if self.last_decision_source == "llm" else "rule"
 
         # LLM 模式（不分事件觸發）：persona 池為「出生地 / name / 車種」的單一真實來源，
-        # 確定性覆寫之（初始 active_mode 維持上面的規則式或 LLM init 結果）。
+        # 確定性覆寫之（初始 action_mode 維持上面的規則式或 LLM init 結果）。
         # 出生地只在此處設一次；之後每步決策不會、也不應再更動出生地（agent 只出生一次）。
         if self.cfg.use_llm:
             from ..decisions import profile_pool
@@ -264,7 +264,7 @@ class SimulationEngine:
                 for agent in self.agents:
                     agent.api_status = "persona_assigned"
             else:
-                logger.warning("persona 池不可用（Ollama？），沿用既有人物")
+                logger.warning("persona 池不可用（vLLM 未啟動？），沿用既有人物")
 
     def _build_town_node_index(self) -> None:
         """① 一次性把每個節點歸到「覆蓋它的行政區」清單。
@@ -439,7 +439,7 @@ class SimulationEngine:
     def _tree_routes(self, agents: list[VehicleAgent], avoid_circles=None) -> dict[str, list[str]]:
         """對一批車用反向終點樹算「current_node→destination_node」路徑（含當前壅塞 + avoid_circles）。
 
-        同 active_mode 共用一張 CSR、每個終點一棵反向樹；惰性只建這批用到的 (mode, 終點)。回 {agent_id: path}。
+        同 action_mode 共用一張 CSR、每個終點一棵反向樹；惰性只建這批用到的 (mode, 終點)。回 {agent_id: path}。
         樹找得到路 ⟺ 路存在（avoid_circles 是加權非刪邊），故不需 per-car 退回。
         """
         from ..spatial import routing
@@ -608,7 +608,7 @@ class SimulationEngine:
             a.origin_town = origin
             a.destination_town = dest
             a.apply_vehicle_type(self.rng.choice(config.VEHICLE_TYPES))
-            a.apply_active_mode(self.rng.choice(config.ACTIVE_MODES))
+            a.apply_action_mode(self.rng.choice(config.ACTION_MODES))
             a.api_status = "ambient"
             self.agents.append(a)
         self._ambient_count = len(pairs)
@@ -861,8 +861,8 @@ class SimulationEngine:
             d = decisions.get(agent.agent_id)
             if d is None:
                 continue
-            if d.active_mode:
-                agent.apply_active_mode(d.active_mode)
+            if d.action_mode:
+                agent.apply_action_mode(d.action_mode)
             if d.vehicle_type:
                 agent.apply_vehicle_type(d.vehicle_type)
             if d.reason:
@@ -873,18 +873,18 @@ class SimulationEngine:
         """記錄本步決策日誌（走 WS 取代讀 txt 檔）+ 解析健康度（fallback 數＝解析出問題的訊號）。
 
         `targeted` 是本步被決策的車；`decisions` 是回傳的 {agent_id: StepDecision}。
-        有拿到 active_mode 的算「成功」、其餘算 fallback（維持現 mode）。日誌上限 50 筆控前端 payload。
+        有拿到 action_mode 的算「成功」、其餘算 fallback（維持現 mode）。日誌上限 50 筆控前端 payload。
         """
         log: list[dict[str, Any]] = []
         decided = 0
         for a in targeted:
             d = decisions.get(a.agent_id)
-            if d is not None and getattr(d, "active_mode", ""):
+            if d is not None and getattr(d, "action_mode", ""):
                 decided += 1
                 a.last_decision_cycle = cycle
                 if len(log) < 50:
                     log.append({"name": a.profile_name or a.agent_id,
-                                "mode": a.active_mode, "reason": a.decision_reason})
+                                "mode": a.action_mode, "reason": a.decision_reason})
         self._decision_log = log
         self._decision_health = {
             "triggered": len(targeted), "decided": decided,
@@ -1346,7 +1346,7 @@ class SimulationEngine:
             lat, lng = qd if qd else self._xy_to_latlng(a.x, a.y)
             agents_snap.append(AgentSnapshot(
                 agent_id=a.agent_id, profile_name=a.profile_name, lat=lat, lng=lng,
-                route_status=str(a.route_status), active_mode=a.active_mode,
+                route_status=str(a.route_status), action_mode=a.action_mode,
                 vehicle_type=a.vehicle_type, speed_kmh=round(a.speed_kmh, 2),
                 congestion_proxy=round(a.congestion_proxy, 4),
                 distance_to_destination=round(a.distance_to_destination, 1),
@@ -1764,9 +1764,9 @@ class SimulationEngine:
         ]
         try:  # LLM 後端/模型（若可取得；取不到不影響匯出）
             from llm_server import llm_config
-            params.append(("llm_backend", getattr(llm_config, "LLM_BACKEND", "")))
+            params.append(("llm_backend", "vllm"))
             getter = getattr(llm_config, "current_model", None)
-            params.append(("llm_model", getter() if callable(getter) else getattr(llm_config, "LLM_MODEL", "")))
+            params.append(("llm_model", getter() if callable(getter) else ""))
         except Exception:  # noqa: BLE001
             pass
         return params
@@ -2127,12 +2127,12 @@ class SimulationEngine:
         try:
             from llm_server import llm_config, model_registry
             return {
-                "backend": llm_config.LLM_BACKEND,
+                "backend": "vllm",
                 "current_model": llm_config.current_model(),
                 "vllm_models": model_registry.VLLM_MODELS,
             }
         except ImportError:
-            return {"backend": "ollama", "current_model": "", "vllm_models": []}
+            return {"backend": "vllm", "current_model": "", "vllm_models": []}
 
     def _load_agent_profiles(self) -> dict[str, Any]:
         """回傳 {name: {identity, traits}} 供前端 inspect（以 identity.name 對應 profile_name）。

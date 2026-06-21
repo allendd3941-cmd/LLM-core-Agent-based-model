@@ -19,7 +19,7 @@ class AgentSnapshot:
     lat: float
     lng: float
     route_status: str
-    active_mode: str
+    action_mode: str
     vehicle_type: str
     speed_kmh: float
     congestion_proxy: float
@@ -31,7 +31,7 @@ class AgentSnapshot:
     current_road_id: str
     waiting_at_signal: bool = False  # 本步是否停在號誌路口等紅燈
     trip_summary: str = ""          # 單一 memory 的旅次摘要 summary（前端點擊 agent 顯示）
-    decision_reason: str = ""       # 本步選擇此 active_mode 的原因（前端顯示）
+    decision_reason: str = ""       # 本步選擇此 action_mode 的原因（前端顯示）
     role: str = "event"             # "event"（去事件地點）| "ambient"（背景常態車流）
     phase: str = "ingress"          # 事件車階段：ingress（往球場）/dwell（停留）/egress（往家）/home（已返家）
     last_decision_cycle: int | None = None  # 上次重新決策的週期（inspect 顯示）

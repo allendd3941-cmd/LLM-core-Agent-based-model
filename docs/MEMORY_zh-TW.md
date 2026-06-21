@@ -36,7 +36,7 @@
   "step": 30,                    // 目前 cycle
   "where": "善化區・南科九路",     // 行政區・路名（人記得到的粒度）
   "traffic_feel": "普通",         // 順暢 / 普通 / 壅塞（當下質性）
-  "mode_used": "fast",           // 目前採用的 active mode
+  "mode_used": "fast",           // 目前採用的 action mode
   "moved": "前進中",              // 前進中 / 緩慢 / 停滯（當下質性）
   "getting_closer": true,        // 是否比上一步更接近目的地（趨勢）
   "remaining": "約 7.6 公里",     // 粗略距離（人講大概）

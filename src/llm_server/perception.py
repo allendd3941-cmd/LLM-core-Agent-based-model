@@ -47,7 +47,7 @@ def _fmt_agent(a: dict) -> str:
         f"位於 {e.get('current_town', '?')}／{e.get('current_road', '?')}，"
         f"腳下{e.get('traffic_here', '?')}、{e.get('speed_status', '?')}、前方{e.get('road_ahead', '?')}，"
         f"距終點約 {e.get('distance_to_destination_m', '?')} 公尺、鄰近 {e.get('nearby_agent_count', '?')} 車，"
-        f"現用模式「{a.get('active_mode', '?')}」，旅次印象：{mem.get('summary', '') or '（無）'}"
+        f"現用模式「{a.get('action_mode', '?')}」，旅次印象：{mem.get('summary', '') or '（無）'}"
     )
 
 

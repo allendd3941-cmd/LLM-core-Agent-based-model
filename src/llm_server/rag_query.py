@@ -9,7 +9,7 @@
 
 三條子查詢：
 - 路況：取【全域路況】（descriptive，當前壅塞情勢）。
-- 任務：固定描述「在壅塞下選交通方式/車種的行為傾向」，含五種 active_mode（英文 key + 中文）。
+- 任務：固定描述「在壅塞下選交通方式/車種的行為傾向」，含五種 action_mode（英文 key + 中文）。
 - 人格：聚合這批 persona 的職業/車種/特質，取高頻拼成短句。
 
 註：任務子查詢的英文 key（fast…）對中文知識庫檢索是**惰性**的（char n-gram 撞不到中文文件），
@@ -23,7 +23,7 @@ from collections import Counter
 
 from . import perception
 
-# 任務子查詢（幾乎固定）：對齊 decision_making 的五種 active_mode enum。
+# 任務子查詢（幾乎固定）：對齊 decision_making 的五種 action_mode enum。
 Q_TASK = (
     "在壅塞與時間壓力下，選擇交通方式與車種的行為傾向。交通方式有五種："
     "fast（想要快一點、爭取時間）、"

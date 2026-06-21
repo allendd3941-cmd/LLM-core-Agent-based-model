@@ -1,12 +1,12 @@
-# Active Mode 設計（數值 + 路徑策略）
+# Action Mode 設計（數值 + 路徑策略）
 
-本文件記錄五種 `active_mode` 的設計：每個 mode 的數值權重、以及讓它們走出**不同路徑選擇方式**的策略旗標。所有數值集中在 `config/simulation.toml` 的 `[active_modes.*]`，可自行調整。
+本文件記錄五種 `action_mode` 的設計：每個 mode 的數值權重、以及讓它們走出**不同路徑選擇方式**的策略旗標。所有數值集中在 `config/simulation.toml` 的 `[action_modes.*]`，可自行調整。
 
 ---
 
-## 1. 背景：active_mode 是什麼
+## 1. 背景：action_mode 是什麼
 
-每個 vehicle agent 在每個 cycle 會有一個 `active_mode`（由 mock 規則或 LLM 決定），代表它當下的移動取向。共五種（語意定義在 `src/llm_server/prompts/decision_making_prompt.txt`）：
+每個 vehicle agent 在每個 cycle 會有一個 `action_mode`（由 mock 規則或 LLM 決定），代表它當下的移動取向。共五種（語意定義在 `src/llm_server/prompts/decision_making_prompt.txt`）：
 
 | mode | 語意 |
 |---|---|
@@ -16,7 +16,7 @@
 | `comfortable` | 穩定舒適 |
 | `short_distance` | 想走短一點 |
 
-mock / LLM **只回傳 mode 名字字串**；套用時（`VehicleAgent.apply_active_mode`）會依名字查 `ACTIVE_MODE_PROFILES` 表，帶入對應的數值與路徑策略。
+mock / LLM **只回傳 mode 名字字串**；套用時（`VehicleAgent.apply_action_mode`）會依名字查 `ACTION_MODE_PROFILES` 表，帶入對應的數值與路徑策略。
 
 ---
 
@@ -87,18 +87,22 @@ edge_cost = length × (
 
 > 注意：`avoid` 的繞路、`tolerate` 的不繞路等差異，**主要在模擬跑出實際壅塞後才會明顯**。零壅塞時（剛開始）各 mode 可能走相同路線。
 
+> **UXsim 後端**（`LLM_ABM_ENGINE=uxsim`）：上表是 legacy 引擎的成本權重觀點；UXsim 後端改把這 5 個 mode
+> 映射到 UXsim 既有的 `set_links_prefer`/`set_links_avoid`（`tolerate` = 偏好自由流時間路徑、不繞開壅塞）。
+> 行為一致點：**decision 一改變，下一步就重算該車的路徑選擇**。完整映射表見 `docs/UXSIM_MIGRATION_zh-TW.md` §5.6。
+
 ---
 
 ## 5. 資料流（如何串起來）
 
 ```
-config/simulation.toml [active_modes.*]
+config/simulation.toml [action_modes.*]
     │ tomllib 載入
     ▼
-config.ACTIVE_MODE_PROFILES: dict[str, ActiveModeProfile]
+config.ACTION_MODE_PROFILES: dict[str, ActionModeProfile]
     │ 依名字查表
     ▼
-VehicleAgent.apply_active_mode("avoid_congestion")     # mock/LLM 只回名字
+VehicleAgent.apply_action_mode("avoid_congestion")     # mock/LLM 只回名字
     │ 套用數值 + 策略旗標到 agent 欄位
     ▼
 VehicleAgent.routing_strategy()  ──►  routing.find_path(..., strategy, seed)
@@ -106,8 +110,8 @@ VehicleAgent.routing_strategy()  ──►  routing.find_path(..., strategy, see
 ```
 
 關鍵檔案：
-- `src/llm_abm_simulator/config.py` — `ActiveModeProfile` 資料模型、`_DEFAULT_ACTIVE_MODE_PROFILES`、`_build_active_mode_profiles`、`ACTIVE_MODE_PROFILES`。
-- `src/llm_abm_simulator/domain/agent.py` — 策略欄位、`apply_active_mode`/`_apply_named_profile`、`routing_strategy`。
+- `src/llm_abm_simulator/config.py` — `ActionModeProfile` 資料模型、`_DEFAULT_ACTION_MODE_PROFILES`、`_build_action_mode_profiles`、`ACTION_MODE_PROFILES`。
+- `src/llm_abm_simulator/domain/agent.py` — 策略欄位、`apply_action_mode`/`_apply_named_profile`、`routing_strategy`。
 - `src/llm_abm_simulator/spatial/routing.py` — strategy-aware `find_path`（含 `_edge_jitter`、road-class、硬避開）。
 - `src/llm_abm_simulator/simulation/engine.py` — 初始指派套 profile、重算讀 `recompute_on_crowded`、傳 `seed`。
 
@@ -115,17 +119,17 @@ VehicleAgent.routing_strategy()  ──►  routing.find_path(..., strategy, see
 
 ## 6. 怎麼調整
 
-改 `config/simulation.toml` 的 `[active_modes.<mode>]` 任一值，重設模擬即生效（即時，不需重建路網）。範例：
+改 `config/simulation.toml` 的 `[action_modes.<mode>]` 任一值，重設模擬即生效（即時，不需重建路網）。範例：
 
 ```toml
-[active_modes.avoid_congestion]
+[action_modes.avoid_congestion]
 congestion_penalty = 5.0     # 想更激進地避塞
 avoid_threshold = 0.5        # 更早就把路段視為「該避開」
 route_randomness = 0.30      # 車流分得更散
 ```
 
 - 缺某個 key 會回退到該 mode 的程式碼預設；缺整個 mode 會用內建預設。
-- TOML key 名稱 == `ActiveModeProfile` 欄位名；要加新策略旗標＝dataclass 加欄位 + `find_path` 讀它 + TOML 加同名一行。
+- TOML key 名稱 == `ActionModeProfile` 欄位名；要加新策略旗標＝dataclass 加欄位 + `find_path` 讀它 + TOML 加同名一行。
 
 ---
 

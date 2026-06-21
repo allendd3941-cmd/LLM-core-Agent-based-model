@@ -29,7 +29,7 @@ LLM → action_mode → UXsim 的 set_links_prefer / set_links_avoid（或 route
 **不自寫 Dijkstra**。只有個別 agent 需要「指定整條精確路徑」時才退回 `enforce_route`（M1）。
 `action_mode` 欄位處置：保留並映射 `distance` / `road_class_bias`；精簡被真實 travel time 涵蓋的
 `congestion_penalty`/`avoid_threshold`/`comfort`/`capacity`；`departure`/`recompute_on_crowded` 留為行為。
-（`active_mode` 全面改名為 `action_mode`。）
+（`action_mode` 全面改名為 `action_mode`。）
 
 ## 4. 已確認的 UXsim API（spike 實測，見 `spike/uxsim_spike.py`）
 - `World(deltan, tmax, random_seed, hard_deterministic_mode, print/save/show_mode, route_choice_principle='homogeneous_DUO')`；DUO 旋鈕為大寫屬性 `DUO_NOISE / DUO_UPDATE_TIME / DUO_UPDATE_WEIGHT`。
@@ -62,6 +62,50 @@ UXsim 內建 route choice 用**全對最短路**：`dist/pred/next = n_nodes²`�
 + route 更新較慢、完整模擬只在 server（64GB）跑。`crop_to_region` 改作**本機開發/測試工具**
 （小半徑裁切讓 facade 邏輯能在筆電快速驗證；正式跑用全網 `radius_km<=0`）。
 後續若 route 更新太慢，可調大 `DUO_UPDATE_TIME` 或日後做「只算實際終點的稀疏 route choice」。
+
+## 5.5 congestion_proxy 對齊 UXsim 物理 + highway_specs 套用情形
+
+**`congestion_proxy` 已對齊 UXsim 物理**（`UXsimEngine._readback`）：
+```
+congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
+```
+- `kappa` = UXsim link 的 **jam density**（即 `build_world` 傳入的 `[uxsim].jam_density`）、`length` = link 長度
+  → `kappa × length` = 該 link 堵塞時最多容納車數（＝ UXsim 判斷 spillback/壅塞的同一儲容）。
+- **不再用 `[highway_specs].capacity_per_lane`** 當分母（那是 legacy 引擎的容量）。
+- 此 proxy 驅動 `is_crowded` / `avoid_congestion` 觸發 / 前端壅塞上色 / `build_analysis` 的 V/C（用同一儲容）。
+
+**`[highway_specs]` 在 UXsim 後端的實際套用**：
+| highway_specs 欄位 | 是否進 UXsim 物理 | 說明 |
+|---|---|---|
+| `speed_car` / `lanes` | ✅ 是 | 下載時烤進 graphml（OSM 真實值優先）→ `addLink(free_flow_speed, number_of_lanes)`。**改了要重建 graphml**。 |
+| `capacity_per_lane` | ❌ 否 | UXsim path **已不使用**（容量由 FD：`free_flow_speed × jam_density × lanes` 推；congestion_proxy 改用 `kappa×length` 儲容）。 |
+| jam density | — | 來自 `[uxsim].jam_density`，**全路型統一**；要分路型需改用 `jam_density_per_lane`（未做，屬 Phase 6 FD 校準）。 |
+
+> ⚠️ **`crowded_road_threshold` 語意改變**：congestion_proxy 現在是「真實占有率」（1km link 約可容 `kappa×length` 台，故同樣車數下占有率比舊 proxy 低很多）。demo 若要更敏感的壅塞觸發，**把 `crowded_road_threshold` 調低**（或日後用 `jam_density_per_lane` 讓多車道容量更真實）。
+
+## 5.6 五種 action_mode → UXsim 路徑選擇參數（最終映射）
+
+**只用 UXsim 既有的 per-vehicle route-choice 參數**（`set_links_prefer` / `set_links_avoid`），不自寫路由器。
+路徑用快取的反向終點樹（單一權重）算出後，取其 link 名餵給 UXsim。
+
+| action_mode | UXsim 動作 | 路徑來源（樹權重） | 行為 |
+|---|---|---|---|
+| `fast` | 清 prefer/avoid（純 DUO） | — | DUO 依**即時旅時**選路，自然避開壅塞 |
+| `comfortable` | `set_links_prefer(路徑 links)` | 自由流時間 + `road_class_bias`（偏好幹道） | 走大路、朝終點（有方向→不亂繞） |
+| `short_distance` | `set_links_prefer(路徑 links)` | 純距離 | 總距離最短 |
+| `tolerate_congestion` | `set_links_prefer(路徑 links)` | 自由流時間 | 黏著計畫路徑、**忍受壅塞不繞開** |
+| `avoid_congestion` | `set_links_avoid(壅塞 links)` + 連通守衛 | （依當前壅塞） | 主動繞開塞車路段 |
+
+**重算時機（驗收標準）**：`_inject_routes` 以 `first = (已注入 mode != 當前 mode)` 判斷——
+**只要 decision 改變（mode 變），下一步即重算該車的路徑選擇**（重算偏好/避開集合）。
+此外 `avoid_congestion` 還會在「該車壅塞 + 過 reroute cooldown」時追當前壅塞重算。
+`tolerate/comfortable/short_distance` 的路徑與當前壅塞無關，故只在 decision 改變時重算即可。
+
+**`set_links_prefer` 為何中途安全且不卡死**（見 `uxsim.py` `route_next_link_choice`）：
+每個路口先做「出口邊 ∩ 偏好清單」，**且交集非空才限縮**；若該路口沒有任何偏好邊
+（被擠出原路徑 / spillback / 前方全塞）→ 跳過限縮 → 退回全部出口邊由 DUO 選 → **永遠有路走**。
+（對比 `set_links_avoid` 是「相減」，全避會變空集合 → `max()` 崩潰 → 故 `avoid_congestion` 需連通守衛；`prefer` 不需要。）
+也因此 `tolerate` 不再用 `enforce_route`（其 `specified_route` 用「已走 link 數」索引、中途套用會崩）。
 
 ## 6. 進度
 - **Phase 0 spike ✅**：UXsim 能支撐 Design 2 + 介入（不退 SUMO）。唯 deltan=1 城市尺度吞吐待 server 量。

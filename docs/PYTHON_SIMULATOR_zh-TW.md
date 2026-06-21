@@ -24,7 +24,7 @@
 | `[agents]` | `nb_agents`（預設 agent 數）/ 起訖行政區 |
 | `[perception]` | 感知半徑、抵達容差、`crowded_speed_factor`（壅塞降速）、壅塞門檻、`nearby_mode`（鄰近車數 grid/exact）、`town_mode`（current_town node/exact）；見 `docs/SCALING_zh-TW.md` §6 |
 | `[movement]` | agent 速度（`default_desired_speed_kmh` / `default_speed_car_kmh` / `default_speed_moto_kmh`）與預設路徑權重 |
-| `[active_modes.*]` | 五種 active_mode 各自的數值權重與路徑策略（詳見 [`ACTIVE_MODES_zh-TW.md`](ACTIVE_MODES_zh-TW.md)）|
+| `[action_modes.*]` | 五種 action_mode 各自的數值權重與路徑策略（詳見 [`ACTION_MODES_zh-TW.md`](ACTION_MODES_zh-TW.md)）|
 | `[roads]` | 車流→壅塞估計與權重、視覺化門檻 |
 | `[llm]` | `use_llm`＝事件車決策核心：false 規則式（預設）/ true LLM；背景車一律規則式（見 `docs/DEMO_FEATURES_zh-TW.md`）|
 | `[memory]` | 單一旅次記憶 memory 的質性門檻（不再分長短期；見 `docs/MEMORY_zh-TW.md`） |
@@ -132,7 +132,7 @@ PYTHONUNBUFFERED=1 uv run uvicorn llm_abm_simulator.web.app:app --host 0.0.0.0 -
 ## 4. 啟用 LLM 決策模式（可選，需 Ollama）
 
 LLM 模式跑 pipeline（`run_agent_profile` → `run_perception`【確定性模板，非 LLM】→
-`run_decision_making`）取得每個 agent 的 active_mode / 車種。每批僅 `run_decision_making`
+`run_decision_making`）取得每個 agent 的 action_mode / 車種。每批僅 `run_decision_making`
 一次 LLM 呼叫。**需要 Ollama 在跑**（模型見 `.env`）。
 > 出生地**不**由 persona 決定，而是由重力模型依人口+距離衰減分配（見 `docs/DEMAND_zh-TW.md`）。
 
@@ -312,7 +312,7 @@ tests/simulator/           pytest
 | ROADLINK 路網（本專案無此檔）| `spatial/road_network.py`：OSM bundle / 合成 fallback |
 | `as_edge_graph` / `path_between` / `with_weights` 動態權重 / crowded recompute | `spatial/routing.py` + 引擎 |
 | road 欄位（speed_car/moto, lanes, capacity, flow, congestion_proxy, weight…）| `domain/road.py` |
-| vehicle 欄位與 active_mode 偏好、`role`、單一旅次記憶 memory（見 `docs/MEMORY_zh-TW.md`）、route_status… | `domain/agent.py` |
+| vehicle 欄位與 action_mode 偏好、`role`、單一旅次記憶 memory（見 `docs/MEMORY_zh-TW.md`）、route_status… | `domain/agent.py` |
 | perceive（速限/missing cap/crowded factor/感知半徑/鄰近數/距離/抵達/重算）| `simulation/engine.py` |
 | congestion 指標、mode/status 分佈、per-cycle | `simulation/metrics.py` |
 | init/step payload 契約（in-process 直呼 llm_server pipeline）、LLM fallback | `decisions/llm_adapter.py` + `response_parser.py` |

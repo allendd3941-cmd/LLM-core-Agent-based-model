@@ -44,8 +44,8 @@ VALIDATION_CAMERAS_CSV = DATA_DIR / "validation_cameras.csv"   # 驗證用真實
 CRS_METRIC = "EPSG:3826"
 CRS_WGS84 = "EPSG:4326"
 
-# 五種 active mode（對齊 prompts/decision_making_prompt.txt 與 LLM 實際輸出）
-ACTIVE_MODES = ("fast", "tolerate_congestion", "avoid_congestion", "comfortable", "short_distance")
+# 五種 action mode（對齊 prompts/decision_making_prompt.txt 與 LLM 實際輸出）
+ACTION_MODES = ("fast", "tolerate_congestion", "avoid_congestion", "comfortable", "short_distance")
 VEHICLE_TYPES = ("汽車", "機車")
 
 # 台南市 37 個行政區（mock profile 生成用；以 TOWN_MOI 實際載入為準，此處為 fallback）
@@ -82,7 +82,7 @@ class SimulationConfig:
     nearby_mode: str = "grid"                    # 鄰近車數估法："grid"（空間網格近似、O(n)）|"exact"（精確全比對、O(n²)）
     town_mode: str = "node"                      # current_town 估法："node"（所在節點所屬區、O(1)）|"exact"（精確位置、O(車數×區數)）
 
-    # === 預設移動偏好（GAML default_* active_mode）===
+    # === 預設移動偏好（GAML default_* action_mode）===
     default_vehicle_type: str = "汽車"
     default_desired_speed_kmh: float = 40.0
     default_speed_car_kmh: float = 45.0
@@ -199,7 +199,7 @@ class ProfileConfig:
 class ScalingConfig:
     """LLM 決策的規模化設定（對應 TOML ``[scaling]``）。詳見 docs/SCALING_zh-TW.md。
 
-    純事件觸發：LLM 模式下只在「踩到壅塞/前方塞」時才呼叫 LLM 重決 active_mode；
+    純事件觸發：LLM 模式下只在「踩到壅塞/前方塞」時才呼叫 LLM 重決 action_mode；
     順暢的車整趟維持規則式初始 mode。觸發的 agent 分批、並行送 LLM（同步等齊再推前端）。
     """
 
@@ -215,6 +215,28 @@ class ScalingConfig:
     # 終點樹會改結果：同 mode+終點走相同(當前壅塞下)最短路(無 per-car jitter)、背景車終點收斂到區代表節點；
     # 含當前壅塞與 avoid_circles 權重，與 find_path 等價(只差 jitter)。城市尺度把每步重算從上萬次 networkx 降到數十棵樹。
     profile_steps: bool = True               # 每步分段計時（decide/move/reroute/flow/…）印一行；純量測、不改結果。
+
+
+@dataclass(frozen=True)
+class UXsimConfig:
+    """UXsim 後端的全域設定（對應 TOML ``[uxsim]``）。詳見 docs/UXSIM_MIGRATION_zh-TW.md。
+
+    僅在 engine_backend=uxsim（環境變數 ``LLM_ABM_ENGINE=uxsim``）時生效。
+    deltan / dev_crop_km 可被環境變數 ``UXSIM_DELTAN`` / ``UXSIM_DEV_CROP_KM`` 覆寫（本機開發方便）。
+    """
+
+    deltan: int = 1                          # 平台聚合單位（1=每車獨立，個體 LLM 必需；成本 ∝ 1/deltan²）
+    jam_density: float = 0.2                  # link 堵塞密度 veh/m/lane（FD 校準對象）
+    dev_crop_km: float = 0.0                 # 本機開發裁切半徑（球場為心；0=全市。正式全市、本機可設 8）
+    reaction_time: float = 1.0               # UXsim 跟車反應時間 s（影響 FD/時間步）
+    route_choice_principle: str = "homogeneous_DUO"  # 路徑選擇原則
+    duo_update_time: float = 600.0           # 路徑重算間隔 s
+    duo_update_weight: float = 0.5           # 換到新最短路的強度 λ
+    duo_noise: float = 0.01                  # 路徑選擇隨機擾動
+    route_choice_update_gradual: bool = False  # 是否逐步更新路徑比例
+    instantaneous_TT_timestep_interval: int = 5  # 多久算一次 link 即時旅時（餵選路）
+    no_cyclic_routing: bool = False          # 禁止重複經過同節點（防繞圈）
+    hard_deterministic_mode: bool = True     # 永遠走最短路、無隨機（可重現；UXsim 預設 False，本專案設 True）
 
 
 @dataclass(frozen=True)
@@ -328,12 +350,12 @@ _DEFAULT_HIGHWAY_SPEC = {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacit
 
 
 @dataclass(frozen=True)
-class ActiveModeProfile:
-    """單一 active_mode 的「數值 + 路徑策略」（對應 TOML ``[active_modes.<name>]``）。
+class ActionModeProfile:
+    """單一 action_mode 的「數值 + 路徑策略」（對應 TOML ``[action_modes.<name>]``）。
 
     前四個 weight 驅動 routing 基礎成本（time/distance/comfort/capacity 的相對大小決定取向）；
     後面的策略旗標讓每個 mode 走出「不同的路徑選擇方式」，預設值皆為「關閉」→
-    不啟用任何旗標時行為等同原本的最短路徑。詳見 docs/ACTIVE_MODES_zh-TW.md。
+    不啟用任何旗標時行為等同原本的最短路徑。詳見 docs/ACTION_MODES_zh-TW.md。
     """
 
     desired_speed_kmh: float = 40.0
@@ -349,30 +371,30 @@ class ActiveModeProfile:
     route_randomness: float = 0.0        # 每邊成本隨機微擾 ±randomness（seeded，可重現）；用來分散車流
 
 
-# 五種 active_mode 的內建預設（TOML [active_modes] 缺省/缺值時的 fallback）。
+# 五種 action_mode 的內建預設（TOML [action_modes] 缺省/缺值時的 fallback）。
 # 設計取向：fast/tolerate 拚時間、avoid 拚避塞、comfortable 拚路況好、short 拚距離。
-_DEFAULT_ACTIVE_MODE_PROFILES: dict[str, ActiveModeProfile] = {
+_DEFAULT_ACTION_MODE_PROFILES: dict[str, ActionModeProfile] = {
     # 最短時間：時間權重高、無視壅塞、塞了會重算找更快的
-    "fast": ActiveModeProfile(
+    "fast": ActionModeProfile(
         desired_speed_kmh=55.0, time_weight=0.70, distance_weight=0.20,
         comfort_weight=0.05, capacity_weight=0.05, route_randomness=0.05),
     # 時間優先但「不繞路」：成本同 fast，但塞車不重算（走到底）
-    "tolerate_congestion": ActiveModeProfile(
+    "tolerate_congestion": ActionModeProfile(
         desired_speed_kmh=45.0, time_weight=0.55, distance_weight=0.30,
         comfort_weight=0.10, capacity_weight=0.05,
         recompute_on_crowded=False, route_randomness=0.05),
     # 避塞：壅塞重罰 + 對高壅塞邊硬避開、積極重算、高隨機分散車流
-    "avoid_congestion": ActiveModeProfile(
+    "avoid_congestion": ActionModeProfile(
         desired_speed_kmh=38.0, time_weight=0.20, distance_weight=0.10,
         comfort_weight=0.25, capacity_weight=0.45,
         congestion_penalty=3.0, avoid_threshold=0.6, route_randomness=0.20),
     # 舒適：偏好大路（road_class_bias），中度避塞
-    "comfortable": ActiveModeProfile(
+    "comfortable": ActionModeProfile(
         desired_speed_kmh=42.0, time_weight=0.20, distance_weight=0.10,
         comfort_weight=0.45, capacity_weight=0.25,
         congestion_penalty=1.0, road_class_bias=0.4, route_randomness=0.10),
     # 最短距離：純距離、無視速度與路型，願意鑽小路抄近
-    "short_distance": ActiveModeProfile(
+    "short_distance": ActionModeProfile(
         desired_speed_kmh=35.0, time_weight=0.10, distance_weight=0.70,
         comfort_weight=0.10, capacity_weight=0.10, route_randomness=0.10),
 }
@@ -416,7 +438,7 @@ def _overrides_for(cls: type, raw: dict[str, Any], skip_sections: set[str]) -> d
 
 
 def _build_simulation_config(raw: dict[str, Any]) -> SimulationConfig:
-    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "active_modes", "memory", "perception_context", "profile", "scaling", "signals", "llm_budget", "demand", "ambient", "departure", "egress"})
+    overrides = _overrides_for(SimulationConfig, raw, skip_sections={"ui", "highway_specs", "action_modes", "memory", "perception_context", "profile", "scaling", "signals", "llm_budget", "demand", "ambient", "departure", "egress", "uxsim"})
     cfg = dataclasses.replace(SimulationConfig(), **overrides)
     if cfg.max_steps <= 0 or cfg.step_minutes <= 0:
         raise ValueError("設定檔 [time].max_steps / step_minutes 必須為正整數")
@@ -471,6 +493,19 @@ def _build_scaling_config(raw: dict[str, Any]) -> ScalingConfig:
     if sc.init_workers < 0 or sc.parallel_init_min_agents < 1:
         raise ValueError("設定檔 [scaling]：init_workers≥0、parallel_init_min_agents≥1")
     return sc
+
+
+def _build_uxsim_config(raw: dict[str, Any]) -> UXsimConfig:
+    overrides = {k: v for k, v in raw.get("uxsim", {}).items()
+                 if k in {f.name for f in fields(UXsimConfig)}}
+    uc = dataclasses.replace(UXsimConfig(), **overrides)
+    if uc.deltan < 1:
+        raise ValueError("設定檔 [uxsim]：deltan≥1")
+    if uc.jam_density <= 0:
+        raise ValueError("設定檔 [uxsim]：jam_density>0")
+    if uc.duo_update_time <= 0 or uc.duo_update_weight < 0 or uc.duo_noise < 0:
+        raise ValueError("設定檔 [uxsim]：duo_update_time>0、duo_update_weight≥0、duo_noise≥0")
+    return uc
 
 
 def _build_demand_config(raw: dict[str, Any]) -> DemandConfig:
@@ -567,17 +602,17 @@ def _build_highway_specs(raw: dict[str, Any]) -> tuple[dict[str, dict[str, float
     return (table or dict(_DEFAULT_HIGHWAY_SPECS)), default_spec
 
 
-def _build_active_mode_profiles(raw: dict[str, Any]) -> dict[str, ActiveModeProfile]:
-    """以內建預設為底，用 TOML [active_modes.<name>] 覆寫各 mode；缺的 mode 補回預設。"""
-    section = raw.get("active_modes")
-    profiles = dict(_DEFAULT_ACTIVE_MODE_PROFILES)
+def _build_action_mode_profiles(raw: dict[str, Any]) -> dict[str, ActionModeProfile]:
+    """以內建預設為底，用 TOML [action_modes.<name>] 覆寫各 mode；缺的 mode 補回預設。"""
+    section = raw.get("action_modes")
+    profiles = dict(_DEFAULT_ACTION_MODE_PROFILES)
     if isinstance(section, dict):
-        valid = {f.name for f in fields(ActiveModeProfile)}
+        valid = {f.name for f in fields(ActionModeProfile)}
         for name, body in section.items():
             if not isinstance(body, dict):
                 continue
             overrides = {k: v for k, v in body.items() if k in valid}
-            base = profiles.get(name, ActiveModeProfile())
+            base = profiles.get(name, ActionModeProfile())
             profiles[name] = dataclasses.replace(base, **overrides)
     return profiles
 
@@ -600,8 +635,9 @@ DEPARTURE_CONFIG = _build_departure_config(_RAW)
 EGRESS_CONFIG = _build_egress_config(_RAW)
 LLM_BUDGET = _build_llm_budget_config(_RAW)
 SIGNAL_CONFIG = _build_signal_config(_RAW)
+UXSIM_CONFIG = _build_uxsim_config(_RAW)
 HIGHWAY_SPECS, DEFAULT_HIGHWAY_SPEC = _build_highway_specs(_RAW)
-ACTIVE_MODE_PROFILES = _build_active_mode_profiles(_RAW)
+ACTION_MODE_PROFILES = _build_action_mode_profiles(_RAW)
 
 # runtime 可覆寫的 max_model_len（前端選模型時依該模型 context 設定；None＝用 [llm_budget] 值）
 _RUNTIME_MAX_MODEL_LEN: int | None = None

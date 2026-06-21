@@ -51,9 +51,11 @@ class UXsimEngine(SimulationEngine):
         self._arterial_links: list[str] = []         # 幹道 link 名（road_class_bias 偏好注入用）
         self._injected: dict[str, str] = {}          # agent_id → 已注入的偏好類型（避免重複套用）
         self._respawn_count: dict[str, int] = {}     # ambient agent_id → 已重生次數（車名唯一）
-        # deltan=1＝每車獨立（個體 LLM 必需）。本機開發可用 UXSIM_DEV_CROP_KM 小裁切（0=全市）。
-        self._deltan = int(_env_float("UXSIM_DELTAN", 1))
-        self._dev_crop_km = _env_float("UXSIM_DEV_CROP_KM", 0.0)
+        self._dest_trees: dict[str, object] = {}     # "distance"/"time" → DestinationTrees（短距/釘路用,快取）
+        # 全域設定來自 config [uxsim]；deltan / dev_crop 另允許環境變數覆寫（本機開發方便）。
+        uc = config.UXSIM_CONFIG
+        self._deltan = int(_env_float("UXSIM_DELTAN", uc.deltan))
+        self._dev_crop_km = _env_float("UXSIM_DEV_CROP_KM", uc.dev_crop_km)
 
     # ------------------------------------------------------------------
     # initialize：父類做 setup（含被覆寫的 _place_all_agents）→ 建 World + 車
@@ -96,8 +98,16 @@ class UXsimEngine(SimulationEngine):
         assert self.network is not None
         sm = self.cfg.step_minutes
         tmax = int((self.cfg.max_steps + 2) * sm * 60)
-        W = uxsim_builder.build_world(self.network, tmax=tmax, deltan=self._deltan,
-                                      seed=self.cfg.seed, signals=self.signals)
+        uc = config.UXSIM_CONFIG
+        W = uxsim_builder.build_world(
+            self.network, tmax=tmax, deltan=self._deltan, seed=self.cfg.seed,
+            signals=self.signals, jam_density=uc.jam_density, reaction_time=uc.reaction_time,
+            duo_update_time=uc.duo_update_time, duo_update_weight=uc.duo_update_weight,
+            duo_noise=uc.duo_noise, route_choice_principle=uc.route_choice_principle,
+            route_choice_update_gradual=uc.route_choice_update_gradual,
+            instantaneous_TT_timestep_interval=uc.instantaneous_TT_timestep_interval,
+            no_cyclic_routing=uc.no_cyclic_routing,
+            hard_deterministic_mode=uc.hard_deterministic_mode)
         self._link_by_road = {l.name: l for l in W.LINKS}
         in_net = set(self.network.graph.nodes())
         added = 0
@@ -142,15 +152,22 @@ class UXsimEngine(SimulationEngine):
             if n <= 0:
                 continue
             road = self._roads_by_id.get(road_id)
-            if road is not None:
-                road.update_flow(n, self.cfg.capacity_fallback_vehicle_count,
-                                 self.cfg.flow_weight_multiplier)
-                rec = self._road_peak.get(road.road_id)   # 累積尖峰（供 build_analysis 瓶頸分析）
-                if rec is None or road.congestion_proxy > rec["peak_proxy"]:
-                    self._road_peak[road.road_id] = {
-                        "road_id": road.road_id, "name": road.road_name or road.road_id,
-                        "peak_proxy": round(road.congestion_proxy, 4),
-                        "peak_flow": int(road.current_flow), "capacity": round(road.capacity, 1)}
+            if road is None:
+                continue
+            # congestion_proxy 對齊 UXsim 物理：占有率 = 車數 / 堵塞儲容（kappa × 長度）。
+            # kappa = UXsim link 的 jam density（即 build_world 傳入的 [uxsim].jam_density），
+            # 與 UXsim 判斷 spillback/壅塞的依據一致；**不再用 [highway_specs].capacity_per_lane**。
+            kappa = float(getattr(link, "kappa", 0.0)) or float(getattr(link, "jam_density", 0.0))
+            length = float(getattr(link, "length", 0.0)) or max(road.length, 1.0)
+            storage = kappa * length   # 該 link 最多容納車數（堵塞時）
+            road.current_flow = n
+            road.congestion_proxy = round(min(1.0, n / storage), 4) if storage > 0 else 0.0
+            rec = self._road_peak.get(road.road_id)   # 累積尖峰（供 build_analysis 瓶頸分析；V/C 用同一儲容）
+            if rec is None or road.congestion_proxy > rec["peak_proxy"]:
+                self._road_peak[road.road_id] = {
+                    "road_id": road.road_id, "name": road.road_name or road.road_id,
+                    "peak_proxy": road.congestion_proxy, "peak_flow": n,
+                    "capacity": round(storage, 1)}
         # 2) 每台車 → agent 欄位（並用 traveled_route 差分填本步走過的邊，供繼承的 _update_detectors 計數）
         self._step_entered_edges = {}
         for a in self.agents:
@@ -202,45 +219,116 @@ class UXsimEngine(SimulationEngine):
         """flow 已在 _readback 從 UXsim link 更新；此處不再用 agent path 統計。"""
         return
 
-    def _inject_routes(self) -> None:
-        """Design 2 路徑注入：把 action_mode 的非時間偏好翻成 UXsim 每車 ``set_links_prefer``。
+    def _refresh_agent_perception(self, agent, pre_move: bool) -> None:
+        """繼承感知 + 補設 ``is_crowded``（legacy 在 _perceive_speed 設；UXsim 不跑那段，故在此設，
+        否則 _triggered_agents / avoid_congestion 的壅塞觸發會永遠 False）。"""
+        super()._refresh_agent_perception(agent, pre_move)
+        agent.is_crowded = agent.congestion_proxy >= self.cfg.crowded_road_threshold
 
-        目前映射（與使用者確認的方向）：``road_class_bias > 0`` → 偏好幹道（links_prefer=幹道 link），
-        UXsim 內建演算法在此偏好下自行算路 → **異質路線、零自寫 Dijkstra**。time/壅塞由 UXsim
-        travel-time 自然涵蓋；distance/comfort 暫不額外注入（被 travel-time 近似）。
-        只在「該車偏好類型改變」時才重套（避免每步對全車重設）。avoid_circles 介入併入 links_avoid。
+    # ------------------------------------------------------------------
+    # action_mode → UXsim 路徑選擇參數（只用 UXsim 既有旋鈕，不自寫選路演算法）
+    # ------------------------------------------------------------------
+    def _inject_routes(self, cycle: int) -> None:
+        """把每台事件車的 action_mode 翻成 UXsim 既有的 route-choice 參數。
+
+        映射（見 docs/UXSIM_MIGRATION_zh-TW.md）：
+          fast                → 清 prefer/avoid（純 UXsim DUO，即時旅時）
+          comfortable         → set_links_prefer(幹道)
+          short_distance      → set_links_prefer(靜態最短距離路徑的 links)
+          tolerate_congestion → set_links_prefer(自由流時間最短路) 黏著計畫、忍受壅塞（不繞開）
+          avoid_congestion    → set_links_avoid(壅塞 links；連通守衛：全塞則不避 → DUO 走最不塞)
+        重算時機：**decision 改變（mode 變）即重算路徑選擇**（first=True → 重算偏好/避開集合）；
+        此外 avoid_congestion 還會在「該車壅塞 + 過 reroute cooldown」時重算（追當前壅塞）。
+        tolerate/comfortable/short_distance 的路徑與當前壅塞無關，故只在 decision 改變時重算。
+        背景車不經此（純 DUO）。
         """
-        if not self._arterial_links:
+        if self._world is None:
             return
-        # 只做「安全的」prefer：set_links_prefer 只過濾出口、無偏好出口時自動退回全部 → 不會困死車。
-        # set_links_avoid 有困死風險（若某節點所有出口都被避 → UXsim max() 崩潰），avoid_area 介入
-        # 需 stranding-safe 機制（小圓 / 成本懲罰），延後（見 docs/UXSIM_MIGRATION_zh-TW.md §5.1）。
+        sc = config.SCALING_CONFIG
+        sm = max(1, self.cfg.step_minutes)
         for a in self._event_agents():
             veh = self._veh.get(a.agent_id)
-            if veh is None:
+            if veh is None or a.waiting_for_origin:
                 continue
-            want = "arterial" if float(getattr(a, "road_class_bias", 0.0) or 0.0) > 0.05 else "none"
-            if self._injected.get(a.agent_id) == want:
+            mode = a.action_mode or "fast"
+            first = self._injected.get(a.agent_id) != mode
+            recompute = (mode == "avoid_congestion" and a.is_crowded
+                         and (cycle - a.last_reroute_cycle) * sm >= sc.reroute_cooldown_minutes)
+            if not (first or recompute):
                 continue
-            try:
-                veh.set_links_prefer(self._arterial_links if want == "arterial" else [])
-                self._injected[a.agent_id] = want
-            except Exception:  # noqa: BLE001
-                pass
+            self._apply_action_mode(a, veh, mode)
+            self._injected[a.agent_id] = mode
+            a.last_reroute_cycle = cycle
 
-    def _intervention_avoid_links(self) -> list[str]:
-        """把 NL 介入的避讓圓（``_avoid_circles``）轉成要避開的 link 名清單（avoid_area 介入）。"""
-        circles = getattr(self, "_avoid_circles", None)
-        if not circles or self.network is None:
+    def _apply_action_mode(self, a, veh, mode: str) -> None:
+        try:
+            if mode == "comfortable":
+                veh.set_links_avoid([])
+                # 偏好「朝終點、且偏好幹道」那條路徑的 links（有方向→不亂繞；勿用全部幹道）
+                veh.set_links_prefer(self._dest_path_links(a, "comfort"))
+            elif mode == "short_distance":
+                veh.set_links_avoid([])
+                veh.set_links_prefer(self._dest_path_links(a, "distance"))
+            elif mode == "tolerate_congestion":
+                # 偏好「自由流時間最短路」的 links：黏著計畫走、不繞開壅塞（= 忍受）。
+                # 用 set_links_prefer（非 enforce_route）→ 每路口把候選邊交集到計畫路徑上、
+                # 中途呼叫安全、decision 一變即重算；該路口無偏好邊時 UXsim 自動退回全部出口邊/DUO
+                # （uxsim route_next_link_choice 的交集只在非空時才限縮）→ 全塞/被擠出原路也不卡死。
+                veh.set_links_avoid([])
+                veh.set_links_prefer(self._dest_path_links(a, "time"))
+            elif mode == "avoid_congestion":
+                veh.set_links_prefer([])
+                veh.set_links_avoid(self._safe_congested_avoid(a))
+            else:                                          # fast / 未知 → 純 DUO
+                veh.set_links_prefer([])
+                veh.set_links_avoid([])
+        except Exception as e:  # noqa: BLE001
+            logger.debug("inject %s 失敗 %s: %s", mode, a.agent_id, e)
+
+    def _event_dest_tree(self, kind: str):
+        """快取的反向終點樹（單一權重；distance=純距離、time=自由流時間,皆與壅塞無關→可全程快取）。
+        一個實例服務所有終點（DestinationTrees 內部對每個 dest 的反向 Dijkstra 自動快取）。"""
+        if kind not in self._dest_trees:
+            from ..spatial.routing import DestinationTrees
+            if kind == "distance":
+                strat = {"time": 0.0, "distance": 1.0, "comfort": 0.0, "capacity": 0.0, "randomness": 0.0}
+            elif kind == "comfort":   # 自由流時間 + 偏好幹道（road_class_bias）→ 朝終點走大路那條
+                strat = {"time": 1.0, "distance": 0.0, "comfort": 0.0, "capacity": 0.0,
+                         "road_class_bias": 0.4, "randomness": 0.0}
+            else:  # time（自由流）
+                strat = {"time": 1.0, "distance": 0.0, "comfort": 0.0, "capacity": 0.0, "randomness": 0.0}
+            self._dest_trees[kind] = DestinationTrees(self.network, strat, seed=self.cfg.seed)
+        return self._dest_trees[kind]
+
+    def _dest_path_links(self, a, kind: str) -> list:
+        """該車 current_node→destination_node 的單一權重最短路 → link 名清單。"""
+        if not a.current_node or not a.destination_node:
             return []
-        out: list[str] = []
-        for (u, v), road in self.network.roads.items():
-            vx, vy = self.network.node_xy(v)
-            for cx, cy, r in circles:
-                if (vx - cx) ** 2 + (vy - cy) ** 2 <= r * r:
-                    out.append(road.road_id)
-                    break
-        return out
+        node_path = self._event_dest_tree(kind).paths_to(
+            a.destination_node, [a.current_node]).get(a.current_node, [])
+        return self._path_link_names(node_path)
+
+    def _path_link_names(self, node_path: list) -> list:
+        names = []
+        for u, v in zip(node_path, node_path[1:]):
+            road = self.network.road_between(u, v) if self.network else None
+            if road is not None:
+                names.append(road.road_id)
+        return names
+
+    def _safe_congested_avoid(self, a) -> list:
+        """回傳此車要避開的壅塞 link 名；**連通守衛**：若避開會使 current→dest 斷路（前方全塞）→
+        回空（不避）→ 交 UXsim DUO 走最小旅時 = 最不塞那條（保證一定有路、絕不卡死）。"""
+        import networkx as nx
+        thr = self.cfg.crowded_road_threshold
+        congested = [r for r in self._roads_by_id.values() if r.congestion_proxy >= thr]
+        if not congested or self.network is None or not a.current_node or not a.destination_node:
+            return []
+        avoid_edges = [(r.node_a, r.node_b) for r in congested]
+        view = nx.restricted_view(self.network.graph, [], avoid_edges)   # 不複製、O(1) view
+        if nx.has_path(view, a.current_node, a.destination_node):
+            return [r.road_id for r in congested]   # 仍連通 → 全避
+        return []                                   # 全塞 → 不避（DUO 走最不塞）
 
     # ------------------------------------------------------------------
     # step：UXsim 推進 + 讀回，重用父類的決策/感知/偵測器/指標/snapshot
@@ -257,7 +345,7 @@ class UXsimEngine(SimulationEngine):
         # 決策（rule：每步對事件車決策；LLM 之後接）。先讀回一次讓決策有最新感知。
         env = self._environment_summary(cycle)
         self._apply_step_decisions(env, cycle)
-        self._inject_routes()
+        self._inject_routes(cycle)
 
         # 物理推進到本週期末
         t_target = int(cycle * self.cfg.step_minutes * 60)
@@ -443,3 +531,4 @@ class UXsimEngine(SimulationEngine):
         self._arterial_links = []
         self._injected = {}
         self._respawn_count = {}
+        self._dest_trees = {}

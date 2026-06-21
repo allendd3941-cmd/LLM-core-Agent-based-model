@@ -5,7 +5,7 @@
 - ``with_weights`` 依 flow 動態調整權重，使壅塞路段較不易被選 → 權重函式讀 Road 即時狀態。
 - ``goto recompute_path: is_crowded`` → 引擎在 agent crowded 時呼叫 ``find_path`` 重算。
 
-權重結合「道路即時壅塞」與「agent 的 active_mode 偏好」（time/distance/comfort/capacity）。
+權重結合「道路即時壅塞」與「agent 的 action_mode 偏好」（time/distance/comfort/capacity）。
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def find_path(
     """加權最短路徑；找不到時回傳空 list（對齊 GAML 找不到 path 的情況）。
 
     Args:
-        strategy: active_mode 的路徑策略。除四個權重 time/distance/comfort/capacity 外，
+        strategy: action_mode 的路徑策略。除四個權重 time/distance/comfort/capacity 外，
             可選旗標（皆有「關閉」預設，省略時行為等同原最短路徑）：
             ``congestion_penalty``（額外壅塞懲罰倍率）、``avoid_threshold``（硬避開門檻）、
             ``road_class_bias``（偏好幹道）、``randomness``（每邊微擾）、``salt``（分散用，通常 agent_id）。
@@ -86,12 +86,12 @@ def path_length_m(network: RoadNetwork, path: list[str]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# 終點樹路由（城市尺度 init 用）：同一 active_mode 用一張靜態權重圖，對每個終點只算一次
+# 終點樹路由（城市尺度 init 用）：同一 action_mode 用一張靜態權重圖，對每個終點只算一次
 # 反向 Dijkstra（scipy C 層），每車沿前驅讀路徑 → 取代逐車 networkx 搜尋。
 # 語意：同 mode+終點的車走相同路徑（無 per-car jitter）；congestion=0 時與 find_path 等價（salt 除外）。
 # ---------------------------------------------------------------------------
 def strategy_signature(s: dict[str, Any]) -> tuple:
-    """同一 active_mode 的策略簽章（不含 per-agent salt）——終點樹分組用。"""
+    """同一 action_mode 的策略簽章（不含 per-agent salt）——終點樹分組用。"""
     return (
         s.get("time", _DEFAULT_WEIGHTS["time"]),
         s.get("distance", _DEFAULT_WEIGHTS["distance"]),
@@ -106,7 +106,7 @@ def strategy_signature(s: dict[str, Any]) -> tuple:
 
 def _edge_cost(network: RoadNetwork, u: str, v: str, road, s: dict[str, Any],
                seed: int, avoid_circles=None) -> float:
-    """單邊成本公式：含「當前壅塞」(road.congestion_proxy) + active_mode 旗標 + jitter + avoid_circles。
+    """單邊成本公式：含「當前壅塞」(road.congestion_proxy) + action_mode 旗標 + jitter + avoid_circles。
 
     find_path 與終點樹**共用同一個公式** → 兩者等價(終點樹只是把 salt 固定成 ""＝不分車、無 per-car jitter)。
     init 時各路段 congestion=0 → 自然退化成自由流成本。
@@ -148,7 +148,7 @@ def _edge_cost(network: RoadNetwork, u: str, v: str, road, s: dict[str, Any],
 
 
 class DestinationTrees:
-    """某 active_mode 的反向最短路樹群：建一次靜態權重 CSR，對多個終點重用。
+    """某 action_mode 的反向最短路樹群：建一次靜態權重 CSR，對多個終點重用。
 
     用法：``DestinationTrees(net, strategy, seed).paths_to(dest, origins)``。
     對每個終點在「轉置圖」上以終點為源跑一次 ``scipy.csgraph.dijkstra``（得到「各點→終點」的樹），

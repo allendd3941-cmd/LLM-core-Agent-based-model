@@ -5,34 +5,29 @@
 核心問題：原本**每步對全部 agent 同步呼叫一次 LLM** → agent 多就(1)上下文塞不下、(2)太慢。
 解法是三個互補的機制，讓 **LLM 成本與「agent×步數」脫鉤 → 變成「決策事件數」**：
 
-1. **後端 adapter（可切 Ollama / vLLM）** — ✅ 已實作
+1. **LLM 後端：vLLM**（OpenAI 相容、continuous batching 高並行） — ✅ 已實作
 2. **事件觸發決策**（只有需要時才叫 LLM） — ✅ 已實作
 3. **同步並行批次推論**（scatter–gather） — ✅ 已實作
 
 ---
 
-## 1. 後端 adapter（✅ 已實作）
+## 1. LLM 後端：vLLM（✅ 已實作）
 
 `llm_server/llm_client.py` 把「怎麼把 prompt 送出去」集中成單一入口 `generate()`，
-LLM 呼叫點（decision_making / agent_profile）共用。
+LLM 呼叫點（decision_making / agent_profile / rag / sim_*）共用，**統一走 vLLM**
+OpenAI 相容 `/v1/chat/completions`（continuous batching 高並行）。
 > 註：`perception` 已改為**確定性模板**（不再呼叫 LLM），故每批只剩 **decision_making** 一次 LLM 呼叫。
-> `generate()` 另支援 `fmt`（結構化輸出 JSON schema：Ollama `format` / vLLM `guided_json`）。詳見 `docs/CHANGES_LLM_PIPELINE_zh-TW.md`。
+> `generate()` 支援 `fmt`（結構化輸出 JSON schema → vLLM `guided_json` 受限解碼）。
 
-| 後端 | 端點 | 用途 |
-|---|---|---|
-| `ollama`（預設） | 原生 `/api/generate` | **行為與原本完全一致**、零回歸；開發/桌面 |
-| `vllm` | OpenAI 相容 `/v1/chat/completions` | **continuous batching 高並行**；Linux/GPU demo |
-
-切換只改 `.env`：
+連線設定只在 `.env`（VLLM_MODEL 必填）：
 ```env
-LLM_BACKEND=ollama        # 或 vllm
 VLLM_URL=http://127.0.0.1:8001
-VLLM_MODEL=<HF 模型名>
+VLLM_MODEL=<HF 模型名>   # 須與 `vllm serve` 啟動的模型一致
 ```
 
-**generate vs chat**：Ollama 路徑維持原生 generate（單一 prompt，行為不變）；vLLM 路徑走 chat
-（system→system message、prompt→user message，並把 Ollama options 映射成 OpenAI 參數
-`temperature`/`seed`/`max_tokens`←`num_predict`/`top_k`→`extra_body`）。chat 對 69更對齊。
+**transport**：system→system message、prompt→user message，並把 Ollama 風格 options 映射成
+OpenAI 參數（`temperature`/`seed`/`max_tokens`←`num_predict`/`top_k`→`extra_body`）；
+結構化輸出走 `guided_json`。
 
 ### vLLM 伺服器啟動（在 Linux/GPU 機，與模擬器分開的環境）
 ```bash
@@ -70,7 +65,7 @@ vllm serve <HF模型> \
 ## 1.5 城市尺度路由（反向終點樹）+ 連線存活（✅ 已實作）
 
 **反向終點樹路由**（`[scaling].route_trees`，預設 true；false＝退回逐車 `find_path` 對照/除錯）：
-**init 與「中途壅塞重算」都用** scipy `csgraph.dijkstra` 反向最短路樹——同一 active_mode 共用一張權重圖、
+**init 與「中途壅塞重算」都用** scipy `csgraph.dijkstra` 反向最短路樹——同一 action_mode 共用一張權重圖、
 每個終點只算一次反向樹、每車沿前驅讀路徑(惰性只建用到的 mode×終點)。事件車去球場(1 終點)、背景車終點
 收斂到**區代表節點**(~區數個終點)。權重 = mode + **當前壅塞** + road_class_bias + **avoid_circles** + 固定 salt,
 與 `find_path` **共用同一成本公式**(`spatial/routing.py` `_edge_cost`)→ 兩者等價,只差 per-car jitter。
@@ -154,7 +149,7 @@ chars_per_token = 2.0   # 字元→token 粗估比；用 `python -m llm_abm_simu
 
 > **實作備註**：
 > - **init persona 指派**改成確定性（`profile_pool.assign_to_agents`，agent i ← pool[i]），
->   開場不呼叫 LLM 決策；初始 active_mode 用規則式核心。Ollama 不可用時 fallback 規則式人物指派。
+>   開場不呼叫 LLM 決策；初始 action_mode 用規則式核心。Ollama 不可用時 fallback 規則式人物指派。
 > - **批次決策**只送該批 agent 的 persona（`profile_pool.personas_json`），與 agents_status 對齊。
 > - **安全開關** `[scaling].event_triggered_decisions=false` 可一鍵退回「每步決策全部」舊行為。
 > - **已知小限制**：並行批次同時寫 `output/*_output_N.txt` 時，pipeline 內的全域 `count` 有競爭，

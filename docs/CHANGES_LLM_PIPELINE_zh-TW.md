@@ -30,7 +30,7 @@
 
 ### 3. 結構化輸出（受限解碼）
 - [`llm_client.generate`](../src/llm_server/llm_client.py) 新增 `fmt`（JSON schema）：Ollama 走 `format`、vLLM 走 `extra_body.guided_json`。
-- [`decision_making.DECISION_SCHEMA`](../src/llm_server/decision_making.py) 定義決策輸出形狀（`active mode` 用 enum），強制模型只能吐合法 JSON → 輸出 token 可預測、解析成功率提升。
+- [`decision_making.DECISION_SCHEMA`](../src/llm_server/decision_making.py) 定義決策輸出形狀（`action mode` 用 enum），強制模型只能吐合法 JSON → 輸出 token 可預測、解析成功率提升。
 - 對齊：移除 `decision_making_prompt.txt` 範例中的 `residential_location`（出生地已由 persona 決定，決策輸出不再需要它）。
 
 ### 4. 全域環境每步只算一次
@@ -50,7 +50,7 @@
 
 - perception 模板：輸出正確、可讀（全域 + 各車局部）。
 - 校準 CLI：正確抓出 `batch_size=30` 超 8192（安全 ≤24），建議 `max_model_len=10240`。
-- 結構化輸出端到端：`use_llm` 模式下 `decision_source=llm`、`last_call_ok=True`，agent 取得 active_mode + reason（llama3.2:1b 在 `format` 受限下吐出合法 JSON）。
+- 結構化輸出端到端：`use_llm` 模式下 `decision_source=llm`、`last_call_ok=True`，agent 取得 action_mode + reason（llama3.2:1b 在 `format` 受限下吐出合法 JSON）。
 - think 容錯（先前修正）仍在：不支援 thinking 的模型自動略過 `think`。
 
 ## 使用方式

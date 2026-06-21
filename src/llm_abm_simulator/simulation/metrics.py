@@ -43,7 +43,7 @@ def overall_environment(roads: list[Road], cfg: config.SimulationConfig,
 
 def distributions(agents: list[VehicleAgent]) -> tuple[dict[str, int], dict[str, int]]:
     """mode 分佈與 status 分佈。"""
-    mode = Counter(a.active_mode for a in agents)
+    mode = Counter(a.action_mode for a in agents)
     status = Counter(str(a.route_status) for a in agents)
     return dict(mode), dict(status)
 

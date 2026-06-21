@@ -106,8 +106,8 @@ def test_overall_environment_counts():
 
 
 def test_distributions():
-    a1 = VehicleAgent.from_config("v1", DEFAULT_CONFIG); a1.active_mode = "fast"
-    a2 = VehicleAgent.from_config("v2", DEFAULT_CONFIG); a2.active_mode = "fast"
+    a1 = VehicleAgent.from_config("v1", DEFAULT_CONFIG); a1.action_mode = "fast"
+    a2 = VehicleAgent.from_config("v2", DEFAULT_CONFIG); a2.action_mode = "fast"
     mode, status = metrics.distributions([a1, a2])
     assert mode["fast"] == 2
     assert sum(status.values()) == 2

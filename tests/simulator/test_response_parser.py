@@ -9,14 +9,14 @@ TOWNS = ["佳里區", "永康區", "安平區", "南區", "鹽水區", "安南�
 
 def test_real_llm_decision_output():
     body = (
-        '{"agents":[{"agent name":"林志安","active mode":"short_distance",'
+        '{"agents":[{"agent name":"林志安","action mode":"short_distance",'
         '"residential_location":"佳里區","vehicle_type":"機車"}]}'
     )
     rows = rp.parse_rows(body, TOWNS, "東區")
     assert len(rows) == 1
     r = rows[0]
     assert r["profile_name"] == "林志安"
-    assert r["active_mode"] == "short_distance"   # 空格 key 也要解析到
+    assert r["action_mode"] == "short_distance"   # 空格 key 也要解析到
     assert r["origin_town"] == "佳里區"
     assert r["vehicle_type"] == "機車"
 
@@ -24,20 +24,20 @@ def test_real_llm_decision_output():
 def test_underscore_and_chinese_keys_with_fence():
     messy = (
         "結果如下：\n```json\n"
-        '{"agents":[{"agent_id":"v1","active_mode":"avoid_congestion",'
+        '{"agents":[{"agent_id":"v1","action_mode":"avoid_congestion",'
         '"vehicle_type":"汽車","出發點":"安南區"}]}\n```'
     )
     rows = rp.parse_rows(messy, TOWNS, "東區")
     assert rows[0]["agent_id"] == "v1"
-    assert rows[0]["active_mode"] == "avoid_congestion"
+    assert rows[0]["action_mode"] == "avoid_congestion"
     assert rows[0]["origin_town"] == "安南區"
     assert rows[0]["vehicle_type"] == "汽車"
 
 
-def test_active_mode_as_map():
-    body = {"agents": [{"agent_id": "v2", "active_mode": {"mode_name": "fast"}}]}
+def test_action_mode_as_map():
+    body = {"agents": [{"agent_id": "v2", "action_mode": {"mode_name": "fast"}}]}
     rows = rp.parse_rows(body, TOWNS, "東區")
-    assert rows[0]["active_mode"] == "fast"
+    assert rows[0]["action_mode"] == "fast"
 
 
 def test_origin_key_aliases():
@@ -47,9 +47,9 @@ def test_origin_key_aliases():
 
 
 def test_decisions_list_key():
-    body = {"decisions": [{"agent_id": "v3", "active mode": "comfortable"}]}
+    body = {"decisions": [{"agent_id": "v3", "action mode": "comfortable"}]}
     rows = rp.parse_rows(body, TOWNS, "東區")
-    assert rows[0]["active_mode"] == "comfortable"
+    assert rows[0]["action_mode"] == "comfortable"
 
 
 def test_vehicle_type_normalization():

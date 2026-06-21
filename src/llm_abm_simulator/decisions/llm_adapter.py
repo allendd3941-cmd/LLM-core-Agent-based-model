@@ -99,7 +99,7 @@ class LLMDecisionPolicy:
                     "agent_id": a.agent_id,
                     "fallback_origin_town": a.origin_town or self.cfg.default_origin_town,
                     "fixed_destination_town": a.destination_town,
-                    "active_mode": a.build_active_mode_payload(),
+                    "action_mode": a.build_action_mode_payload(),
                     "vehicle_type": a.vehicle_type,
                 }
                 for a in agents
@@ -136,7 +136,7 @@ class LLMDecisionPolicy:
                 profile_name=row["profile_name"],
                 origin_town=row["origin_town"],
                 vehicle_type=row["vehicle_type"],
-                active_mode=row["active_mode"],
+                action_mode=row["action_mode"],
             )
         return result
 
@@ -156,7 +156,7 @@ class LLMDecisionPolicy:
                 continue
             result[aid] = StepDecision(
                 agent_id=aid,
-                active_mode=row["active_mode"],
+                action_mode=row["action_mode"],
                 vehicle_type=row["vehicle_type"],
                 reason=row.get("reason", ""),
             )

@@ -4,7 +4,7 @@
 「LLM 整合是 adapter，不是核心」原則。兩個生命週期方法：
 
 - ``initialize_agents``：產生每個 agent 的起點/車種/初始 mode/名稱（對齊 GAML init_agents）。
-- ``decide_step``：每 step 回傳各 agent 的 active_mode（與可選 vehicle_type）更新。
+- ``decide_step``：每 step 回傳各 agent 的 action_mode（與可選 vehicle_type）更新。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ class InitAssignment:
     profile_name: str = ""
     origin_town: str = ""
     vehicle_type: str = ""
-    active_mode: str = ""
+    action_mode: str = ""
 
 
 @dataclass
@@ -31,9 +31,9 @@ class StepDecision:
     """每 step 對單一 agent 的決策。"""
 
     agent_id: str
-    active_mode: str = ""
+    action_mode: str = ""
     vehicle_type: str = ""
-    reason: str = ""        # 選擇此 active_mode 的原因（10~20 字）
+    reason: str = ""        # 選擇此 action_mode 的原因（10~20 字）
 
 
 @runtime_checkable

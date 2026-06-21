@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 def output_process(response, output_path, file_name):
     if not response:
-        raise ValueError("Ollama response是空的")
+        raise ValueError("LLM response是空的")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

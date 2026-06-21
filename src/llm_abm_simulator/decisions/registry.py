@@ -20,7 +20,7 @@ CORES: dict[str, dict[str, str]] = {
     "llm": {
         "key": "llm",
         "label": "LLM 認知核心",
-        "desc": "本進程直呼 llm_server pipeline，依人格 persona 與環境感知做決策（需 Ollama/vLLM）。",
+        "desc": "本進程直呼 llm_server pipeline，依人格 persona 與環境感知做決策（需 vLLM）。",
     },
 }
 

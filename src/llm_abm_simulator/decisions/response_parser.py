@@ -1,14 +1,14 @@
 """response_parser.py — robust 解析 LLM/decision 回應。
 
-完整鏡像 GAML 的解析容錯邏輯（extract_origin_from_body / extract_active_mode_from_body /
+完整鏡像 GAML 的解析容錯邏輯（extract_origin_from_body / extract_action_mode_from_body /
 extract_vehicle_type_from_body / apply_*_response），並對齊既有 LLM pipeline 的實際輸出
 （見 output/decision_making_output_1.txt 與 prompts/decision_making_prompt.txt）：
 
-    {"agents": [{"agent name": "...", "active mode": "fast",
+    {"agents": [{"agent name": "...", "action mode": "fast",
                  "residential_location": "東區", "vehicle_type": "機車"}]}
 
-注意：既有 simulation_web/backend/llm_bridge.py 找的是 ``active_mode`` / ``agent_id``，
-與真實輸出的 ``"active mode"`` / ``"agent name"`` 不符，因此解析不到 — 本檔修正此問題，
+注意：既有 simulation_web/backend/llm_bridge.py 找的是 ``action_mode`` / ``agent_id``，
+與真實輸出的 ``"action mode"`` / ``"agent name"`` 不符，因此解析不到 — 本檔修正此問題，
 支援含空格與底線兩種 key、中英文 key，以及非純 JSON（含 markdown 圍欄/前後雜訊）的回應。
 """
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # 各欄位的 key 別名（對齊 GAML reply.keys contains 一連串判斷）
 _ORIGIN_KEYS = ("origin", "residential_location", "origin_town", "origin_taz", "出發點", "起點")
-_MODE_KEYS = ("active_mode", "active mode", "mode", "type")
+_MODE_KEYS = ("action_mode", "action mode", "mode", "type")
 _VEHICLE_KEYS = ("vehicle_type", "vehicle type", "車種", "vehicle_ownership")
 _REASON_KEYS = ("reason", "理由", "原因", "why")
 _NAME_KEYS = ("agent name", "agent_name", "name", "profile_name")
@@ -92,7 +92,7 @@ def _first_key(row: dict, keys: tuple[str, ...]) -> Any:
 # 單列解析
 # ---------------------------------------------------------------------------
 def parse_row(row: dict, available_towns: list[str], default_origin: str) -> dict[str, Any]:
-    """從單一 agent row 解析出 id/name/origin/active_mode/vehicle_type。"""
+    """從單一 agent row 解析出 id/name/origin/action_mode/vehicle_type。"""
     name = _first_key(row, _NAME_KEYS)
     agent_id = _first_key(row, _ID_KEYS)
 
@@ -100,11 +100,11 @@ def parse_row(row: dict, available_towns: list[str], default_origin: str) -> dic
     origin = normalize_town_name(origin_raw, available_towns, default_origin) if origin_raw is not None else ""
 
     mode_raw = _first_key(row, _MODE_KEYS)
-    active_mode = ""
+    action_mode = ""
     if isinstance(mode_raw, dict):
-        active_mode = str(mode_raw.get("mode_name") or mode_raw.get("mode") or "")
+        action_mode = str(mode_raw.get("mode_name") or mode_raw.get("mode") or "")
     elif mode_raw is not None:
-        active_mode = str(mode_raw)
+        action_mode = str(mode_raw)
 
     vt_raw = _first_key(row, _VEHICLE_KEYS)
     vehicle_type = normalize_vehicle_type(vt_raw) if vt_raw is not None else ""
@@ -116,7 +116,7 @@ def parse_row(row: dict, available_towns: list[str], default_origin: str) -> dic
         "agent_id": str(agent_id) if agent_id is not None else "",
         "profile_name": str(name) if name is not None else "",
         "origin_town": origin,
-        "active_mode": active_mode,
+        "action_mode": action_mode,
         "vehicle_type": vehicle_type,
         "reason": reason,
     }

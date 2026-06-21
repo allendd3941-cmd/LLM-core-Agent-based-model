@@ -3,7 +3,7 @@
 這是兩個可選決策核心之一（另一個是 LLM 認知核心，見 llm_adapter.py；登錄於 registry.py）。
 提供 demo 預設的即時決策，並作為 paper 的對照基線（baseline）；同一個 seed 必產生相同結果（可重現）。
 背景常態車流（ambient）也一律由本核心驅動（不吃 LLM、不存記憶）。
-所有隨機都走注入的 RNG。init 階段指派名稱/車種/起點/初始 mode；step 階段依壅塞與距離選 active_mode。
+所有隨機都走注入的 RNG。init 階段指派名稱/車種/起點/初始 mode；step 階段依壅塞與距離選 action_mode。
 核心 key（``name``）為 ``"rule"``，會成為 engine.last_decision_source 並下發前端顯示。
 """
 
@@ -37,7 +37,7 @@ class MockDecisionPolicy:
     def initialize_agents(
         self, agents: list[VehicleAgent], available_towns: list[str]
     ) -> dict[str, InitAssignment]:
-        from ..config import ACTIVE_MODES, VEHICLE_TYPES
+        from ..config import ACTION_MODES, VEHICLE_TYPES
 
         towns = available_towns or [self.cfg.default_origin_town]
         result: dict[str, InitAssignment] = {}
@@ -47,7 +47,7 @@ class MockDecisionPolicy:
                 profile_name=_NAME_POOL[self.rng.randrange(len(_NAME_POOL))],
                 origin_town=towns[self.rng.randrange(len(towns))],
                 vehicle_type=self.rng.choice(VEHICLE_TYPES),
-                active_mode=self.rng.choice(ACTIVE_MODES),
+                action_mode=self.rng.choice(ACTION_MODES),
             )
         return result
 
@@ -58,7 +58,7 @@ class MockDecisionPolicy:
         environment: dict[str, Any],
         cycle: int,
     ) -> dict[str, StepDecision]:
-        """依壅塞/距離/車種選 active_mode（確定性規則，不用隨機）。"""
+        """依壅塞/距離/車種選 action_mode（確定性規則，不用隨機）。"""
         decisions: dict[str, StepDecision] = {}
         for agent in agents:
             congestion = agent.congestion_proxy
@@ -74,5 +74,5 @@ class MockDecisionPolicy:
             else:
                 mode, reason = "tolerate_congestion", "機車順順走，不繞路"
             decisions[agent.agent_id] = StepDecision(
-                agent_id=agent.agent_id, active_mode=mode, reason=reason)
+                agent_id=agent.agent_id, action_mode=mode, reason=reason)
         return decisions

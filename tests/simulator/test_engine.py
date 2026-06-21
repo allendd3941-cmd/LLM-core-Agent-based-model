@@ -47,7 +47,7 @@ def test_snapshot_shape(small_config):
     for key in ("cycle", "agents", "roads", "metrics", "mode_distribution", "status_distribution"):
         assert key in msg
     a = msg["agents"][0]
-    for key in ("agent_id", "lat", "lng", "route_status", "active_mode", "vehicle_type"):
+    for key in ("agent_id", "lat", "lng", "route_status", "action_mode", "vehicle_type"):
         assert key in a
 
 

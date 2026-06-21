@@ -1,9 +1,9 @@
 """agent.py — 車輛 agent 資料模型。
 
 欄位與行為對齊 GAML ``species vehicle skills:[moving]``：
-identity / active_mode 偏好 / 旅程狀態 / 感知狀態 / API & memory。
+identity / action_mode 偏好 / 旅程狀態 / 感知狀態 / API & memory。
 
-設計取捨：本類別只持有「狀態」與「狀態轉換」（套用 active_mode、記錄 memory、
+設計取捨：本類別只持有「狀態」與「狀態轉換」（套用 action_mode、記錄 memory、
 組 payload），不直接依賴 networkx。實際的路徑規劃與移動由 ``simulation.engine``
 搭配 ``spatial`` 驅動，使 domain 層維持可純單元測試。
 """
@@ -131,8 +131,8 @@ class VehicleAgent:
     destination_town: str = ""
     vehicle_type: str = "汽車"
 
-    # === active_mode（GAML: mode_name + 一組移動偏好權重）===
-    active_mode: str = "fast"
+    # === action_mode（GAML: mode_name + 一組移動偏好權重）===
+    action_mode: str = "fast"
     desired_speed: float = 40.0          # km/h
     speed_car_preference: float = 45.0
     speed_moto_preference: float = 35.0
@@ -142,7 +142,7 @@ class VehicleAgent:
     time_weight: float = 0.45
     distance_weight: float = 0.25
     capacity_weight: float = 0.10
-    # active_mode 路徑策略旗標（由 ACTIVE_MODE_PROFILES 套用；預設關閉＝原最短路徑行為）
+    # action_mode 路徑策略旗標（由 ACTION_MODE_PROFILES 套用；預設關閉＝原最短路徑行為）
     congestion_penalty: float = 0.0
     avoid_threshold: float = 1.0
     road_class_bias: float = 0.0
@@ -191,7 +191,7 @@ class VehicleAgent:
     nearby_agent_count: int = 0
     congestion_proxy: float = 0.0
     selected_action: str = "none"
-    decision_reason: str = ""            # LLM/mock 選擇此 active_mode 的原因（前端顯示）
+    decision_reason: str = ""            # LLM/mock 選擇此 action_mode 的原因（前端顯示）
     last_decision_cycle: int | None = None  # 上次「重新決策」的週期（前端 inspect / 決策日誌用）
     last_reroute_cycle: int = -(10**9)      # 上次「重算路徑」的週期（reroute cooldown 用；預設極小＝首次必可重算）
 
@@ -244,29 +244,29 @@ class VehicleAgent:
         )
 
     # ------------------------------------------------------------------
-    # active_mode 套用（鏡像 GAML apply_active_mode）
+    # action_mode 套用（鏡像 GAML apply_action_mode）
     # ------------------------------------------------------------------
-    def apply_active_mode(self, payload: dict[str, Any] | str | None) -> None:
-        """從決策回應套用 active_mode；缺少的欄位保留原值。
+    def apply_action_mode(self, payload: dict[str, Any] | str | None) -> None:
+        """從決策回應套用 action_mode；缺少的欄位保留原值。
 
         接受兩種形式：
-        - 字串：視為 mode 名稱（例如 "fast"）→ 套用 ACTIVE_MODE_PROFILES 對應的數值與路徑策略。
-        - dict：含 mode_name / move_speed / 各權重等（GAML active_mode map）。先依名稱套用 profile
+        - 字串：視為 mode 名稱（例如 "fast"）→ 套用 ACTION_MODE_PROFILES 對應的數值與路徑策略。
+        - dict：含 mode_name / move_speed / 各權重等（GAML action_mode map）。先依名稱套用 profile
           當基準，再讓 dict 內明確給的數值欄位覆寫（LLM 可細調）。
         """
         if payload is None:
             return
         if isinstance(payload, str):
-            self.active_mode = payload or self.active_mode
-            self._apply_named_profile(self.active_mode)
+            self.action_mode = payload or self.action_mode
+            self._apply_named_profile(self.action_mode)
             return
 
         if "mode_name" in payload:
-            self.active_mode = str(payload["mode_name"])
-            self._apply_named_profile(self.active_mode)
+            self.action_mode = str(payload["mode_name"])
+            self._apply_named_profile(self.action_mode)
         elif "mode" in payload:
-            self.active_mode = str(payload["mode"])
-            self._apply_named_profile(self.active_mode)
+            self.action_mode = str(payload["mode"])
+            self._apply_named_profile(self.action_mode)
 
         _set = self._maybe_set_float
         _set(payload, "move_speed", "desired_speed")
@@ -288,10 +288,10 @@ class VehicleAgent:
                 pass
 
     def _apply_named_profile(self, mode_name: str) -> None:
-        """依 mode 名稱套用 ACTIVE_MODE_PROFILES 的數值與路徑策略；查無此名則不動。"""
-        from ..config import ACTIVE_MODE_PROFILES
+        """依 mode 名稱套用 ACTION_MODE_PROFILES 的數值與路徑策略；查無此名則不動。"""
+        from ..config import ACTION_MODE_PROFILES
 
-        prof = ACTIVE_MODE_PROFILES.get(mode_name)
+        prof = ACTION_MODE_PROFILES.get(mode_name)
         if prof is None:
             return
         self.desired_speed = prof.desired_speed_kmh
@@ -327,7 +327,7 @@ class VehicleAgent:
         }
 
     def routing_strategy(self) -> dict[str, Any]:
-        """回傳 find_path 用的完整策略：四個權重 + active_mode 路徑策略旗標 + 分散用 salt。"""
+        """回傳 find_path 用的完整策略：四個權重 + action_mode 路徑策略旗標 + 分散用 salt。"""
         return {
             **self.routing_weights(),
             "congestion_penalty": self.congestion_penalty,
@@ -338,11 +338,11 @@ class VehicleAgent:
         }
 
     # ------------------------------------------------------------------
-    # payload（對齊 GAML build_api_agent_payload / build_active_mode_payload）
+    # payload（對齊 GAML build_api_agent_payload / build_action_mode_payload）
     # ------------------------------------------------------------------
-    def build_active_mode_payload(self) -> dict[str, Any]:
+    def build_action_mode_payload(self) -> dict[str, Any]:
         return {
-            "mode_name": self.active_mode,
+            "mode_name": self.action_mode,
             "move_speed": self.desired_speed,
             "speed_car": self.speed_car_preference,
             "speed_moto": self.speed_moto_preference,
@@ -390,7 +390,7 @@ class VehicleAgent:
             "agent_name": self.profile_name,
             "origin_town": self.origin_town,
             "destination_town": self.destination_town,
-            "active_mode": self.active_mode,
+            "action_mode": self.action_mode,
             "vehicle_type": self.vehicle_type,
             "environment": self.build_environment_payload(),
             "memory": self.memory,
@@ -419,14 +419,14 @@ class VehicleAgent:
         # --- 滾動更新累積器 ---
         if self._start_cycle is None:
             self._start_cycle = cycle
-        if self._prev_mode and self.active_mode != self._prev_mode:
+        if self._prev_mode and self.action_mode != self._prev_mode:
             self._mode_switch_count += 1
         if feel == FEEL_CONGESTED and where not in self._congested_spots \
                 and len(self._congested_spots) < cfg.congested_spots_max:
             self._congested_spots.append(where)
         self._smoothness_sum += self.congestion_proxy
         self._smoothness_n += 1
-        self._prev_mode = self.active_mode
+        self._prev_mode = self.action_mode
         self._prev_distance = self.distance_to_destination
 
         elapsed_steps = cycle - self._start_cycle + 1
@@ -439,7 +439,7 @@ class VehicleAgent:
             "step": cycle,
             "where": where,
             "traffic_feel": feel,
-            "mode_used": self.active_mode,
+            "mode_used": self.action_mode,
             "moved": _moved_label(self.distance_moved_last_step, step_minutes, cfg),
             "getting_closer": bool(closer),
             "remaining": _km_label(self.distance_to_destination, cfg.distance_decimals),
@@ -480,7 +480,7 @@ class VehicleAgent:
         if self._congested_spots:
             parts.append("曾在" + "、".join(self._congested_spots) + "一帶遇到壅塞")
         if self._mode_switch_count > 0:
-            parts.append(f"中途換了 {self._mode_switch_count} 次策略，目前採「{self.active_mode}」")
+            parts.append(f"中途換了 {self._mode_switch_count} 次策略，目前採「{self.action_mode}」")
         if arrived:
             parts.append("目前已抵達目的地")
         else:

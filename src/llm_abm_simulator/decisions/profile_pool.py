@@ -112,7 +112,7 @@ def _generate(count: int) -> list[dict]:
     def gen_one(idx: int, size: int) -> list[dict]:
         try:
             raw = run_agent_profile(output=False, agent_count=size, seed=42 + idx)
-        except Exception as e:  # noqa: BLE001  生成可能因 Ollama/vLLM 不可用等失敗
+        except Exception as e:  # noqa: BLE001  生成可能因 vLLM 不可用等失敗
             logger.warning("persona 批次 %d 生成失敗：%s", idx, e)
             return []
         return [o for o in json_utils.salvage_objects(raw) if _is_persona(o)]
@@ -178,7 +178,7 @@ def assign_to_agents(agents, pool_size: int,
     出生點直接由 persona 的 ``identity.residential_location`` 決定（用 response_parser 正規化成
     available_towns 內的行政區），讓「自帶出生地」**不分事件觸發與否**都生效；無法匹配時保留
     呼叫前既有的 origin_town（通常是 mock 隨機指派的合法區），其次才退到 default_origin。
-    回傳是否成功（池可用）；失敗（生成不到，如 Ollama 掛）回 False，由上層 fallback 到 mock。
+    回傳是否成功（池可用）；失敗（生成不到，如 vLLM 掛）回 False，由上層 fallback 到 mock。
     """
     pool = ensure_pool(len(agents), pool_size)
     if not pool:

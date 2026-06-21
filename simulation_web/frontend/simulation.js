@@ -157,11 +157,9 @@ const TrafficUI = (() => {
     const ambToggle = $("toggle-ambient");
     if (ambToggle) ambToggle.onchange = () => TrafficMap.toggleAmbient(ambToggle.checked);
 
-    const lb = $("llm-backend");
-    if (lb) lb.onchange = () => refreshLlmModels(lb.value);
     const lm = $("llm-model");
     if (lm) lm.onchange = () => {
-      send("set_llm", { backend: $("llm-backend").value, model: lm.value });
+      send("set_llm", { model: lm.value });
       updateLlmHint();
     };
 
@@ -274,23 +272,13 @@ const TrafficUI = (() => {
   function setLlmInit(llm) {
     if (!llm) return;
     llmVllmModels = llm.vllm_models || [];
-    const lb = $("llm-backend");
-    if (lb && llm.backend) lb.value = llm.backend;
-    refreshLlmModels(llm.backend || "ollama", llm.current_model || "");
+    refreshLlmModels(llm.current_model || "");
   }
 
-  async function refreshLlmModels(backend, preselect) {
+  function refreshLlmModels(preselect) {
     const lm = $("llm-model");
     if (!lm) return;
-    let models = [];
-    if (backend === "vllm") {
-      models = llmVllmModels;
-    } else {
-      try {
-        const res = await fetch("/api/llm/models?backend=ollama");
-        models = (await res.json()).models || [];
-      } catch (e) { models = []; }
-    }
+    const models = llmVllmModels;
     lm.innerHTML = models.length
       ? models.map((m) => `<option value="${m.id}">${escapeHtml(m.label || m.id)}</option>`).join("")
       : `<option value="">（無可用模型）</option>`;
@@ -301,16 +289,11 @@ const TrafficUI = (() => {
   function updateLlmHint() {
     const hint = $("llm-model-hint");
     if (!hint) return;
-    const backend = $("llm-backend").value;
     const id = $("llm-model").value;
-    if (backend === "vllm") {
-      const m = llmVllmModels.find((x) => x.id === id);
-      hint.textContent = m
-        ? `${m.params} · context ${m.max_context}（${m.note}）· 對齊目標：請自行 vllm serve 此模型`
-        : "vLLM：請先 vllm serve 對應模型";
-    } else {
-      hint.textContent = id ? `Ollama 模型（context 由系統設 ~8192）` : "Ollama 未偵測到模型（請先 ollama pull）";
-    }
+    const m = llmVllmModels.find((x) => x.id === id);
+    hint.textContent = m
+      ? `${m.params} · context ${m.max_context}（${m.note}）· 對齊目標：請自行 vllm serve 此模型`
+      : "vLLM：請先 vllm serve 對應模型";
   }
 
   const CORE_LABEL = { rule: "規則式", llm: "LLM", mock: "規則式" };
@@ -412,7 +395,7 @@ const TrafficUI = (() => {
       ["ID", a.agent_id],
       ["姓名", a.profile_name || "—"],
       ["車種", a.vehicle_type],
-      ["行為模式", a.active_mode],
+      ["行為模式", a.action_mode],
       ["狀態", a.waiting_at_signal ? "等紅燈" : a.route_status],
       ["起點區", a.origin_town],
       ["目前區", a.current_town || "—"],

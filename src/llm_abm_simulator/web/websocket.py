@@ -438,20 +438,20 @@ class SimulationSession:
                          "label": f"驗證 CSV（{case}）"})
 
     async def _set_llm(self, value: dict) -> None:
-        """前端選模型：套用 runtime 後端/模型，並連動 max_model_len 與 ollama num_ctx（整套 LLM 共用）。"""
+        """前端選 vLLM 模型：套用 runtime 模型名 + 連動 max_model_len（整套 LLM 共用）。
+
+        注意：vLLM 一機一模型、不能熱切換真正的 server；此處只改 client 對齊的模型名，
+        實際要 `vllm serve` 對應模型。
+        """
         from .. import config
         from llm_server import llm_config, model_registry
-        backend = value.get("backend") or llm_config.LLM_BACKEND
         model = value.get("model") or ""
-        if backend == "vllm" and model:
-            max_len = model_registry.suggested_max_model_len(model)
-            llm_config.set_runtime_llm("vllm", model, num_ctx=None)
-            config.set_runtime_max_model_len(max_len)
-        else:  # ollama
-            max_len = model_registry.PROJECT_CONTEXT_CAP
-            llm_config.set_runtime_llm("ollama", model, num_ctx=max_len)
-            config.set_runtime_max_model_len(max_len)
-        await self.status(f"LLM 已切換：{backend} · {model or '(預設)'}（max_model_len={max_len}）")
+        max_len = (model_registry.suggested_max_model_len(model) if model
+                   else model_registry.PROJECT_CONTEXT_CAP)
+        llm_config.set_runtime_llm(model)
+        config.set_runtime_max_model_len(max_len)
+        await self.status(
+            f"LLM 模型已設為：{model or '(未指定，請於 .env 設 VLLM_MODEL)'}（max_model_len={max_len}）")
 
     def _set_mode(self, mode: str) -> None:
         # 動態切換 mock/llm；engine 內部 cfg 與本 session cfg 同步

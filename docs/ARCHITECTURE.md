@@ -27,7 +27,7 @@ the in-process pipeline described here.
 
 | Layer / module | Responsibility |
 | --- | --- |
-| `domain/` | Pure data models + state transitions: `agent` (state, active-mode, `role`, single trip `memory`, payloads), `road` (flow → congestion → dynamic weight), `town`, `state` (output snapshots), `events`. No I/O, unit-testable. |
+| `domain/` | Pure data models + state transitions: `agent` (state, action-mode, `role`, single trip `memory`, payloads), `road` (flow → congestion → dynamic weight), `town`, `state` (output snapshots), `events`. No I/O, unit-testable. |
 | `spatial/` | `road_network` (OSM `graphml` → directed graph + `Road` objects), `routing` (weighted shortest path / Dijkstra + dynamic congestion weight), `gis_loader`, `geojson`, `build_roads`. |
 | `mobility/` | `demand` — gravity model: event-car origins (population × distance-to-venue) and ambient OD pairs (double-ended gravity over town pairs). |
 | `decisions/` | `registry` (named selectable cores), `base` (the `DecisionPolicy` protocol), `mock_policy` (rule-based core), `llm_adapter` (in-process call into `llm_server`), `response_parser` (robust LLM-JSON → rows), `profile_pool` (stable persona pool + slicing). |
@@ -41,7 +41,7 @@ the in-process pipeline described here.
 | --- | --- |
 | `agent_profile.py` | Generate agent personas (identity / traits) via the LLM. |
 | `perception.py` | **Deterministic template (no LLM call)** — reformats the simulator's structured, qualitative state into a compact per-agent + global summary for decision-making. |
-| `decision_making.py` | Build the decision prompt and call the LLM with a structured-output schema (`DECISION_SCHEMA`); returns each agent's active mode + `reason`. The only LLM call per batch. |
+| `decision_making.py` | Build the decision prompt and call the LLM with a structured-output schema (`DECISION_SCHEMA`); returns each agent's action mode + `reason`. The only LLM call per batch. |
 | `json_utils.py` | Robust LLM-JSON salvage (handles trailing commas, fences, truncated arrays). |
 | `llm_client.py` | Unified Ollama/vLLM transport (`generate()`); structured output via Ollama `format` / vLLM `guided_json`. |
 | `llm_config.py` / `model_registry.py` | Backend/model connection settings from `.env`; vLLM candidate registry. |
@@ -64,7 +64,7 @@ sequenceDiagram
     UI->>WS: control (start / step / set_agents …) via WebSocket
     loop each simulation step
         ENG->>ENG: perceive (speed limit, congestion, neighbours)
-        ENG->>DEC: decide active mode (+ vehicle type, reason)
+        ENG->>DEC: decide action mode (+ vehicle type, reason)
         alt LLM policy
             DEC->>PIPE: in-process call (persona + deterministic perception → decision LLM)
             PIPE->>LLM: prompt
@@ -86,7 +86,7 @@ sequenceDiagram
 A user-selectable **decision core** drives the **event** cars (registry: `decisions/registry.py`).
 **Ambient** cars always use the rule-based core (no LLM, no memory).
 
-- **Rule-based** (`rule`, default): `mock_policy` picks an active mode per agent from deterministic rules
+- **Rule-based** (`rule`, default): `mock_policy` picks an action mode per agent from deterministic rules
   (congestion / distance / vehicle type) and supplies a short `reason`. Fully reproducible; serves as the
   paper's baseline for the LLM-vs-rule comparison.
 - **LLM** (`llm`): `llm_adapter` builds the init/step payload, calls `llm_server` **in-process**

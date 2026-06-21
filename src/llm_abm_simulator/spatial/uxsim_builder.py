@@ -57,6 +57,15 @@ def build_world(
     seed: int = 0,
     jam_density: float = DEFAULT_JAM_DENSITY,
     signals: Any = None,
+    reaction_time: float = 1.0,
+    duo_update_time: float = 600.0,
+    duo_update_weight: float = 0.5,
+    duo_noise: float = 0.01,
+    route_choice_principle: str = "homogeneous_DUO",
+    route_choice_update_gradual: bool = False,
+    instantaneous_TT_timestep_interval: int = 5,
+    no_cyclic_routing: bool = False,
+    hard_deterministic_mode: bool = True,
     print_mode: int = 0,
 ) -> Any:
     """從 ``RoadNetwork`` 建一個已載入網路的 UXsim ``World``（不含車輛）。
@@ -74,8 +83,14 @@ def build_world(
     from uxsim import World
 
     W = World(
-        name="tainan", deltan=deltan, tmax=tmax, print_mode=print_mode,
-        save_mode=0, show_mode=0, random_seed=seed, hard_deterministic_mode=True,
+        name="tainan", deltan=deltan, tmax=tmax, reaction_time=reaction_time,
+        duo_update_time=duo_update_time, duo_update_weight=duo_update_weight, duo_noise=duo_noise,
+        route_choice_principle=route_choice_principle,
+        route_choice_update_gradual=route_choice_update_gradual,
+        instantaneous_TT_timestep_interval=instantaneous_TT_timestep_interval,
+        no_cyclic_routing=no_cyclic_routing,
+        random_seed=seed, hard_deterministic_mode=hard_deterministic_mode,
+        print_mode=print_mode, save_mode=0, show_mode=0,
     )
 
     sig = signals if (signals is not None and getattr(signals, "enabled", False)) else None

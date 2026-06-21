@@ -1,27 +1,27 @@
-"""domain 模型測試：active_mode 套用、車種正規化、Road 動態更新。"""
+"""domain 模型測試：action_mode 套用、車種正規化、Road 動態更新。"""
 
 from __future__ import annotations
 
-from llm_abm_simulator.config import ACTIVE_MODE_PROFILES, DEFAULT_CONFIG
+from llm_abm_simulator.config import ACTION_MODE_PROFILES, DEFAULT_CONFIG
 from llm_abm_simulator.domain.agent import VehicleAgent
 from llm_abm_simulator.domain.road import Road
 from llm_abm_simulator.domain.events import RouteStatus
 
 
-def test_apply_active_mode_dict_partial_update():
+def test_apply_action_mode_dict_partial_update():
     a = VehicleAgent.from_config("v1", DEFAULT_CONFIG)
-    a.apply_active_mode({"mode_name": "avoid_congestion", "time_weight": 0.6})
-    assert a.active_mode == "avoid_congestion"
-    # 套 mode 會先載入整組 active_mode profile（見 docs/ACTIVE_MODES_zh-TW.md），
+    a.apply_action_mode({"mode_name": "avoid_congestion", "time_weight": 0.6})
+    assert a.action_mode == "avoid_congestion"
+    # 套 mode 會先載入整組 action_mode profile（見 docs/ACTION_MODES_zh-TW.md），
     # 再讓 dict 內明確給的欄位覆寫：time_weight 被覆寫成 0.6，未指定的欄位＝該 profile 的值。
     assert a.time_weight == 0.6
-    assert a.comfort_weight == ACTIVE_MODE_PROFILES["avoid_congestion"].comfort_weight
+    assert a.comfort_weight == ACTION_MODE_PROFILES["avoid_congestion"].comfort_weight
 
 
-def test_apply_active_mode_string():
+def test_apply_action_mode_string():
     a = VehicleAgent.from_config("v1", DEFAULT_CONFIG)
-    a.apply_active_mode("fast")
-    assert a.active_mode == "fast"
+    a.apply_action_mode("fast")
+    assert a.action_mode == "fast"
 
 
 def test_apply_vehicle_type():

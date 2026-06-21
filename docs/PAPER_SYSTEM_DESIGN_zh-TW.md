@@ -68,7 +68,7 @@ edge_cost = length × (
     + w_capacity · (1 + congestion × 2.0)          # 壅塞=貴
 )
 ```
-再依 `active_mode` 的**路徑策略旗標**疊加（預設全關＝退化為純最短路）：
+再依 `action_mode` 的**路徑策略旗標**疊加（預設全關＝退化為純最短路）：
 ```
 if congestion_penalty: cost ×= (1 + congestion_penalty × congestion)     # avoid 用
 if congestion > avoid_threshold: cost ×= 25                              # 硬避開（近乎封路）
@@ -76,7 +76,7 @@ if road_class_bias>0: 幹道 cost ×=(1−bias)、小路 cost ×=(1+bias)       
 if randomness: cost ×= jitter∈[1−r,1+r]                                  # 分散車流（見 3.4）
 if avoid_circles: 落在避讓圓內的邊 cost ×= 25                            # NL 介入
 ```
-`w_time/w_distance/w_comfort/w_capacity` 為 agent 當前 active_mode 的四權重。
+`w_time/w_distance/w_comfort/w_capacity` 為 agent 當前 action_mode 的四權重。
 
 ### 3.3 壅塞觸發重算（reactive rerouting）
 `engine._move_agent`：當 `is_crowded`（`congestion_proxy ≥ crowded_road_threshold=0.5`）且該 mode `recompute_on_crowded=True`
@@ -122,13 +122,13 @@ P(dest = j | i) ∝ population_j × f(d_ij)  , j≠i       # trip distribution�
 
 ---
 
-## 5. Agent 與五種行為模式（`domain/agent.py`、`[active_modes.*]`）
+## 5. Agent 與五種行為模式（`domain/agent.py`、`[action_modes.*]`）
 
-`VehicleAgent`：identity（`agent_id`/`profile_name`/`role`）、起訖、`active_mode` + 四權重 + 路徑策略旗標、
+`VehicleAgent`：identity（`agent_id`/`profile_name`/`role`）、起訖、`action_mode` + 四權重 + 路徑策略旗標、
 路網位置（公尺座標 + 節點路徑 + `edge_progress`）、感知狀態、單一 `memory`、事件觸發內部狀態。
 `role`：`event`（去球場，可用 LLM 核心）/ `ambient`（背景，一律規則式、無記憶）。
 
-mock/LLM **只回 mode 名字字串**；`apply_active_mode` 查 `ACTIVE_MODE_PROFILES` 套入數值 + 策略旗標。五種：
+mock/LLM **只回 mode 名字字串**；`apply_action_mode` 查 `ACTION_MODE_PROFILES` 套入數值 + 策略旗標。五種：
 
 | mode | desired | time | dist | comfort | cap | penalty | avoid_thr | class_bias | recompute | randomness | 一句話走法 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -191,7 +191,7 @@ mock/LLM **只回 mode 名字字串**；`apply_active_mode` 查 `ACTIVE_MODE_PRO
 - 記憶 `summary` 一律確定性模板、不呼叫 LLM（§7）。每步 INFO 日誌印實採 batch。
 
 ### 8.4 結構化輸出 + 強韌解析（`decision_making.DECISION_SCHEMA`、`json_utils`）
-`generate(fmt=DECISION_SCHEMA)`：Ollama 走 `format`、vLLM 走 `guided_json`（受限解碼）；`active mode` 用 enum 限五種。
+`generate(fmt=DECISION_SCHEMA)`：Ollama 走 `format`、vLLM 走 `guided_json`（受限解碼）；`action mode` 用 enum 限五種。
 輸出 token 可預測、解析成功率高。壞 JSON（尾逗號/圍欄/截斷陣列）由 `json_utils.salvage_objects` 物件級救回，不整批作廢。
 
 ---
@@ -295,7 +295,7 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 
 ## 16. 參數總表（`config/simulation.toml` ↔ `config.py`，唯一真實來源）
 `[time]`(max_steps36/step_minutes5)、`[agents]`(nb_agents/起訖)、`[perception]`(感知半徑300/抵達50/crowded_speed0.55/門檻0.5/nearby_mode/town_mode)、
-`[movement]`、`[active_modes.*]`(5模式權重+旗標)、`[roads]`+`[highway_specs.*]`(速度/容量；改值需重建路網)、`[llm]`(use_llm)、
+`[movement]`、`[action_modes.*]`(5模式權重+旗標)、`[roads]`+`[highway_specs.*]`(速度/容量；改值需重建路網)、`[llm]`(use_llm)、
 `[memory]`(質性門檻)、`[perception_context]`(hotspots_top_k5/lookahead2000/speed ratios)、
 `[profile]`(pool_size 原型數上限)、`[scaling]`(event_triggered/cooldown5/batch_size30/concurrency4)、
 `[llm_budget]`(max_model_len8192/reserve1024/overhead800/chars_per_token2.0)、`[demand]`(beta0.08/decay/min_dist0.5)、
@@ -309,7 +309,7 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 1. 號誌時相為**合成值**（台南無真實秒數）→ 非真實號誌孿生。
 2. 人口 CSV **近似值** → 正式 paper 換 MOI 官方。
 3. RAG（**TF-IDF**、非語意 embedding、opt-in）：
-   (a) **只透過「LLM 選 active_mode」這條通道**影響模擬，**不修**路網容量/合成號誌/需求模型/人口近似——誤差若來自這些，RAG 幫不上；
+   (a) **只透過「LLM 選 action_mode」這條通道**影響模擬，**不修**路網容量/合成號誌/需求模型/人口近似——誤差若來自這些，RAG 幫不上；
    (b) `vehicle_type` 由 persona 綁定，改運具分布應改 persona 而非 RAG；
    (c) **每批全域檢索、無 per-agent 人格化**（per-archetype 為 future work）；
    (d) 「準確率」宣稱需 **ground truth** 對照（真實散場清空時間/運具分布/路口流量），否則只能稱 grounding 的 **plausibility** 提升。
@@ -354,7 +354,7 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 - `salvage_objects`（**最關鍵**）：先 `loads_lenient`（去 ```json``` 圍欄→原文→repair 後各試一次 `json.loads`）；
   失敗時用 `_balanced_object` **字串感知**地逐一掃出頂層平衡 `{...}`（正確處理字串內引號/跳脫），各自寬鬆解析、能解的就收 →
   **陣列被截斷時保留前面完整物件、只丟最後半個**（小模型輸出截斷的常見情形）。
-- `response_parser`：欄位**多 key 別名**容錯（mode：`active_mode`/`active mode`/`mode`/`type`；vehicle：`vehicle_type`/`車種`/`vehicle_ownership`；
+- `response_parser`：欄位**多 key 別名**容錯（mode：`action_mode`/`action mode`/`mode`/`type`；vehicle：`vehicle_type`/`車種`/`vehicle_ownership`；
   name/id/origin/reason 各有別名清單）；`normalize_town_name` **由長到短**比對區名（避免「安南區」被「南區」搶先命中）；
   支援 dict 含 `agents/decisions/initial_vehicles/requested_agents`、純 list、單 dict、含雜訊字串。
 
@@ -366,7 +366,7 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 `enabled` 預設 True 但**無上傳文件即無作用**。
 
 **多重查詢 + RRF（`retrieve_multi`）**：`rag_query.build_subqueries` 每批從模擬狀態組三條子查詢——
-路況（取【全域路況】）、任務（固定描述五種 active_mode，英文 key + 中文）、人格（聚合這批 persona 的職業/車種/特質高頻）；
+路況（取【全域路況】）、任務（固定描述五種 action_mode，英文 key + 中文）、人格（聚合這批 persona 的職業/車種/特質高頻）；
 各自檢索 `PER_QUERY_K=5` 塊，依名次以 Reciprocal Rank Fusion（`RRF_C=60`）融合去重，取 `DEFAULT_K=4` 注入。
 被多條子查詢撈到的塊分數自動變高。回傳含 provenance（source/idx/via/scores）。
 `rag_store.query_mode`：`multi`（預設）/`single`（只用 perception 當 query，ablation 對照）。

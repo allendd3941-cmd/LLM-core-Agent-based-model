@@ -21,7 +21,7 @@
 - **每車局部**：`current_road_id`（機器 ID，無語意）、`congestion_proxy`（裸數字）、
   `nearby_agent_count`、`distance_to_destination_m`。
 
-要選 active_mode（fast / avoid_congestion / tolerate / comfortable / short_distance），
+要選 action_mode（fast / avoid_congestion / tolerate / comfortable / short_distance），
 LLM 真正需要、但舊版**完全沒有**的是：
 1. **前方路況**——接下來要走的路塞不塞？（avoid vs fast 的決定性資訊）
 2. **壅塞的空間分佈**——哪些區在塞？
@@ -65,7 +65,7 @@ LLM 真正需要、但舊版**完全沒有**的是：
 `elapsed_minutes` 等裸統計，供前端 metrics 面板使用。
 
 > **為什麼這樣分？** 那些裸統計（全場車數、活躍/壅塞道路數、平均 proxy）對「單一 agent 選哪個
-> active_mode」幫助不大，卻會佔 LLM context；它們真正的用途是展示與記錄，所以只給前端，
+> action_mode」幫助不大，卻會佔 LLM context；它們真正的用途是展示與記錄，所以只給前端，
 > 不送 LLM。LLM 只看得懂、也只需要質性的 `overall_traffic` / `congestion_trend` / `congestion_hotspots`。
 
 > **為什麼用 agent 聚合算熱點？** 壅塞只存在於有 agent 的路段（`congestion_proxy = flow/capacity`，
@@ -131,7 +131,7 @@ speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩�
   `engine._llm_environment()` 瘦身成質性版才放進 `_build_step_payload`（裸統計留給 recorder/前端）。
   `perception.py` 確定性把這些欄位組成感知文字（不呼叫 LLM），再交給 `decision_making` 的 prompt。
 - **確定性**：全為規則運算，不含隨機、不呼叫 LLM，維持「同 seed → 同軌跡」。
-- **與實際路徑選擇的關係（重要）**：本文件的環境資訊只影響 **LLM 選哪個 active_mode**。
+- **與實際路徑選擇的關係（重要）**：本文件的環境資訊只影響 **LLM 選哪個 action_mode**。
   真正的改道仍由 `simulation/engine.py` 的「踩到壅塞路才重算」（`is_crowded`）觸發、由
   `spatial/routing.py` 的加權最短路徑決定。也就是說 `road_ahead` 目前是**讓 LLM 提前選避塞
   mode**，而非直接讓 routing 預先繞路；若要「前方壅塞就提前改道」真正生效，需另外調整

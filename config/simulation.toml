@@ -34,7 +34,7 @@ crowded_road_threshold = 0.3            # congestion_proxy ≥ 此值視為壅�
 nearby_mode = "grid"                    # 鄰近車數估法：grid（空間網格近似、O(n)，大規模用）| exact（精確全比對、O(n²)）
 town_mode = "node"                      # current_town 估法：node（所在節點所屬區、O(1)，大規模用）| exact（精確位置、O(車數×區數)）
 
-# ----- 預設移動偏好（每個 agent 的初始 active_mode 權重）-----
+# ----- 預設移動偏好（每個 agent 的初始 action_mode 權重）-----
 # 註：time/distance/comfort/capacity 為路徑規劃權重，數值相對大小決定取向。
 [movement]
 default_vehicle_type = "汽車"            # "汽車" 或 "機車"
@@ -48,9 +48,9 @@ default_distance_weight = 0.25
 default_capacity_weight = 0.10
 default_road_type_preference = ["primary", "secondary", "tertiary", "residential"]
 
-# ----- 五種 active_mode 的數值 + 路徑策略 -----
+# ----- 五種 action_mode 的數值 + 路徑策略 -----
 # 每個 mode 一組權重（time/distance/comfort/capacity，相對大小決定路徑取向）+ 策略旗標。
-# 策略旗標讓每個 mode 走出不同的路徑選擇方式（詳見 docs/ACTIVE_MODES_zh-TW.md）：
+# 策略旗標讓每個 mode 走出不同的路徑選擇方式（詳見 docs/ACTION_MODES_zh-TW.md）：
 #   congestion_penalty   額外壅塞懲罰倍率，成本 ×(1 + penalty×congestion)；0=不額外懲罰
 #   avoid_threshold      congestion_proxy > 此值的邊近乎封路（硬避開）；≥1=停用（proxy 上限 1）
 #   road_class_bias      >0：幹道打折、小路加罰（偏好大路）；0=不分路型
@@ -58,7 +58,7 @@ default_road_type_preference = ["primary", "secondary", "tertiary", "residential
 #   route_randomness     每邊成本隨機微擾 ±值（seeded、可重現），用來分散車流
 # mock/LLM 只需回 mode 名字，套用時會自動帶入下列數值與策略。
 
-[active_modes.fast]              # 最短時間：無視壅塞，走自由流最快路線
+[action_modes.fast]              # 最短時間：無視壅塞，走自由流最快路線
 desired_speed_kmh = 100.0
 time_weight = 0.70
 distance_weight = 0.20
@@ -66,7 +66,7 @@ comfort_weight = 0.05
 capacity_weight = 0.05
 route_randomness = 0.05
 
-[active_modes.tolerate_congestion]   # 時間優先但不繞路：塞了也走到底
+[action_modes.tolerate_congestion]   # 時間優先但不繞路：塞了也走到底
 desired_speed_kmh = 80.0
 time_weight = 0.55
 distance_weight = 0.30
@@ -75,7 +75,7 @@ capacity_weight = 0.05
 recompute_on_crowded = false
 route_randomness = 0.05
 
-[active_modes.avoid_congestion]  # 避塞：壅塞重罰 + 硬避開高壅塞邊 + 積極重算 + 高隨機分散
+[action_modes.avoid_congestion]  # 避塞：壅塞重罰 + 硬避開高壅塞邊 + 積極重算 + 高隨機分散
 desired_speed_kmh = 80.0
 time_weight = 0.20
 distance_weight = 0.10
@@ -85,7 +85,7 @@ congestion_penalty = 3.0
 avoid_threshold = 0.6
 route_randomness = 0.20
 
-[active_modes.comfortable]       # 舒適：偏好大路，中度避塞
+[action_modes.comfortable]       # 舒適：偏好大路，中度避塞
 desired_speed_kmh = 60.0
 time_weight = 0.20
 distance_weight = 0.10
@@ -95,7 +95,7 @@ congestion_penalty = 1.0
 road_class_bias = 0.4
 route_randomness = 0.10
 
-[active_modes.short_distance]    # 最短距離：純距離，願意鑽小路抄近
+[action_modes.short_distance]    # 最短距離：純距離，願意鑽小路抄近
 desired_speed_kmh = 70.0
 time_weight = 0.10
 distance_weight = 0.70
@@ -152,7 +152,7 @@ speed_slow_ratio = 0.5       # ≥ 此值 →「略慢」；否則「壅塞緩�
 pool_size = 500                 # persona 原型數上限（建議數百；車多時循環重用，不再 1 車 1 persona）
 
 # ----- 規模化（LLM 決策的事件觸發 + 並行批次）-----
-# 純事件觸發：LLM 模式下只在踩到壅塞/前方塞時才重決 active_mode；順暢的車維持規則式初始 mode。
+# 純事件觸發：LLM 模式下只在踩到壅塞/前方塞時才重決 action_mode；順暢的車維持規則式初始 mode。
 # 詳見 docs/SCALING_zh-TW.md。
 [scaling]
 event_triggered_decisions = true   # 關閉＝退回「每步對全部 agent 決策」舊行為
@@ -317,3 +317,18 @@ speed_car = 40
 speed_moto = 35
 lanes = 1
 capacity_per_lane = 12
+
+# UXsim 後端全域設定（僅 LLM_ABM_ENGINE=uxsim 時生效；見 docs/UXSIM_MIGRATION_zh-TW.md）
+[uxsim]
+deltan = 1                    # 平台聚合單位（1=每車獨立，個體 LLM 必需；成本 ∝ 1/deltan²）
+jam_density = 0.2             # link 堵塞密度 veh/m/lane（FD 校準對象）
+dev_crop_km = 0              # 本機開發裁切半徑（球場為心；0=全市。本機開發可設 8；env UXSIM_DEV_CROP_KM 可覆寫）
+reaction_time = 1            # UXsim 跟車反應時間 s
+route_choice_principle = "homogeneous_DUO"
+duo_update_time = 600        # 路徑重算間隔 s（調大=更省、改路更少）
+duo_update_weight = 0.5      # 換到新最短路的強度 λ
+duo_noise = 0.01             # 路徑選擇隨機擾動（調大=更分散）
+route_choice_update_gradual = false
+instantaneous_TT_timestep_interval = 5
+no_cyclic_routing = false    # 禁止重複經過同節點（防繞圈）
+hard_deterministic_mode = true  # 永遠走最短路、無隨機（可重現）

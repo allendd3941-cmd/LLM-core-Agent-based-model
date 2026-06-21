@@ -24,7 +24,7 @@
 | `EGRESS_zh-TW.md` | 散場（egress）兩階段疏運評估（手動宣告散場、回居住地、清場時間） |
 | `MEMORY_zh-TW.md` | 單一旅次記憶（不分長短期；`summary` 一律確定性模板，已移除 LLM 摘要） |
 | `ENVIRONMENT_zh-TW.md` | 送 LLM 的環境感知（質性標籤、熱點、前方路況） |
-| `ACTIVE_MODES_zh-TW.md` | 五種 active_mode 的權重與路徑策略 |
+| `ACTION_MODES_zh-TW.md` | 五種 action_mode 的權重與路徑策略 |
 | `DEMO_FEATURES_zh-TW.md` | 互動功能（模型選擇器/分析/對話/場景/prompt/RAG/NL 介入/上傳/zoom 渲染） |
 | `CHANGES_LLM_PIPELINE_zh-TW.md` | LLM pipeline 重構（perception 模板化、token 預算切批、結構化輸出） |
 | `DATA.md` | 資料來源（GIS、路網、人口、號誌） |
@@ -111,7 +111,7 @@
 ### 3.9 互動 demo 功能
 | 功能 | 說明 | code |
 |---|---|---|
-| **LLM 模型選擇器** | 前端選後端（Ollama/vLLM）+ 模型;整套 LLM 共用所選模型 | `llm_config`/`model_registry`/`websocket._set_llm` |
+| **LLM 模型選擇器** | 前端選 vLLM 模型（＝對齊目標）;整套 LLM 共用所選模型 | `llm_config`/`model_registry`/`websocket._set_llm` |
 | **可抽換場景/圖層** | `tainan_stadium`/`tainan_station` 內建 + `build_scenario` 建新縣市 | `scenarios.py`/`spatial/build_scenario.py` |
 | **前端可改 Prompts** | 即時改人格/決策 prompt（結構化輸出保護格式不崩） | `llm_server/prompt_store.py` |
 | **RAG 知識庫** | 上傳文字 → decision 每批用路況檢索注入（sklearn TF-IDF char n-gram,非 embedding） | `llm_server/rag_store.py` |
@@ -143,10 +143,9 @@
 - **分析**：抵達曲線加「每步出發」對照；狀態列「未出發 N」。
 - [doc] DEMO_FEATURES_zh-TW.md §17　[code] `engine._assign_departures`/`_activate_due_departures`
 
-### 3.10 LLM 後端（Ollama / vLLM）
-- **Ollama**：即時查 `/api/tags` 列實裝模型,**前端可熱切換**;帶 `options.num_ctx`。適合本機/無 GPU。
-- **vLLM**：OpenAI 相容、continuous batching、高並行（`--max-num-seqs`）;**一個 server 綁一個模型,前端下拉只是「對齊目標」,不能熱切換**（換模型要重啟 `vllm serve`）。需 GPU。結構化輸出走 `guided_json`。
-- **設定（連線）**：`.env` 的 `LLM_BACKEND`/`OLLAMA_*`/`VLLM_URL`/`VLLM_MODEL`（刻意與 `simulation.toml` 分離）。
+### 3.10 LLM 後端（vLLM）
+- **vLLM**：OpenAI 相容 `/v1/chat/completions`、continuous batching、高並行（`--max-num-seqs`）;**一個 server 綁一個模型,前端模型下拉＝「對齊目標」,不能熱切換**（換模型要重啟 `vllm serve`）。需 GPU。結構化輸出走 `guided_json`。
+- **設定（連線）**：`.env` 的 `VLLM_URL`/`VLLM_MODEL`（VLLM_MODEL 必填；刻意與 `simulation.toml` 分離）。
 - [doc] PYTHON_SIMULATOR_zh-TW.md、SCALING_zh-TW.md（vLLM 啟動）　[code] `llm_server/llm_client.py`/`llm_config.py`
 
 ---

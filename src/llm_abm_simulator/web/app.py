@@ -125,21 +125,10 @@ def create_app() -> FastAPI:
         return FileResponse(p, media_type="application/zip", filename=name)
 
     @app.get("/api/llm/models")
-    async def list_llm_models(backend: str = "ollama") -> JSONResponse:
-        """列出可選模型：ollama→即時查 /api/tags 的實裝模型；vllm→候選登錄表。"""
-        if backend == "vllm":
-            from llm_server.model_registry import VLLM_MODELS
-            return JSONResponse({"backend": "vllm", "models": VLLM_MODELS})
-        # ollama：即時查實裝模型
-        try:
-            import requests
-            from llm_server import llm_config
-            r = requests.get(f"{llm_config.ollama_base_url()}/api/tags", timeout=5)
-            r.raise_for_status()
-            names = [m.get("name", "") for m in r.json().get("models", []) if m.get("name")]
-            return JSONResponse({"backend": "ollama", "models": [{"id": n, "label": n} for n in names]})
-        except Exception as e:  # noqa: BLE001  Ollama 沒開/連不上 → 空清單
-            return JSONResponse({"backend": "ollama", "models": [], "error": str(e)[:200]})
+    async def list_llm_models() -> JSONResponse:
+        """列出可選 vLLM 模型（候選登錄表）。前端下拉＝「對齊目標」，實際要 `vllm serve` 對應模型。"""
+        from llm_server.model_registry import VLLM_MODELS
+        return JSONResponse({"backend": "vllm", "models": VLLM_MODELS})
 
     @app.get("/api/rag/status")
     async def rag_status() -> JSONResponse:

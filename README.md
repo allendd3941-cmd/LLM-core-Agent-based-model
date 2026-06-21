@@ -176,7 +176,7 @@ Paths are weighted-shortest paths (Dijkstra on the OSM graph). Each edge's cost 
 length/time/comfort/congestion under the agent's behavioural-mode weights; *avoid-congestion*
 adds a heavy congestion penalty and a near-block multiplier. When an agent is stuck on a congested
 road and its mode allows it, the path is recomputed from the current position — reacting to live
-congestion. See [`docs/ACTIVE_MODES_zh-TW.md`](docs/ACTIVE_MODES_zh-TW.md).
+congestion. See [`docs/ACTION_MODES_zh-TW.md`](docs/ACTION_MODES_zh-TW.md).
 
 ### 4. Personas, robustness, reproducibility
 - **Persona pool:** LLM personas are generated once into a stable pool and *sliced* per agent count;
@@ -199,7 +199,7 @@ fallback). Sections include:
 | `[memory]` | qualitative thresholds for short-/long-term memory |
 | `[summary]` | LLM trip-summary on/off, model tag, cadence |
 | `[profile]` | persona pool size |
-| `[active_modes.*]` | the five behavioural modes' weights & routing flags |
+| `[action_modes.*]` | the five behavioural modes' weights & routing flags |
 | `[roads]` / `[highway_specs]` | congestion model, per-OSM-class speed/capacity |
 | `[ui]` | front-end slider ranges (also the back-end clamps — single source of truth) |
 | `[scaling]` / `[llm_budget]` | event-triggered batching, concurrency, and token-budget-driven batch sizing |
@@ -246,7 +246,7 @@ LLM_abm_model/
   LLM mode, persona pool, Linux/SSH demo, architecture.
 - [`docs/ENVIRONMENT_zh-TW.md`](docs/ENVIRONMENT_zh-TW.md) — spatial perception design.
 - [`docs/MEMORY_zh-TW.md`](docs/MEMORY_zh-TW.md) — single trip-memory design.
-- [`docs/ACTIVE_MODES_zh-TW.md`](docs/ACTIVE_MODES_zh-TW.md) — the five behavioural modes & routing.
+- [`docs/ACTION_MODES_zh-TW.md`](docs/ACTION_MODES_zh-TW.md) — the five behavioural modes & routing.
 - [`docs/DEMAND_zh-TW.md`](docs/DEMAND_zh-TW.md) — gravity-model origin demand (decoupled from persona).
 - [`docs/DEMO_FEATURES_zh-TW.md`](docs/DEMO_FEATURES_zh-TW.md) — LLM model selector, post-sim analytics, pause-to-chat.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/DATA.md`](docs/DATA.md) — system & data notes.
