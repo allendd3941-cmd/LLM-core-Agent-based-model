@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
@@ -49,9 +50,16 @@ def configure_logging(level: int | None = None) -> None:
         lg.propagate = False
 
 
-def create_app() -> FastAPI:
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # logging 在 server 啟動時設定，而非 import 時——否則只要 import 本模組（例如測試 import
+    # web 層）就會關掉套件 logger 的 propagate，污染使用 caplog 的測試。
     configure_logging()
-    app = FastAPI(title="LLM ABM 交通模擬器", version="0.1.0")
+    yield
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="LLM ABM 交通模擬器", version="0.1.0", lifespan=_lifespan)
     frontend = config.FRONTEND_DIR
 
     @app.get("/healthz")

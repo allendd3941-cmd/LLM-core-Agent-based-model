@@ -214,7 +214,16 @@ const TrafficMap = (() => {
     makeDetMarker(lat, lng, label, false);
   }
 
-  function getDetectors() { return stagedDetectors.map((d) => ({ lat: d.lat, lng: d.lng })); }
+  function getDetectors() {
+    // 保留相機 UUID（ext_id/ext_name）回送，否則「套用設定」round-trip 會把驗證相機的 UUID 洗掉，
+    // 導致匯出驗證 CSV 找不到帶 UUID 的偵測器而全空。手動放置的點沒有 UUID（略過該欄）。
+    return stagedDetectors.map((d) => {
+      const o = { lat: d.lat, lng: d.lng };
+      if (d.ext_id != null) o.ext_id = d.ext_id;
+      if (d.ext_name != null) o.ext_name = d.ext_name;
+      return o;
+    });
+  }
   function detectorCount() { return stagedDetectors.length; }
 
   function clearDetectors() {
@@ -228,7 +237,7 @@ const TrafficMap = (() => {
     if (!detectorLayer) return;
     detectorLayer.clearLayers();
     detMarkers = [];
-    stagedDetectors = (list || []).map((d) => ({ lat: d.lat, lng: d.lng }));
+    stagedDetectors = (list || []).map((d) => ({ lat: d.lat, lng: d.lng, ext_id: d.ext_id, ext_name: d.ext_name }));
     (list || []).forEach((d) => makeDetMarker(d.lat, d.lng, d.label, true));
   }
 

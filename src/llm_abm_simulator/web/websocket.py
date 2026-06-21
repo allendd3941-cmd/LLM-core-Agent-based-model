@@ -33,9 +33,16 @@ def _sanitize_detectors(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, list):
         for d in raw[:100]:
             try:
-                out.append({"lat": float(d["lat"]), "lng": float(d["lng"])})
+                item: dict[str, Any] = {"lat": float(d["lat"]), "lng": float(d["lng"])}
             except (KeyError, TypeError, ValueError):
                 continue
+            # 保留相機 UUID（ext_id/ext_name）：預設 55 台驗證相機 round-trip 後仍能對應真實相機、
+            # 匯出驗證 CSV 才不會因 UUID 被洗掉而全空。手動放置的點無此欄、自然略過。
+            if d.get("ext_id"):
+                item["ext_id"] = d["ext_id"]
+            if d.get("ext_name"):
+                item["ext_name"] = d["ext_name"]
+            out.append(item)
     return out
 
 
@@ -53,8 +60,17 @@ class SimulationSession:
         self._send_lock = asyncio.Lock()   # 序列化送出：避免 run loop 與 set_view 快照並發 send 撞在一起
 
     def _make_engine(self) -> SimulationEngine:
-        """建立引擎並套用目前的監測器點位（每次重建引擎都要重新套用）。"""
-        eng = SimulationEngine(self.cfg)
+        """建立引擎並套用目前的監測器點位（每次重建引擎都要重新套用）。
+
+        後端由環境變數 ``LLM_ABM_ENGINE`` 選擇：``legacy``（預設、自寫物理）/ ``uxsim``（UXsim 後端）。
+        遷移期間預設 legacy，確保未完成前系統照常可用（見 docs/UXSIM_MIGRATION_zh-TW.md）。
+        """
+        import os
+        if os.getenv("LLM_ABM_ENGINE", "legacy").lower() == "uxsim":
+            from ..simulation.uxsim_engine import UXsimEngine
+            eng: SimulationEngine = UXsimEngine(self.cfg)
+        else:
+            eng = SimulationEngine(self.cfg)
         eng.set_detectors(self._detector_specs)
         return eng
 

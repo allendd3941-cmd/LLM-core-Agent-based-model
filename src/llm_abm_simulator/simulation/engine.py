@@ -1645,8 +1645,8 @@ class SimulationEngine:
 
     def detectors_payload(self) -> list[dict[str, Any]]:
         """給前端：已註冊監測器的位置（畫標記用）。"""
-        return [{"id": d["id"], "ext_id": d.get("ext_id"), "label": d["label"],
-                 "lat": d["lat"], "lng": d["lng"]}
+        return [{"id": d["id"], "ext_id": d.get("ext_id"), "ext_name": d.get("ext_name"),
+                 "label": d["label"], "lat": d["lat"], "lng": d["lng"]}
                 for d in self._detectors]
 
     def snap_point(self, lat: float, lng: float) -> dict[str, Any]:
