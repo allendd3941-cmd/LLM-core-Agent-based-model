@@ -94,7 +94,7 @@ congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 | `comfortable` | `set_links_prefer(路徑 links)` | 自由流時間 + `road_class_bias`（偏好幹道） | 走大路、朝終點（有方向→不亂繞） |
 | `short_distance` | `set_links_prefer(路徑 links)` | 純距離 | 總距離最短 |
 | `tolerate_congestion` | `set_links_prefer(路徑 links)` | 自由流時間 | 黏著計畫路徑、**忍受壅塞不繞開** |
-| `avoid_congestion` | `set_links_avoid(壅塞 links)` + 連通守衛 | （依當前壅塞） | 主動繞開塞車路段 |
+| `avoid_congestion` | `set_links_prefer(繞塞最短路 links)` | 移除壅塞邊後的最短路 | 主動繞開塞車路段（全塞則回 DUO 走最不塞） |
 
 **重算時機（驗收標準）**：`_inject_routes` 以 `first = (已注入 mode != 當前 mode)` 判斷——
 **只要 decision 改變（mode 變），下一步即重算該車的路徑選擇**（重算偏好/避開集合）。
@@ -104,8 +104,17 @@ congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 **`set_links_prefer` 為何中途安全且不卡死**（見 `uxsim.py` `route_next_link_choice`）：
 每個路口先做「出口邊 ∩ 偏好清單」，**且交集非空才限縮**；若該路口沒有任何偏好邊
 （被擠出原路徑 / spillback / 前方全塞）→ 跳過限縮 → 退回全部出口邊由 DUO 選 → **永遠有路走**。
-（對比 `set_links_avoid` 是「相減」，全避會變空集合 → `max()` 崩潰 → 故 `avoid_congestion` 需連通守衛；`prefer` 不需要。）
-也因此 `tolerate` 不再用 `enforce_route`（其 `specified_route` 用「已走 link 數」索引、中途套用會崩）。
+**為何全部改用 `prefer`、完全不用 `set_links_avoid`**：`set_links_avoid` 是在每個路口「相減」掉壅塞出口，
+某節點所有出口都被避掉時 → 空集合 → UXsim `route_next_link_choice` 的 `max()` 崩潰（**重壅塞下實測會發生**，
+全域連通守衛不足以擋，因 DUO 仍可能把車帶進局部死角）。改用 `prefer` 後（交集為空才不限縮、否則退回全部出口），
+**任何路口都不會被清空 → 不崩、永遠有路走**。故：
+- `avoid_congestion` = `set_links_prefer(移除壅塞邊後的最短路)`（取代舊的 `set_links_avoid`）；
+- `tolerate` 不用 `enforce_route`（其 `specified_route` 用「已走 link 數」索引、中途套用會崩）。
+→ 5 個 mode 一律 `set_links_prefer` 或清空，**唯一會崩的 `set_links_avoid` 路徑已徹底移除**。
+
+**車輛顯示位置**：UXsim 後端覆寫 `_xy_to_latlng` → 用 `_metric_to_latlng` 真實投影
+（UXsim 的 `a.x/a.y` 是 `get_xy_coords` 給的真實連續公尺座標）。**不沿用父類「吸最近節點」近似**——
+否則整段路的車會塌到路口節點、前端攤成一坨格子（顯示假象，非物理塞爆）。`_visible_agents` 已視窗裁切故投影成本可接受。
 
 ## 6. 進度
 - **Phase 0 spike ✅**：UXsim 能支撐 Design 2 + 介入（不退 SUMO）。唯 deltan=1 城市尺度吞吐待 server 量。

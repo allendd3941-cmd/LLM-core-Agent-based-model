@@ -215,6 +215,16 @@ class UXsimEngine(SimulationEngine):
         """改用 agent 目前的 UXsim link 對應的 Road（取代 current_path 推導）。"""
         return self._roads_by_id.get(agent.current_road_id) if agent.current_road_id else None
 
+    def _xy_to_latlng(self, x: float, y: float) -> tuple[float, float]:
+        """UXsim 的 a.x/a.y 是 UXsim 由 get_xy_coords 給的『真實連續公尺座標』(CRS_METRIC)
+        → 用真實投影顯示，**不吸最近節點**。
+
+        legacy 引擎的車是節點到節點離散跳、x/y 即節點座標，故父類用「吸最近節點」近似又省投影成本；
+        但 UXsim 的車連續在路段上跑，吸節點會讓整段路的車全塌到同一個路口節點 → 前端攤成一坨格子
+        （不是物理塞爆，是顯示假象）。改真實投影後車沿路散開、忠實反映物理。
+        渲染已由 _visible_agents 做視窗裁切（只送可視範圍的車），故每車投影成本可接受。"""
+        return self._metric_to_latlng(x, y)
+
     def _recompute_flows(self) -> None:
         """flow 已在 _readback 從 UXsim link 更新；此處不再用 agent path 統計。"""
         return
@@ -236,7 +246,7 @@ class UXsimEngine(SimulationEngine):
           comfortable         → set_links_prefer(幹道)
           short_distance      → set_links_prefer(靜態最短距離路徑的 links)
           tolerate_congestion → set_links_prefer(自由流時間最短路) 黏著計畫、忍受壅塞（不繞開）
-          avoid_congestion    → set_links_avoid(壅塞 links；連通守衛：全塞則不避 → DUO 走最不塞)
+          avoid_congestion    → set_links_prefer(繞塞最短路；全塞則不偏好 → DUO 走最不塞) [strand-safe]
         重算時機：**decision 改變（mode 變）即重算路徑選擇**（first=True → 重算偏好/避開集合）；
         此外 avoid_congestion 還會在「該車壅塞 + 過 reroute cooldown」時重算（追當前壅塞）。
         tolerate/comfortable/short_distance 的路徑與當前壅塞無關，故只在 decision 改變時重算。
@@ -277,8 +287,11 @@ class UXsimEngine(SimulationEngine):
                 veh.set_links_avoid([])
                 veh.set_links_prefer(self._dest_path_links(a, "time"))
             elif mode == "avoid_congestion":
-                veh.set_links_prefer([])
-                veh.set_links_avoid(self._safe_congested_avoid(a))
+                # 用「偏好一條繞塞路徑」(prefer) 而非 set_links_avoid：
+                # avoid 在某節點把所有出口都避掉時 UXsim 會 max() 空集合崩潰（重壅塞下會發生）；
+                # prefer 交集為空時自動退回全部出口/DUO → strand-safe，永遠有路走。
+                veh.set_links_avoid([])
+                veh.set_links_prefer(self._congested_detour_prefer(a))
             else:                                          # fast / 未知 → 純 DUO
                 veh.set_links_prefer([])
                 veh.set_links_avoid([])
@@ -316,19 +329,26 @@ class UXsimEngine(SimulationEngine):
                 names.append(road.road_id)
         return names
 
-    def _safe_congested_avoid(self, a) -> list:
-        """回傳此車要避開的壅塞 link 名；**連通守衛**：若避開會使 current→dest 斷路（前方全塞）→
-        回空（不避）→ 交 UXsim DUO 走最小旅時 = 最不塞那條（保證一定有路、絕不卡死）。"""
+    def _congested_detour_prefer(self, a) -> list:
+        """避塞：回傳一條『繞開壅塞、仍到得了終點』的最短路徑 link 名（給 set_links_prefer）。
+
+        作法：把當前壅塞邊從圖上移除（O(1) restricted_view）後算 current→dest 最短路；其 links 交給 prefer。
+        **strand-safe**：移除壅塞後若斷路（前方全塞）→ 回 []（prefer 清空）→ UXsim DUO 走最小旅時＝最不塞那條，
+        保證一定有路、絕不卡死。用 prefer 而非 avoid，是因為 avoid 在某節點把所有出口避光會讓 UXsim 崩。"""
         import networkx as nx
         thr = self.cfg.crowded_road_threshold
-        congested = [r for r in self._roads_by_id.values() if r.congestion_proxy >= thr]
-        if not congested or self.network is None or not a.current_node or not a.destination_node:
+        if self.network is None or not a.current_node or not a.destination_node:
             return []
+        congested = [r for r in self._roads_by_id.values() if r.congestion_proxy >= thr]
+        if not congested:
+            return []   # 無壅塞 → 不偏好 → 純 DUO
         avoid_edges = [(r.node_a, r.node_b) for r in congested]
         view = nx.restricted_view(self.network.graph, [], avoid_edges)   # 不複製、O(1) view
-        if nx.has_path(view, a.current_node, a.destination_node):
-            return [r.road_id for r in congested]   # 仍連通 → 全避
-        return []                                   # 全塞 → 不避（DUO 走最不塞）
+        try:
+            node_path = nx.shortest_path(view, a.current_node, a.destination_node, weight="length")
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return []   # 前方全塞/斷路 → 不偏好 → DUO 走最不塞
+        return self._path_link_names(node_path)
 
     # ------------------------------------------------------------------
     # step：UXsim 推進 + 讀回，重用父類的決策/感知/偵測器/指標/snapshot
