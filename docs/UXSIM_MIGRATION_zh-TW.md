@@ -71,15 +71,19 @@ congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 ```
 - `kappa` = UXsim link 的 **jam density**（即 `build_world` 傳入的 `[uxsim].jam_density`）、`length` = link 長度
   → `kappa × length` = 該 link 堵塞時最多容納車數（＝ UXsim 判斷 spillback/壅塞的同一儲容）。
-- **不再用 `[highway_specs].capacity_per_lane`** 當分母（那是 legacy 引擎的容量）。
-- 此 proxy 驅動 `is_crowded` / `avoid_congestion` 觸發 / 前端壅塞上色 / `build_analysis` 的 V/C（用同一儲容）。
+- **單一容量來源**：`UXsimEngine._build_world_and_vehicles` 把 `Road.capacity` 設為 `kappa × length`（jam 儲容），
+  之後 `congestion_proxy`、`build_analysis` 的 V/C、snapshot、GIS 匯出**全部讀同一個 `Road.capacity`** → 報表與即時地圖、與物理完全一致。
+- 此 proxy 驅動 `is_crowded` / `avoid_congestion` 觸發 / 前端壅塞上色 / `build_analysis` 的 V/C（皆同一儲容）。
+- **已移除設定參數**（換 UXsim 後與物理無關、會誤導）：`[highway_specs].capacity_per_lane`、`[roads].capacity_fallback_vehicle_count`、`[roads].flow_weight_multiplier`。
+  （legacy 引擎內部改用常數佔位；UXsim 後端本就覆寫 `Road.capacity`，故無影響。）
 
 **`[highway_specs]` 在 UXsim 後端的實際套用**：
 | highway_specs 欄位 | 是否進 UXsim 物理 | 說明 |
 |---|---|---|
 | `speed_car` / `lanes` | ✅ 是 | 下載時烤進 graphml（OSM 真實值優先）→ `addLink(free_flow_speed, number_of_lanes)`。**改了要重建 graphml**。 |
-| `capacity_per_lane` | ❌ 否 | UXsim path **已不使用**（容量由 FD：`free_flow_speed × jam_density × lanes` 推；congestion_proxy 改用 `kappa×length` 儲容）。 |
-| jam density | — | 來自 `[uxsim].jam_density`，**全路型統一**；要分路型需改用 `jam_density_per_lane`（未做，屬 Phase 6 FD 校準）。 |
+| jam density（容量來源） | 來自 `[uxsim].jam_density` | 容量 = `kappa×length`，**全路型統一**；要分路型需改用 `jam_density_per_lane`（未做，屬 Phase 6 FD 校準）。 |
+
+> **引擎預設已改 UXsim**：`web/websocket._make_engine` 預設 `uxsim`；本機記憶體不足（UXsim 全市約 9GB）時設 `LLM_ABM_ENGINE=legacy` 退回自寫物理引擎當逃生口/baseline。`tests/simulator/test_engine.py` 仍以 legacy 引擎做輕量整合測試（筆電可跑）。
 
 > ⚠️ **`crowded_road_threshold` 語意改變**：congestion_proxy 現在是「真實占有率」（1km link 約可容 `kappa×length` 台，故同樣車數下占有率比舊 proxy 低很多）。demo 若要更敏感的壅塞觸發，**把 `crowded_road_threshold` 調低**（或日後用 `jam_density_per_lane` 讓多車道容量更真實）。
 
@@ -115,6 +119,32 @@ congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 **車輛顯示位置**：UXsim 後端覆寫 `_xy_to_latlng` → 用 `_metric_to_latlng` 真實投影
 （UXsim 的 `a.x/a.y` 是 `get_xy_coords` 給的真實連續公尺座標）。**不沿用父類「吸最近節點」近似**——
 否則整段路的車會塌到路口節點、前端攤成一坨格子（顯示假象，非物理塞爆）。`_visible_agents` 已視窗裁切故投影成本可接受。
+
+## 5.7 環境感知對接 UXsim（road_ahead）
+
+送 LLM 的感知大多直接吃 UXsim 真值：`congestion_proxy`（kappa 占有率）、`speed_status`（`veh.v`÷速限）、
+`nearby_agent_count`（真實 x,y 空間網格）、`congestion_hotspots`/`trend`（聚合）。
+
+**唯一需重接的是「前方路況」`road_ahead`**：base 版沿 `agent.current_path` 掃 `lookahead_distance_m`，
+但 UXsim 的路由逐路口即時決定、agent 不持有完整前方路徑（`current_path` 只有當前 link）→ base 版恆回「順暢」。
+→ `UXsimEngine` 覆寫 `_road_ahead`：**只看「朝終點的下一條 OSM 段」**＝ `_dest_path_links(agent,"time")[0]`
+（其起點＝當前 link 末端節點，實測 42/42 確認是真正下一段），壅塞則回質性文字「下一條路壅塞（街名）」、否則「順暢」。
+- 比固定距離掃描更貼合 UXsim、也更像真人「看到下一條路塞就改道」（bounded local perception）。
+- **連帶恢復前瞻觸發**：event-triggered 的 `signal = 腳下壅塞 or road_ahead 非順暢` 第二項回來（trigger 程式碼零改）。
+- ⚠️ 注意 `[memory].feel_congested_proxy = 0.6` 對 kappa 真實占有率偏高 → road_ahead 實測常為「順暢」；
+  要更敏感需調此門檻（與 `crowded_road_threshold` 同屬 §5.5 的門檻 tuning，未動）。
+- `[perception_context].lookahead_distance_m` 僅 legacy 用；UXsim 只看下一段、忽略它。
+
+**記憶體 `memory.moved`（停滯/緩慢/前進中）也已接上**：它吃 `distance_moved_last_step`，原只在 legacy 的
+`_move_agent` 被設、UXsim 不走那條 → 曾恆為 0 → 記憶誤報「停滯」。修法：`UXsimEngine._readback` 在更新 `a.x,a.y` 時
+用**每步歐氏位移**(`hypot(x-prev_x, y-prev_y)`，與 legacy 同算法)設 `distance_moved_last_step`，未在路上的車設 0。
+實測 `moved` 隨實際位移分布為 緩慢/前進中、換算時速 6.5~25 km/h（合理）。記憶其餘欄位（traffic_feel/where/
+getting_closer/remaining/congested_spots/smoothness/summary）本就直接吃 UXsim 真值，無需改。
+
+**前端 agent 檢視「狀態」列接上 `selected_action`**：原 `selected_action`（goto_destination/wait_at_signal/
+arrived/error/recompute）只在 legacy 寫、且**未進 `AgentSnapshot`**（沒接到前端）。已：① `UXsimEngine._readback`
+依車況設 `selected_action`（含「中途改道」＝該 cycle 有 reroute）；② 加進 `AgentSnapshot` + `_snapshot`；
+③ 前端 `simulation.js` 以 `ACTION_LABELS` 轉中文（前往目的地/改道中/等紅燈/已抵達/路徑異常）顯示在「狀態」列。
 
 ## 6. 進度
 - **Phase 0 spike ✅**：UXsim 能支撐 Design 2 + 介入（不退 SUMO）。唯 deltan=1 城市尺度吞吐待 server 量。

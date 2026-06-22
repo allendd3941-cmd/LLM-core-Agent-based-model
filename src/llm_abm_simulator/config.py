@@ -94,10 +94,8 @@ class SimulationConfig:
     default_capacity_weight: float = 0.10
     default_road_type_preference: tuple[str, ...] = ("primary", "secondary", "tertiary", "residential")
 
-    # === 道路壅塞估計與權重（GAML 同名參數）===
+    # === 道路壅塞估計與權重 ===
     active_road_min_flow: int = 1
-    capacity_fallback_vehicle_count: float = 10.0
-    flow_weight_multiplier: float = 2.0
     road_flow_high_threshold: int = 8            # 視覺化：紅色門檻
     road_flow_medium_threshold: int = 3          # 視覺化：橘色門檻
 
@@ -334,19 +332,19 @@ class SignalConfig:
 
 
 # road_network 的 highway 速限 fallback（TOML [highway_specs] 缺省時用這組）。
-# capacity（同時容車代理值）改由 capacity_per_lane × lanes 在載入時算出，讓「車道數」真正影響容量；
-# capacity_per_lane 單調遞減（高等級每車道吞吐較大），符合交通工程直覺。
+# 註：UXsim 後端的容量由基本圖（free_flow_speed × jam_density × lanes）決定、congestion_proxy 用
+# jam 儲容（kappa×length），皆與此處無關 → 已移除 capacity_per_lane（不再是設定旋鈕）。
 _DEFAULT_HIGHWAY_SPECS: dict[str, dict[str, float]] = {
-    "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3, "capacity_per_lane": 22},
-    "trunk": {"speed_car": 80, "speed_moto": 65, "lanes": 2, "capacity_per_lane": 20},
-    "primary": {"speed_car": 60, "speed_moto": 50, "lanes": 2, "capacity_per_lane": 18},
-    "secondary": {"speed_car": 50, "speed_moto": 40, "lanes": 2, "capacity_per_lane": 15},
-    "tertiary": {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity_per_lane": 12},
-    "residential": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity_per_lane": 9},
-    "unclassified": {"speed_car": 30, "speed_moto": 30, "lanes": 1, "capacity_per_lane": 8},
-    "service": {"speed_car": 25, "speed_moto": 25, "lanes": 1, "capacity_per_lane": 6},
+    "motorway": {"speed_car": 90, "speed_moto": 70, "lanes": 3},
+    "trunk": {"speed_car": 80, "speed_moto": 65, "lanes": 2},
+    "primary": {"speed_car": 60, "speed_moto": 50, "lanes": 2},
+    "secondary": {"speed_car": 50, "speed_moto": 40, "lanes": 2},
+    "tertiary": {"speed_car": 40, "speed_moto": 35, "lanes": 1},
+    "residential": {"speed_car": 30, "speed_moto": 30, "lanes": 1},
+    "unclassified": {"speed_car": 30, "speed_moto": 30, "lanes": 1},
+    "service": {"speed_car": 25, "speed_moto": 25, "lanes": 1},
 }
-_DEFAULT_HIGHWAY_SPEC = {"speed_car": 40, "speed_moto": 35, "lanes": 1, "capacity_per_lane": 12}
+_DEFAULT_HIGHWAY_SPEC = {"speed_car": 40, "speed_moto": 35, "lanes": 1}
 
 
 @dataclass(frozen=True)

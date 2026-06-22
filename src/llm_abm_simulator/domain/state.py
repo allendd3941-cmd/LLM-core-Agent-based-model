@@ -30,6 +30,7 @@ class AgentSnapshot:
     current_town: str
     current_road_id: str
     waiting_at_signal: bool = False  # 本步是否停在號誌路口等紅燈
+    selected_action: str = "none"   # 當下低階動作（前端「狀態」列顯示；前往目的地/等紅燈/已抵達/改道中/路徑異常）
     trip_summary: str = ""          # 單一 memory 的旅次摘要 summary（前端點擊 agent 顯示）
     decision_reason: str = ""       # 本步選擇此 action_mode 的原因（前端顯示）
     role: str = "event"             # "event"（去事件地點）| "ambient"（背景常態車流）

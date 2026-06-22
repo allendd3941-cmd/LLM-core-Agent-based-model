@@ -62,15 +62,15 @@ class SimulationSession:
     def _make_engine(self) -> SimulationEngine:
         """建立引擎並套用目前的監測器點位（每次重建引擎都要重新套用）。
 
-        後端由環境變數 ``LLM_ABM_ENGINE`` 選擇：``legacy``（預設、自寫物理）/ ``uxsim``（UXsim 後端）。
-        遷移期間預設 legacy，確保未完成前系統照常可用（見 docs/UXSIM_MIGRATION_zh-TW.md）。
+        後端**預設 UXsim**（正式/論文用）；本機開發若記憶體不足（UXsim 全市約 9GB）可設
+        ``LLM_ABM_ENGINE=legacy`` 退回自寫物理引擎當逃生口/baseline（見 docs/UXSIM_MIGRATION_zh-TW.md）。
         """
         import os
-        if os.getenv("LLM_ABM_ENGINE", "legacy").lower() == "uxsim":
-            from ..simulation.uxsim_engine import UXsimEngine
-            eng: SimulationEngine = UXsimEngine(self.cfg)
+        if os.getenv("LLM_ABM_ENGINE", "uxsim").lower() == "legacy":
+            eng: SimulationEngine = SimulationEngine(self.cfg)
         else:
-            eng = SimulationEngine(self.cfg)
+            from ..simulation.uxsim_engine import UXsimEngine
+            eng = UXsimEngine(self.cfg)
         eng.set_detectors(self._detector_specs)
         return eng
 

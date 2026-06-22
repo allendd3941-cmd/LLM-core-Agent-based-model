@@ -388,6 +388,20 @@ const TrafficUI = (() => {
     }
   }
 
+  const ACTION_LABELS = {
+    goto_destination: "前往目的地",
+    goto_destination_recompute_path: "改道中",
+    wait_at_signal: "等紅燈",
+    arrived: "已抵達",
+    error: "路徑異常",
+    none: "—",
+  };
+  function actionLabel(a) {
+    const m = ACTION_LABELS[a.selected_action];
+    if (m) return m;
+    return a.waiting_at_signal ? "等紅燈" : (a.route_status || "—");  // 後備：舊資料/未設時
+  }
+
   function inspectAgent(a) {
     // 點事件車 → 向後端要整趟行走軌跡，在地圖上畫出來（檢驗散場是否受進場記憶影響）
     if (a && a.agent_id && a.role !== "ambient" && send) send("get_agent_path", { agent_id: a.agent_id });
@@ -396,7 +410,7 @@ const TrafficUI = (() => {
       ["姓名", a.profile_name || "—"],
       ["車種", a.vehicle_type],
       ["行為模式", a.action_mode],
-      ["狀態", a.waiting_at_signal ? "等紅燈" : a.route_status],
+      ["狀態", actionLabel(a)],
       ["起點區", a.origin_town],
       ["目前區", a.current_town || "—"],
       ["速度", `${a.speed_kmh} km/h`],

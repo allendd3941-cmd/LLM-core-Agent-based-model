@@ -90,11 +90,6 @@ def _resolve_speeds(data: dict, spec: dict[str, float]) -> tuple[float, float]:
     return float(round(v, 1)), float(round(v * ratio, 1))
 
 
-def _capacity_for(spec: dict[str, float], lanes: float) -> float:
-    """容量代理值 = 每車道容量 × 車道數（至少一車道）。"""
-    per_lane = float(spec.get("capacity_per_lane",
-                              config.DEFAULT_HIGHWAY_SPEC.get("capacity_per_lane", 12.0)))
-    return max(1.0, lanes) * per_lane
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +252,7 @@ def _convert_osm_graph(g_osm: nx.MultiDiGraph) -> nx.DiGraph:
             speed_car=speed_car,
             speed_moto=speed_moto,
             lanes=lanes,
-            capacity=_capacity_for(spec, lanes),
+            capacity=max(1.0, lanes) * 12.0,
             wkt=geom.wkt,
         )
     logger.info("OSM 路網轉換完成：%d 節點 / %d 邊", g.number_of_nodes(), g.number_of_edges())
@@ -310,7 +305,7 @@ def build_synthetic_graph(cfg: config.SimulationConfig) -> nx.DiGraph:
             g.add_edge(u, v, road_id=f"{u}_{v}", length=length, highway="secondary",
                        road_name="synthetic", speed_car=spec["speed_car"],
                        speed_moto=spec["speed_moto"], lanes=lanes,
-                       capacity=_capacity_for(spec, lanes), wkt=geom.wkt)
+                       capacity=max(1.0, lanes) * 12.0, wkt=geom.wkt)
 
     for i in range(n):
         for j in range(n):
@@ -373,7 +368,8 @@ def _wrap(graph: nx.DiGraph) -> RoadNetwork:
         highway = str(data.get("highway", ""))
         spec = _spec_for(highway)
         lanes = float(data.get("lanes", spec.get("lanes", 1.0)))
-        # 容量在載入時由 每車道容量 × 車道數 算出（調 capacity_per_lane 免重建即生效）
+        # capacity 此處僅給 legacy 引擎一個粗略佔位值（每車道 12）；UXsim 後端在 _build_world_and_vehicles
+        # 會把 Road.capacity 覆寫為 jam 儲容（kappa×length），與 congestion_proxy/物理同源。
         roads[(u, v)] = Road(
             road_id=str(data.get("road_id", f"{u}_{v}")),
             node_a=u,
@@ -385,7 +381,7 @@ def _wrap(graph: nx.DiGraph) -> RoadNetwork:
             speed_car=float(data.get("speed_car", 45.0)),
             speed_moto=float(data.get("speed_moto", 35.0)),
             lanes=lanes,
-            capacity=_capacity_for(spec, lanes),
+            capacity=max(1.0, lanes) * 12.0,
             geometry_wgs84=geom,
         )
     return RoadNetwork(graph, roads)

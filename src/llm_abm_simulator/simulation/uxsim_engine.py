@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 
 from .. import config
@@ -48,8 +49,8 @@ class UXsimEngine(SimulationEngine):
         self._link_by_road: dict[str, object] = {}  # road_id → uxsim Link（壅塞讀回）
         self._roads_by_id: dict[str, object] = {}   # road_id → Road
         self._veh_prog: dict[str, int] = {}          # agent_id → 已走過 link 數（偵測器每步差分）
-        self._arterial_links: list[str] = []         # 幹道 link 名（road_class_bias 偏好注入用）
         self._injected: dict[str, str] = {}          # agent_id → 已注入的偏好類型（避免重複套用）
+        self._reroute_cycle: dict[str, int] = {}     # agent_id → 最後一次「中途改道」的 cycle（前端顯示「改道中」）
         self._respawn_count: dict[str, int] = {}     # ambient agent_id → 已重生次數（車名唯一）
         self._dest_trees: dict[str, object] = {}     # "distance"/"time" → DestinationTrees（短距/釘路用,快取）
         # 全域設定來自 config [uxsim]；deltan / dev_crop 另允許環境變數覆寫（本機開發方便）。
@@ -109,6 +110,13 @@ class UXsimEngine(SimulationEngine):
             no_cyclic_routing=uc.no_cyclic_routing,
             hard_deterministic_mode=uc.hard_deterministic_mode)
         self._link_by_road = {l.name: l for l in W.LINKS}
+        # Road.capacity 設為 UXsim 的 jam 儲容（kappa × 長度）= 一條 link 塞死時最多容納車數。
+        # 讓 build_analysis / snapshot / GIS 匯出的容量與 congestion_proxy、與物理**同源**，
+        # 不再用 [highway_specs].capacity_per_lane（那會讓 LOS 報表跟即時地圖壅塞對不上）。
+        for rid, link in self._link_by_road.items():
+            road = self._roads_by_id.get(rid)
+            if road is not None:
+                road.capacity = float(link.kappa) * float(link.length)
         in_net = set(self.network.graph.nodes())
         added = 0
         for a in self.agents:
@@ -123,13 +131,8 @@ class UXsimEngine(SimulationEngine):
             except Exception as e:  # noqa: BLE001
                 logger.debug("addVehicle 失敗 %s: %s", a.agent_id, e)
         self._world = W
-        # 預先算「幹道 link 名」集合（road_class_bias 偏好注入用，一次算好重用）
-        from ..domain.agent import clean_highway
-        from ..spatial.routing import _MAJOR_HIGHWAYS
-        self._arterial_links = [rid for rid, road in self._roads_by_id.items()
-                                if clean_highway(road.highway) in _MAJOR_HIGHWAYS]
-        logger.info("UXsim 後端就緒：%d/%d 台車已建（deltan=%d）；幹道 link %d",
-                    added, len(self.agents), self._deltan, len(self._arterial_links))
+        logger.info("UXsim 後端就緒：%d/%d 台車已建（deltan=%d）",
+                    added, len(self.agents), self._deltan)
 
     # ------------------------------------------------------------------
     # 物理讀回：UXsim → agent / Road 欄位（讓繼承的感知/snapshot 直接可用）
@@ -154,12 +157,9 @@ class UXsimEngine(SimulationEngine):
             road = self._roads_by_id.get(road_id)
             if road is None:
                 continue
-            # congestion_proxy 對齊 UXsim 物理：占有率 = 車數 / 堵塞儲容（kappa × 長度）。
-            # kappa = UXsim link 的 jam density（即 build_world 傳入的 [uxsim].jam_density），
-            # 與 UXsim 判斷 spillback/壅塞的依據一致；**不再用 [highway_specs].capacity_per_lane**。
-            kappa = float(getattr(link, "kappa", 0.0)) or float(getattr(link, "jam_density", 0.0))
-            length = float(getattr(link, "length", 0.0)) or max(road.length, 1.0)
-            storage = kappa * length   # 該 link 最多容納車數（堵塞時）
+            # congestion_proxy = 占有率 = 車數 / jam 儲容。儲容 = road.capacity（建構時已設為 kappa×length，
+            # 單一來源，與 build_analysis/snapshot/GIS 完全同源；不再用 [highway_specs].capacity_per_lane）。
+            storage = road.capacity
             road.current_flow = n
             road.congestion_proxy = round(min(1.0, n / storage), 4) if storage > 0 else 0.0
             rec = self._road_peak.get(road.road_id)   # 累積尖峰（供 build_analysis 瓶頸分析；V/C 用同一儲容）
@@ -189,6 +189,7 @@ class UXsimEngine(SimulationEngine):
             a.route_status = self._status_from_state(state)
             a.speed_kmh = round(float(getattr(veh, "v", 0.0)) * 3.6, 2)
             a.waiting_at_signal = False
+            a.distance_moved_last_step = 0.0   # 未在路上→0；在路上時下方用每步位移覆寫（供 memory 的 moved 標籤）
             link = getattr(veh, "link", None)
             if link is not None:
                 a.current_road_id = link.name
@@ -205,9 +206,25 @@ class UXsimEngine(SimulationEngine):
                     a.waiting_at_signal = True
                 try:
                     x, y = veh.get_xy_coords()
+                    prev_x, prev_y = a.x, a.y
                     a.x, a.y = float(x), float(y)
+                    # 每步歐氏位移（與 legacy _move_agent 同算法）→ memory 的 moved（停滯/緩慢/前進）
+                    a.distance_moved_last_step = math.hypot(a.x - prev_x, a.y - prev_y)
                 except Exception:  # noqa: BLE001
                     pass
+            # selected_action（前端「狀態」列用；與 legacy 同詞彙，前端轉中文）
+            if a.route_status == RouteStatus.ARRIVED:
+                a.selected_action = "arrived"
+            elif a.route_status == RouteStatus.ERROR:
+                a.selected_action = "error"
+            elif a.waiting_at_signal:
+                a.selected_action = "wait_at_signal"
+            elif self._reroute_cycle.get(a.agent_id) == cycle:
+                a.selected_action = "goto_destination_recompute_path"
+            elif link is not None:
+                a.selected_action = "goto_destination"
+            else:
+                a.selected_action = "none"
             if state == "end" and a.arrival_cycle is None and a.role == "event":
                 a.arrival_cycle = cycle
 
@@ -235,6 +252,27 @@ class UXsimEngine(SimulationEngine):
         super()._refresh_agent_perception(agent, pre_move)
         agent.is_crowded = agent.congestion_proxy >= self.cfg.crowded_road_threshold
 
+    def _road_ahead(self, agent, congested_proxy: float, lookahead_m: float = 0.0) -> str:
+        """UXsim：只看「朝終點的下一條 OSM link」的壅塞 → 質性文字（取代 base 的固定距離掃描）。
+
+        下一條 link＝該車 current_node→終點 最短路的第一段（`_dest_path_links` 的 links[0]）；
+        其起點正是當前 link 的末端節點，故是**真正的下一段**（非腳下這條）。
+        無下一段（快到終點/不在路上）→ 順暢。比固定距離掃描更貼合 UXsim（路由逐路口即時決定）、
+        也更像真人「看到下一條路塞就改道」。``lookahead_m`` 在此忽略（保留簽章相容）。
+        註：UXsim 的 ``veh.route_next_link`` 在車仍在當前 link 時＝當前這條（會與 traffic_here 重複），
+        故不用它；改用終點樹的下一段（朝終點、對所有 mode 都穩定）。
+        """
+        from ..domain import agent as agent_mod
+        if agent.route_status in (RouteStatus.ARRIVED, RouteStatus.ERROR):
+            return ""
+        links = self._dest_path_links(agent, "time")   # 朝終點（自由流時間）路徑的 link 名清單
+        road = self._roads_by_id.get(links[0]) if links else None
+        if road is None:
+            return agent_mod.AHEAD_CLEAR
+        if road.congestion_proxy >= congested_proxy:
+            return agent_mod.road_ahead_next_label(road.road_name)
+        return agent_mod.AHEAD_CLEAR
+
     # ------------------------------------------------------------------
     # action_mode → UXsim 路徑選擇參數（只用 UXsim 既有旋鈕，不自寫選路演算法）
     # ------------------------------------------------------------------
@@ -261,12 +299,15 @@ class UXsimEngine(SimulationEngine):
             if veh is None or a.waiting_for_origin:
                 continue
             mode = a.action_mode or "fast"
-            first = self._injected.get(a.agent_id) != mode
+            prev = self._injected.get(a.agent_id)
+            first = prev != mode
             recompute = (mode == "avoid_congestion" and a.is_crowded
                          and (cycle - a.last_reroute_cycle) * sm >= sc.reroute_cooldown_minutes)
             if not (first or recompute):
                 continue
             self._apply_action_mode(a, veh, mode)
+            if recompute or (first and prev is not None):   # 中途改道（非初始路由）→ 前端「改道中」
+                self._reroute_cycle[a.agent_id] = cycle
             self._injected[a.agent_id] = mode
             a.last_reroute_cycle = cycle
 
@@ -548,7 +589,7 @@ class UXsimEngine(SimulationEngine):
         self._link_by_road = {}
         self._roads_by_id = {}
         self._veh_prog = {}
-        self._arterial_links = []
         self._injected = {}
+        self._reroute_cycle = {}
         self._respawn_count = {}
         self._dest_trees = {}

@@ -105,9 +105,14 @@ def speed_status_label(speed_kmh: float, limit_kmh: float, cfg: PerceptionContex
 
 
 def road_ahead_label(distance_m: float, road_name: str) -> str:
-    """前方壅塞點描述（distance_m＝距離該壅塞段的公尺）。"""
+    """前方壅塞點描述（distance_m＝距離該壅塞段的公尺）。legacy 引擎用（沿路徑掃描）。"""
     where = road_name or "前方路段"
     return f"前方約 {distance_m / 1000:.1f} 公里後壅塞（{where}）"
+
+
+def road_ahead_next_label(road_name: str) -> str:
+    """下一條 OSM 路段壅塞的質性描述（UXsim 後端用：只看即將進入的下一條路）。"""
+    return f"下一條路壅塞（{road_name or '前方路段'}）"
 
 
 def clean_highway(highway: str) -> str:

@@ -1115,8 +1115,7 @@ class SimulationEngine:
         for (u, v), flow in counts.items():
             road = self.network.road_between(u, v)
             if road is not None:
-                road.update_flow(flow, self.cfg.capacity_fallback_vehicle_count,
-                                 self.cfg.flow_weight_multiplier)
+                road.update_flow(flow, 10.0, 2.0)   # legacy-only fallback/multiplier 常數（UXsim 後端不走此路）
                 # 累積整趟每條路的尖峰壅塞（供「路網層」Top-N 瓶頸路段分析；含背景車）
                 rec = self._road_peak.get(road.road_id)
                 if rec is None or road.congestion_proxy > rec["peak_proxy"]:
@@ -1354,6 +1353,7 @@ class SimulationEngine:
                 origin_town=a.origin_town, destination_town=a.destination_town,
                 current_town=a.current_town, current_road_id=a.current_road_id,
                 waiting_at_signal=a.waiting_at_signal,
+                selected_action=a.selected_action,
                 trip_summary=a.memory.get("summary", ""),
                 decision_reason=a.decision_reason,
                 role=a.role,
