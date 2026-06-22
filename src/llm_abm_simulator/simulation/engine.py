@@ -141,6 +141,7 @@ class SimulationEngine:
         self._town_nodes: dict[str, list[str]] = {}       # 區名 → 覆蓋它的節點清單（init 一次性建，放置 O(1)）
         self._node_town: dict[str, str] = {}              # 節點 → 所屬區（同一索引反向；current_town O(1)）
         self._town_rep_cache: dict[str, str | None] = {}  # 區名 → 代表節點（終點樹路由：背景車終點收斂到此）
+        self._dest_pool: dict[str, list[str]] | None = None  # 稀疏終點池：區名→終點節點清單（lazy 建一次；見 _dest_node_in_town）
         self._nearby_grid: dict[tuple[int, int], int] | None = None  # 每步重建的鄰近計數網格
         self._nearby_cell: float = 1.0
         self._view: dict[str, float] | None = None        # 前端回報的可視範圍（公尺框 + zoom）；大規模裁切用
@@ -308,6 +309,7 @@ class SimulationEngine:
                 node_town.setdefault(n, t.town_name)
         self._town_nodes = idx
         self._node_town = node_town
+        self._dest_pool = None   # 節點索引重建 → 終點池失效，下次 _dest_node_in_town 重建
         if cache_key is not None:
             _SPATIAL_INDEX_CACHE.clear()   # 只留最新場景的索引
             _SPATIAL_INDEX_CACHE[cache_key] = (idx, node_town)
@@ -337,6 +339,42 @@ class SimulationEngine:
             return self.network.nearest_node(t.centroid_metric.x, t.centroid_metric.y)
         return self.network._node_ids[self.rng.randrange(len(self.network._node_ids))]
 
+    def _dest_node_in_town(self, town_name: str) -> str:
+        """**終點專用**（稀疏終點）：從該區的「終點池」抽一個節點，把全市不同終點節點數壓到數百~千個
+        → 讓 UXsim DUO route_search 只需對少數終點算（見 simulation/uxsim_sparse_routing.py）。
+
+        池 = 每區 ceil(人口 / [demand].dest_pool_per_capita) 個不重複隨機節點（**建一次、快取**，
+        用獨立 rng 取樣以**不擾動主 rng 序列**）。停用（per_capita≤0）或池空 → 退回 `_node_in_town`（區內任一節點）。
+        消耗主 rng 與 `_node_in_town` 一致（一次 `randrange`）→ 既有可重現性不變（同 seed→同結果）。
+        只用於終點（背景/散場）；起點仍用 `_node_in_town`（保留起點多樣性，且起點不影響 route_search 成本）。"""
+        pool = self._dest_pool_for(town_name)
+        if pool:
+            return pool[self.rng.randrange(len(pool))]
+        return self._node_in_town(town_name)
+
+    def _dest_pool_for(self, town_name: str) -> list[str]:
+        if config.DEMAND_CONFIG.dest_pool_per_capita <= 0:
+            return []                                  # 停用 → 舊行為
+        if self._dest_pool is None:
+            self._build_dest_pool(config.DEMAND_CONFIG.dest_pool_per_capita)
+        return self._dest_pool.get(town_name, [])
+
+    def _build_dest_pool(self, per_capita: int) -> None:
+        """為每區建終點池：ceil(人口/per_capita) 個不重複隨機節點（人口缺/0 的區給 1 個）。"""
+        import math
+        import random
+        prng = random.Random((self.cfg.seed or 0) ^ 0x5E5D)  # 獨立 rng，不動 self.rng
+        pool: dict[str, list[str]] = {}
+        for t in self.towns:
+            nodes = self._town_nodes.get(t.town_name) or []
+            if not nodes:
+                continue
+            k = math.ceil(t.population / per_capita) if t.population and t.population > 0 else 1
+            pool[t.town_name] = prng.sample(nodes, min(max(1, k), len(nodes)))
+        self._dest_pool = pool
+        logger.info("稀疏終點池建立：%d 區、共 %d 個終點節點（每 %d 人一個）",
+                    len(pool), sum(len(v) for v in pool.values()), per_capita)
+
     def _place_agent(self, agent: VehicleAgent) -> None:
         """把單一 agent 放到起點節點、算初始路徑（runtime 介入新增車用；init 走 _place_all_agents）。"""
         self._place_agent_setup(agent)
@@ -359,7 +397,7 @@ class SimulationEngine:
 
         if agent.role == "ambient":
             dtown = self._town_by_name(agent.destination_town)
-            dest_node = (self._node_in_town(agent.destination_town)
+            dest_node = (self._dest_node_in_town(agent.destination_town)
                          if dtown is not None else self._dest_node)
         else:
             agent.destination_town = self._dest_town
@@ -531,7 +569,7 @@ class SimulationEngine:
         if not town:
             town = demand_mod.sample_residence(self.towns, self.rng) or agent.origin_town
         agent.home_town = town
-        agent.home_node = (self._node_in_town(town)
+        agent.home_node = (self._dest_node_in_town(town)
                            if self._town_by_name(town) is not None else origin_node)
 
     def declare_egress(self) -> str:
@@ -627,7 +665,7 @@ class SimulationEngine:
                 continue
             dest = demand_mod.sample_dest_town(self.towns, (a.x, a.y), self.rng, config.DEMAND_CONFIG)
             dtown = self._town_by_name(dest) if dest else None
-            dnode = (self._node_in_town(dest)
+            dnode = (self._dest_node_in_town(dest)
                      if dtown is not None else self._dest_node)
             _t0 = time.perf_counter() if self._profiler.enabled else 0.0
             path = self._route(a.current_node, dnode, a.routing_strategy())

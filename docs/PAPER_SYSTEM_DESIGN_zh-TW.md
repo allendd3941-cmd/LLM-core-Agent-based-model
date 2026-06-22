@@ -72,7 +72,7 @@ edge_cost = length × (
 ```
 if congestion_penalty: cost ×= (1 + congestion_penalty × congestion)     # avoid 用
 if congestion > avoid_threshold: cost ×= 25                              # 硬避開（近乎封路）
-if road_class_bias>0: 幹道 cost ×=(1−bias)、小路 cost ×=(1+bias)          # comfortable 偏好大路
+if road_class_bias>0: 幹道 cost ×=(1−bias)、小路 cost ×=(1+bias)          # 偏好大路（legacy 旗標，現無 mode 使用）
 if randomness: cost ×= jitter∈[1−r,1+r]                                  # 分散車流（見 3.4）
 if avoid_circles: 落在避讓圓內的邊 cost ×= 25                            # NL 介入
 ```
@@ -122,23 +122,23 @@ P(dest = j | i) ∝ population_j × f(d_ij)  , j≠i       # trip distribution�
 
 ---
 
-## 5. Agent 與五種行為模式（`domain/agent.py`、`[action_modes.*]`）
+## 5. Agent 與三種行為模式（`domain/agent.py`、`[action_modes.*]`）
 
 `VehicleAgent`：identity（`agent_id`/`profile_name`/`role`）、起訖、`action_mode` + 四權重 + 路徑策略旗標、
 路網位置（公尺座標 + 節點路徑 + `edge_progress`）、感知狀態、單一 `memory`、事件觸發內部狀態。
 `role`：`event`（去球場，可用 LLM 核心）/ `ambient`（背景，一律規則式、無記憶）。
 
-mock/LLM **只回 mode 名字字串**；`apply_action_mode` 查 `ACTION_MODE_PROFILES` 套入數值 + 策略旗標。五種：
+mock/LLM **只回 mode 名字字串**；`apply_action_mode` 查 `ACTION_MODE_PROFILES` 套入數值 + 策略旗標。三種：
 
 | mode | desired | time | dist | comfort | cap | penalty | avoid_thr | class_bias | recompute | randomness | 一句話走法 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `fast` | 55 | 0.70 | 0.20 | 0.05 | 0.05 | 0 | — | — | ✓ | 0.05 | 最短時間、無視壅塞、塞了重算 |
 | `tolerate_congestion` | 45 | 0.55 | 0.30 | 0.10 | 0.05 | 0 | — | — | ✗ | 0.05 | 時間優先但不繞路、走到底 |
 | `avoid_congestion` | 38 | 0.20 | 0.10 | 0.25 | 0.45 | 3.0 | 0.6 | — | ✓ | 0.20 | 避塞：重罰+硬避開+積極重算+高分散 |
-| `comfortable` | 42 | 0.20 | 0.10 | 0.45 | 0.25 | 1.0 | — | 0.4 | ✓ | 0.10 | 偏好大路、中度避塞 |
-| `short_distance` | 35 | 0.10 | 0.70 | 0.10 | 0.10 | 0 | — | — | ✓ | 0.10 | 純距離最短、願鑽小路 |
 
 > 數值為 demo 取向經驗值、非實證標定（誠實限制）。差異需模擬跑出壅塞後才明顯。
+> `comfortable`（偏好大路）與 `short_distance`（純距離）已移除：UXsim 後端路徑選擇唯一方向來源是「最短時間樹」，
+> 路型/距離偏好無法在「零 Dijkstra（不自算路徑）」下表達（實測 comfortable 1~2/60 抵達）。詳見 `ACTION_MODES_zh-TW.md`。
 
 ---
 
@@ -171,7 +171,7 @@ mock/LLM **只回 mode 名字字串**；`apply_action_mode` 查 `ACTION_MODE_PRO
 可在前端切換（`registry.py` 具名核心；`engine.last_decision_source` 下發顯示）。**背景車永遠規則式**。
 
 ### 8.1 規則式核心（`mock_policy.py`，baseline）
-確定性 threshold 規則選 mode：`cong>0.7→avoid`；`>0.4→comfortable`；`dist<2km→short_distance`；
+確定性 threshold 規則選 mode：`cong>0.7→avoid_congestion`；`>0.4→tolerate_congestion`；`dist<2km→fast`；
 汽車→`fast`；機車→`tolerate_congestion`。零 LLM 成本、即時、可重現 → demo 預設 + LLM fallback + 論文 baseline。
 
 ### 8.2 LLM 認知核心（`llm_adapter.py` → `llm_server` pipeline）
@@ -191,7 +191,7 @@ mock/LLM **只回 mode 名字字串**；`apply_action_mode` 查 `ACTION_MODE_PRO
 - 記憶 `summary` 一律確定性模板、不呼叫 LLM（§7）。每步 INFO 日誌印實採 batch。
 
 ### 8.4 結構化輸出 + 強韌解析（`decision_making.DECISION_SCHEMA`、`json_utils`）
-`generate(fmt=DECISION_SCHEMA)`：Ollama 走 `format`、vLLM 走 `guided_json`（受限解碼）；`action mode` 用 enum 限五種。
+`generate(fmt=DECISION_SCHEMA)`：Ollama 走 `format`、vLLM 走 `guided_json`（受限解碼）；`action mode` 用 enum 限三種。
 輸出 token 可預測、解析成功率高。壞 JSON（尾逗號/圍欄/截斷陣列）由 `json_utils.salvage_objects` 物件級救回，不整批作廢。
 
 ---
@@ -366,7 +366,7 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 `enabled` 預設 True 但**無上傳文件即無作用**。
 
 **多重查詢 + RRF（`retrieve_multi`）**：`rag_query.build_subqueries` 每批從模擬狀態組三條子查詢——
-路況（取【全域路況】）、任務（固定描述五種 action_mode，英文 key + 中文）、人格（聚合這批 persona 的職業/車種/特質高頻）；
+路況（取【全域路況】）、任務（固定描述三種 action_mode，英文 key + 中文）、人格（聚合這批 persona 的職業/車種/特質高頻）；
 各自檢索 `PER_QUERY_K=5` 塊，依名次以 Reciprocal Rank Fusion（`RRF_C=60`）融合去重，取 `DEFAULT_K=4` 注入。
 被多條子查詢撈到的塊分數自動變高。回傳含 provenance（source/idx/via/scores）。
 `rag_store.query_mode`：`multi`（預設）/`single`（只用 perception 當 query，ablation 對照）。

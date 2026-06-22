@@ -44,8 +44,11 @@ VALIDATION_CAMERAS_CSV = DATA_DIR / "validation_cameras.csv"   # 驗證用真實
 CRS_METRIC = "EPSG:3826"
 CRS_WGS84 = "EPSG:4326"
 
-# 四種 action mode（對齊 prompts/decision_making_prompt.txt 與 LLM 實際輸出；short_distance 已移除）
-ACTION_MODES = ("fast", "tolerate_congestion", "avoid_congestion", "comfortable")
+# 三種 action mode（對齊 prompts/decision_making_prompt.txt 與 LLM 實際輸出；short_distance、comfortable 已移除）
+# 註：comfortable（偏好大路/舒適）無法用純 UXsim 參數實現——UXsim 唯一方向來源是「最短時間樹」，
+#     任何路型篩選都會使替代邊 route_pref=0、車輛亂繞到不了（實測 prefer 幹道 1/60、avoid 小路 2/60），
+#     與 short_distance 同一道牆（UXsim 無路型/距離成本）。故移除，保留三個純參數可實現的模式。
+ACTION_MODES = ("fast", "tolerate_congestion", "avoid_congestion")
 VEHICLE_TYPES = ("汽車", "機車")
 
 # 台南市 37 個行政區（mock profile 生成用；以 TOWN_MOI 實際載入為準，此處為 fallback）
@@ -235,6 +238,10 @@ class UXsimConfig:
     instantaneous_TT_timestep_interval: int = 5  # 多久算一次 link 即時旅時（餵選路）
     no_cyclic_routing: bool = False          # 禁止重複經過同節點（防繞圈）
     hard_deterministic_mode: bool = True     # 永遠走最短路、無隨機（可重現；UXsim 預設 False，本專案設 True）
+    # 稀疏 route_search：把 UXsim 的 all-pairs Dijkstra（每 duo_update_time 對全 N 節點當終點算）改成
+    # 只對「實際被當終點的節點」算（搭配 [demand].dest_pool_per_capita 收斂終點數）。結果完全一致、只算得少。
+    # 詳見 simulation/uxsim_sparse_routing.py。關閉＝用 UXsim 原生 all-pairs（對拍/除錯用）。
+    sparse_route_search: bool = True
 
 
 @dataclass(frozen=True)
@@ -264,6 +271,10 @@ class DemandConfig:
     beta: float = 0.08          # 距離衰減係數（越大越偏好近場館的區）；decay=exp 時用於 exp(−beta·d_km)
     decay: str = "exp"          # "exp"（指數）或 "power"（冪次 d_km^(−beta)）
     min_distance_km: float = 0.5  # 距離下限（避免場館同區 d→0 造成權重爆掉）
+    # 稀疏終點：每區只取 ceil(人口/此值) 個不重複隨機節點當「終點池」，所有終點（背景/散場）從池抽。
+    # 把全市不同終點節點數從上萬壓到數百~千 → UXsim DUO route_search（all-pairs Dijkstra）只需對這些終點算
+    # （見 [uxsim].sparse_route_search），城市尺度吞吐大幅提升。0 或負 = 停用（終點可為區內任一節點，舊行為）。
+    dest_pool_per_capita: int = 1000
 
 
 @dataclass(frozen=True)
@@ -369,8 +380,8 @@ class ActionModeProfile:
     route_randomness: float = 0.0        # 每邊成本隨機微擾 ±randomness（seeded，可重現）；用來分散車流
 
 
-# 五種 action_mode 的內建預設（TOML [action_modes] 缺省/缺值時的 fallback）。
-# 設計取向：fast/tolerate 拚時間、avoid 拚避塞、comfortable 拚路況好、short 拚距離。
+# 三種 action_mode 的內建預設（TOML [action_modes] 缺省/缺值時的 fallback）。
+# 設計取向：fast 拚時間、tolerate 拚不繞路（慣性）、avoid 拚避塞。
 _DEFAULT_ACTION_MODE_PROFILES: dict[str, ActionModeProfile] = {
     # 最短時間：時間權重高、無視壅塞、塞了會重算找更快的
     "fast": ActionModeProfile(
@@ -386,11 +397,6 @@ _DEFAULT_ACTION_MODE_PROFILES: dict[str, ActionModeProfile] = {
         desired_speed_kmh=38.0, time_weight=0.20, distance_weight=0.10,
         comfort_weight=0.25, capacity_weight=0.45,
         congestion_penalty=3.0, avoid_threshold=0.6, route_randomness=0.20),
-    # 舒適：偏好大路（road_class_bias），中度避塞
-    "comfortable": ActionModeProfile(
-        desired_speed_kmh=42.0, time_weight=0.20, distance_weight=0.10,
-        comfort_weight=0.45, capacity_weight=0.25,
-        congestion_penalty=1.0, road_class_bias=0.4, route_randomness=0.10),
 }
 
 

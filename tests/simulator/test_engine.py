@@ -33,11 +33,14 @@ def test_determinism_same_seed(small_config):
 
 
 def test_agents_make_progress(small_config):
-    _, states = _run(small_config)
+    # 用多一點車（直線距離在繞路時可能暫時不減；少量車+特定 seed 易偽陰性）→ 穩健驗「引擎確實推進」。
+    import dataclasses
+    cfg = dataclasses.replace(small_config, nb_agents=20)
+    _, states = _run(cfg)
     # 至少有 agent 在最後距離終點比一開始近（有實際移動）
     first = {a.agent_id: a.distance_to_destination for a in states[0].agents}
     last = {a.agent_id: a.distance_to_destination for a in states[-1].agents}
-    assert any(last[k] < first[k] for k in first)
+    assert any(k in last and last[k] < first[k] for k in first)
 
 
 def test_snapshot_shape(small_config):

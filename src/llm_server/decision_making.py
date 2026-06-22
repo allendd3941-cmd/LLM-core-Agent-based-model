@@ -39,8 +39,7 @@ DECISION_SCHEMA = {
                     "agent name": {"type": "string"},
                     "action mode": {
                         "type": "string",
-                        "enum": ["fast", "tolerate_congestion", "avoid_congestion",
-                                 "comfortable"],
+                        "enum": ["fast", "tolerate_congestion", "avoid_congestion"],
                     },
                     "vehicle_type": {"type": "string", "enum": ["機車", "汽車"]},
                     "reason": {"type": "string"},

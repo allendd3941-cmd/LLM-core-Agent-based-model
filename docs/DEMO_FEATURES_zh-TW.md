@@ -94,7 +94,7 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 
 - 後端 `llm_server/rag_store.py`（通用檢索引擎）：sklearn **TF-IDF（char_wb n-gram，對中文友善）**，免額外依賴、離線可跑。
   句/段感知切塊；`retrieve`（single）/ `retrieve_multi`（多重查詢+RRF）/ `add_text` / `clear` / `stats` / `enabled` / `query_mode`。
-- 查詢建構 `llm_server/rag_query.py`：每批把模擬狀態組三條子查詢——**路況**（全域路況）、**任務**（五種 action_mode，英文+中文）、
+- 查詢建構 `llm_server/rag_query.py`：每批把模擬狀態組三條子查詢——**路況**（全域路況）、**任務**（三種 action_mode，英文+中文）、
   **人格**（聚合這批 persona），各自檢索後以 RRF 融合取 top-4 注入（被多面向撈到的塊排前）。比舊「只用路況」涵蓋更廣，零額外 LLM 成本。
 - 注入點：`decision_making.run_decision_making` 回 `(LLM 文字, provenance)`；provenance 隨回傳值經 `llm_adapter → engine` 上送。
 - **provenance 顯示**：決策日誌每步顯示「本批參考知識 N 段」（面向色標+來源#塊號+預覽），**點擊看完整片段+相似度**——讓決策的在地知識依據可被檢視。

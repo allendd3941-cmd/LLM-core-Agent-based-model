@@ -87,21 +87,22 @@ congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 
 > ⚠️ **`crowded_road_threshold` 語意改變**：congestion_proxy 現在是「真實占有率」（1km link 約可容 `kappa×length` 台，故同樣車數下占有率比舊 proxy 低很多）。demo 若要更敏感的壅塞觸發，**把 `crowded_road_threshold` 調低**（或日後用 `jam_density_per_lane` 讓多車道容量更真實）。
 
-## 5.6 四種 action_mode → UXsim 路徑選擇參數（最終版，純參數、零自算路徑）
+## 5.6 三種 action_mode → UXsim 路徑選擇參數（最終版，純參數、零自算路徑）
 
 **方向一律由 UXsim 自己的 `route_pref`（內建最短時間樹）提供**；我們只用 UXsim 既有參數「在它的時間路由上加篩選/凍結」，**完全不自算路徑、無 Dijkstra**。
 
 | action_mode | UXsim 參數 | UXsim 怎麼選（原理） |
 |---|---|---|
 | `fast` | `route_choice_principle="homogeneous_DUO"`，清 prefer/avoid | 純走 UXsim 最短時間，自然避開壅塞 |
-| `comfortable` | DUO + `set_links_prefer(幹道類別 link)` | 在「幹道出口」中、用時間樹挑往終點 → 偏好大路 |
 | `avoid_congestion` | DUO + `set_links_avoid(壅塞 link；每節點保底)` | 在「非壅塞出口」中、用時間樹挑往終點 → 繞開塞段 |
 | `tolerate_congestion` | `route_pref.copy()` + `principle="fixed"` | 凍結當下時間路線、不再被 DUO 更新 → 不改道、忍受 |
 
-- `links_prefer`/`links_avoid` 的那組 link 名只是「**查屬性篩出**」：路型(highway) init 分類一次快取、壅塞用 `congestion_proxy ≥ 門檻` 篩。**不是算路徑。**
+- `links_avoid` 的那組 link 名只是「**查屬性篩出**」：壅塞用 `congestion_proxy ≥ 門檻` 篩。**不是算路徑。**
 - **方向**全取自 UXsim 的 route_pref（它的時間樹）；選路 100% 是 UXsim 的 `route_next_link_choice`。
 - `tolerate` 只是 `route_pref.copy()`（記憶體複製）+ 非 DUO principle（讓 UXsim 不覆寫它）。
-- **`short_distance` 已移除**：UXsim 只有時間成本、無距離成本，不自算路徑就無法表達「最短距離」。
+- **`short_distance` 與 `comfortable` 已移除**：兩者都需要 UXsim 沒有的成本維度（距離 / 路型偏好）。UXsim 路徑選擇
+  唯一方向來源是「最短時間樹」，任何路型/距離篩選只要時間樹下一步不在篩選集 → 替代邊 route_pref=0 → 路口亂選到不了
+  （實測 comfortable：prefer 幹道 1/60、avoid 小路 2/60 抵達）。在「零 Dijkstra」前提下無法實現，故移除。
 
 **不崩的保證**：
 - `set_links_prefer` strand-safe：路口無該類出口 → UXsim 自動退回全部出口/DUO。
@@ -140,6 +141,40 @@ getting_closer/remaining/congested_spots/smoothness/summary）本就直接吃 UX
 arrived/error/recompute）只在 legacy 寫、且**未進 `AgentSnapshot`**（沒接到前端）。已：① `UXsimEngine._readback`
 依車況設 `selected_action`（含「中途改道」＝該 cycle 有 reroute）；② 加進 `AgentSnapshot` + `_snapshot`；
 ③ 前端 `simulation.js` 以 `ACTION_LABELS` 轉中文（前往目的地/改道中/等紅燈/已抵達/路徑異常）顯示在「狀態」列。
+
+## 5.8 稀疏終點 + 稀疏 route_search（城市尺度吞吐瓶頸的解法）
+
+**問題**：UXsim 的 DUO 選路 `RouteChoice.route_search_all` 每 `duo_update_time` 對**全節點當終點**跑一次
+scipy all-pairs Dijkstra（N≈1.5 萬節點）→ O(N·(E+N·logN))、**單核**、N² 記憶體。server 實測 step1
+`move≈340s`，是城市尺度最大吞吐瓶頸（`deltan` 調大只省物理、對此無效——它與車數無關、只與節點數有關）。
+
+**觀察**：其實只需要「**有車真的要去的終點**」的最短路樹；其他節點當終點算了也沒車用。
+
+**兩段解法（結果一致、只算得少）**：
+
+1. **稀疏終點池**（`[demand].dest_pool_per_capita`，預設 1000）：init 時為每區建
+   `ceil(人口/1000)` 個**不重複隨機節點**當「終點池」，所有終點（背景車 OD、散場回家）都從池抽。
+   把全市不同終點節點數從上萬壓到**數百~千**（台南全市實測 2052 個、dev-crop 8km 1233 個）。
+   - 單一咽喉：`SimulationEngine._dest_node_in_town`（終點專用，原 `_node_in_town` 仍供**起點**用、保留起點多樣性）。
+   - 用獨立 rng 建池 → **不擾動主 rng 序列**（既有可重現性不變、同 seed→同結果）。0/負＝停用（舊行為）。
+
+2. **稀疏 route_search**（`[uxsim].sparse_route_search`，預設 true；`simulation/uxsim_sparse_routing.py`）：
+   把 `route_search_all`/`homogeneous_DUO_update` 換成「**只對 active 終點集合 D 算**」
+   （`dijkstra(adj.T, indices=D)` 只從 D 個源做）。D＝目前所有 vehicle 的終點（搭配池 → |D| 數百千）。
+   - **結果完全一致**：`adj_mat_time` 逐 link 逐字複製原版（含 noise/多 link 平均）→ 同樣 dijkstra →
+     `route_pref[D]` 與原生 all-pairs **逐元素相同**（`tests/test_sparse_routing.py` 對拍）。
+   - **為何安全可 compact**：`RouteChoice.next`/`dist` 在 UXsim 內只被 `homogeneous_DUO_update` 消費
+     （per-vehicle 的 `route_pref_update` 僅 `heterogeneous_DUO` 分支用、本專案不用；homogeneous_DUO 車讀
+     `route_pref[dest.id]`；`fixed`（tolerate）車該方法 no-op）→ 不需配 N×N。`dist_record` 原為唯寫，省略。
+   - 以 patch **RouteChoice 類別**實作（UXsim 在 `exec_simulation` 內才建 `W.ROUTECHOICE`，故 patch 類別、時機無關）；
+     `enable_/disable_sparse_routing()` 可開關（false＝還原原生 all-pairs，供對拍/baseline）。
+
+**效益**：route_search 成本 ∝ |D|（而非 N）。實測 dev-crop 8km：active 終點 146 vs 節點 4716（~32× 少源）。
+比例越粗（每更多人一個終點）池越小、越快；每 1000 人一個約 4× 多終點（仍遠少於節點）。
+
+**已知限制（可接受、可自癒）**：D 取自當下 vehicle 終點。若某池節點在某次 route_search 當下**無任何車以它為終點**
+（respawn/散場才首次用到）→ 該終點 route_pref 等**下次重算**才建好，中間該車可能短暫亂走。實務上車數遠多於池節點
+→ 幾乎每池節點時時有車要去，極少發生且下次自癒。原生 all-pairs 無此延遲。詳見 `uxsim_sparse_routing.py` docstring。
 
 ## 6. 進度
 - **Phase 0 spike ✅**：UXsim 能支撐 Design 2 + 介入（不退 SUMO）。唯 deltan=1 城市尺度吞吐待 server 量。

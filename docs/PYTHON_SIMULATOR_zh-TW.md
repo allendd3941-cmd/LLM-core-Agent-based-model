@@ -24,7 +24,7 @@
 | `[agents]` | `nb_agents`（預設 agent 數）/ 起訖行政區 |
 | `[perception]` | 感知半徑、抵達容差、`crowded_speed_factor`（壅塞降速）、壅塞門檻、`nearby_mode`（鄰近車數 grid/exact）、`town_mode`（current_town node/exact）；見 `docs/SCALING_zh-TW.md` §6 |
 | `[movement]` | agent 速度（`default_desired_speed_kmh` / `default_speed_car_kmh` / `default_speed_moto_kmh`）與預設路徑權重 |
-| `[action_modes.*]` | 五種 action_mode 各自的數值權重與路徑策略（詳見 [`ACTION_MODES_zh-TW.md`](ACTION_MODES_zh-TW.md)）|
+| `[action_modes.*]` | 三種 action_mode 各自的數值權重與路徑策略（詳見 [`ACTION_MODES_zh-TW.md`](ACTION_MODES_zh-TW.md)）|
 | `[roads]` | 車流→壅塞估計與權重、視覺化門檻 |
 | `[llm]` | `use_llm`＝事件車決策核心：false 規則式（預設）/ true LLM；背景車一律規則式（見 `docs/DEMO_FEATURES_zh-TW.md`）|
 | `[memory]` | 單一旅次記憶 memory 的質性門檻（不再分長短期；見 `docs/MEMORY_zh-TW.md`） |

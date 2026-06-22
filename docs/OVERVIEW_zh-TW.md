@@ -24,7 +24,7 @@
 | `EGRESS_zh-TW.md` | 散場（egress）兩階段疏運評估（手動宣告散場、回居住地、清場時間） |
 | `MEMORY_zh-TW.md` | 單一旅次記憶（不分長短期；`summary` 一律確定性模板，已移除 LLM 摘要） |
 | `ENVIRONMENT_zh-TW.md` | 送 LLM 的環境感知（質性標籤、熱點、前方路況） |
-| `ACTION_MODES_zh-TW.md` | 五種 action_mode 的權重與路徑策略 |
+| `ACTION_MODES_zh-TW.md` | 三種 action_mode 的權重與路徑策略 |
 | `DEMO_FEATURES_zh-TW.md` | 互動功能（模型選擇器/分析/對話/場景/prompt/RAG/NL 介入/上傳/zoom 渲染） |
 | `CHANGES_LLM_PIPELINE_zh-TW.md` | LLM pipeline 重構（perception 模板化、token 預算切批、結構化輸出） |
 | `DATA.md` | 資料來源（GIS、路網、人口、號誌） |

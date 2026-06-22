@@ -47,9 +47,9 @@ def test_origin_key_aliases():
 
 
 def test_decisions_list_key():
-    body = {"decisions": [{"agent_id": "v3", "action mode": "comfortable"}]}
+    body = {"decisions": [{"agent_id": "v3", "action mode": "avoid_congestion"}]}
     rows = rp.parse_rows(body, TOWNS, "東區")
-    assert rows[0]["action_mode"] == "comfortable"
+    assert rows[0]["action_mode"] == "avoid_congestion"
 
 
 def test_vehicle_type_normalization():

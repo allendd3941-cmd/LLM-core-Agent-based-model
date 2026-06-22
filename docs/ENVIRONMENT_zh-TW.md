@@ -21,7 +21,7 @@
 - **每車局部**：`current_road_id`（機器 ID，無語意）、`congestion_proxy`（裸數字）、
   `nearby_agent_count`、`distance_to_destination_m`。
 
-要選 action_mode（fast / avoid_congestion / tolerate / comfortable / short_distance），
+要選 action_mode（fast / avoid_congestion / tolerate_congestion），
 LLM 真正需要、但舊版**完全沒有**的是：
 1. **前方路況**——接下來要走的路塞不塞？（avoid vs fast 的決定性資訊）
 2. **壅塞的空間分佈**——哪些區在塞？

@@ -48,7 +48,7 @@ default_distance_weight = 0.25
 default_capacity_weight = 0.10
 default_road_type_preference = ["primary", "secondary", "tertiary", "residential"]
 
-# ----- 五種 action_mode 的數值 + 路徑策略 -----
+# ----- 三種 action_mode 的數值 + 路徑策略 -----
 # 每個 mode 一組權重（time/distance/comfort/capacity，相對大小決定路徑取向）+ 策略旗標。
 # 策略旗標讓每個 mode 走出不同的路徑選擇方式（詳見 docs/ACTION_MODES_zh-TW.md）：
 #   congestion_penalty   額外壅塞懲罰倍率，成本 ×(1 + penalty×congestion)；0=不額外懲罰
@@ -84,16 +84,6 @@ capacity_weight = 0.45
 congestion_penalty = 3.0
 avoid_threshold = 0.6
 route_randomness = 0.20
-
-[action_modes.comfortable]       # 舒適：偏好大路，中度避塞
-desired_speed_kmh = 60.0
-time_weight = 0.20
-distance_weight = 0.10
-comfort_weight = 0.45
-capacity_weight = 0.25
-congestion_penalty = 1.0
-road_class_bias = 0.4
-route_randomness = 0.10
 
 
 # ----- 道路壅塞估計與權重 -----
@@ -179,6 +169,8 @@ enabled = true       # 是否用重力模型決定出生地
 beta = 0.08          # 距離衰減係數（exp(−beta·d_km)）
 decay = "exp"        # "exp" 指數 / "power" 冪次（d_km^(−beta)）
 min_distance_km = 0.5  # 距離下限，避免場館同區距離→0 權重爆掉
+dest_pool_per_capita = 1000  # 稀疏終點：每區取 ceil(人口/此值) 個不重複隨機節點當終點池（全市約數百~千個終點）；
+                             # 搭配 [uxsim].sparse_route_search 大幅加速 DUO 選路。0/負=停用（終點可為區內任一節點）
 
 # ----- 背景常態交通流（ambient）-----
 # 在「去事件地點的事件車流」之外，注入不指定事件終點的常態背景車，讓路網有真實基礎負載
@@ -315,3 +307,5 @@ route_choice_update_gradual = false
 instantaneous_TT_timestep_interval = 5
 no_cyclic_routing = true    # 禁止重複經過同節點（防繞圈）
 hard_deterministic_mode = true  # 永遠走最短路、無隨機（可重現）
+sparse_route_search = true   # 稀疏 route_search：DUO 的 all-pairs Dijkstra 改成只對實際終點算（結果一致、城市尺度大幅加速）；
+                             # 搭配 [demand].dest_pool_per_capita。false=用 UXsim 原生 all-pairs（對拍/除錯）

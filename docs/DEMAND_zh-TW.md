@@ -31,10 +31,21 @@ enabled = true        # false → 回退既有出生地指派
 beta = 0.08           # 距離衰減；越大越集中在近場館的區
 decay = "exp"         # "exp" 或 "power"
 min_distance_km = 0.5 # 距離下限，避免同區 d→0 權重爆掉
+dest_pool_per_capita = 1000  # 稀疏終點：每區取 ceil(人口/此值) 個不重複隨機節點當終點池；0/負=停用
 ```
 
 - `beta` 是「距離敏感度」：之後前端會做成 **slider**，demo 時即時展示「催客圈」如何隨距離衰減改變（互動 + 空間性賣點）。
 - 替代模型：可在 paper 提 **radiation model（Simini 2012）** 作為免參數對照。
+
+### 稀疏終點池（`dest_pool_per_capita`）
+
+把所有**終點**（背景車 OD 的終點、散場回家的家）收斂到一個**有界池**：每區只取
+`ceil(人口 / dest_pool_per_capita)` 個**不重複隨機節點**（人口加權→近真實活動分布，台南全市約 2052 個終點）。
+目的是把「全市不同終點節點數」從上萬壓到數百~千，**讓 UXsim 的 DUO route_search 只需對這些終點算最短路**
+（搭配 `[uxsim].sparse_route_search`），城市尺度吞吐大幅提升——這是 73k 車城市尺度能即時跑的關鍵槓桿之一。
+- 起點不受影響（仍可為區內任一節點，保留多樣性；起點不影響 route_search 成本）。
+- 池用獨立 rng 建、不擾動主序列 → 既有結果可重現性不變。`0/負`＝停用（終點回到區內任一節點，舊行為）。
+- 機制與對拍詳見 [`UXSIM_MIGRATION_zh-TW.md`](UXSIM_MIGRATION_zh-TW.md) §5.8、`simulation/uxsim_sparse_routing.py`。
 
 ## 資料來源
 
@@ -46,6 +57,7 @@ min_distance_km = 0.5 # 距離下限，避免同區 d→0 權重爆掉
 
 - `src/llm_abm_simulator/mobility/demand.py`：`gravity_weights` / `assign_origin_towns` / `expected_distribution`。
 - `engine.initialize()`：在 `_initial_decisions()` 後呼叫 `demand.assign_origin_towns(...)` 覆寫出生地，再 `_place_agent`（在該區內隨機路網節點生成）。
+- 稀疏終點池：`engine._build_dest_pool` / `_dest_node_in_town`（終點專用）/ `_dest_pool_for`；稀疏 route_search 在 `simulation/uxsim_sparse_routing.py`。
 - `domain/town.py`：`Town.population`；`spatial/gis_loader.py`：載入時 join 人口 CSV。
 
 ## 與其他模組的關係

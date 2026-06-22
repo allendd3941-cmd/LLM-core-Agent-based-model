@@ -20,7 +20,7 @@ def _payload():
         "agents_status": [
             {"agent_name": "車A", "action_mode": "fast",
              "environment": {"current_town": "東區"}, "memory": {}},
-            {"agent_name": "車B", "action_mode": "comfortable",
+            {"agent_name": "車B", "action_mode": "avoid_congestion",
              "environment": {"current_town": "南區"}, "memory": {}},
         ],
     }

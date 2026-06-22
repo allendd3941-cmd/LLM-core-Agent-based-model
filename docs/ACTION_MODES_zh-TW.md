@@ -1,22 +1,24 @@
 # Action Mode 設計（數值 + 路徑策略）
 
-本文件記錄五種 `action_mode` 的設計：每個 mode 的數值權重、以及讓它們走出**不同路徑選擇方式**的策略旗標。所有數值集中在 `config/simulation.toml` 的 `[action_modes.*]`，可自行調整。
+本文件記錄三種 `action_mode` 的設計：每個 mode 的數值權重、以及讓它們走出**不同路徑選擇方式**的策略旗標。所有數值集中在 `config/simulation.toml` 的 `[action_modes.*]`，可自行調整。
 
 ---
 
 ## 1. 背景：action_mode 是什麼
 
-每個 vehicle agent 在每個 cycle 會有一個 `action_mode`（由 mock 規則或 LLM 決定），代表它當下的移動取向。共五種（語意定義在 `src/llm_server/prompts/decision_making_prompt.txt`）：
+每個 vehicle agent 在每個 cycle 會有一個 `action_mode`（由 mock 規則或 LLM 決定），代表它當下的移動取向。共三種（語意定義在 `src/llm_server/prompts/decision_making_prompt.txt`）：
 
 | mode | 語意 |
 |---|---|
 | `fast` | 想要快一點 |
-| `tolerate_congestion` | 繼續塞車也沒關係 |
-| `avoid_congestion` | 避開壅塞 |
-| `comfortable` | 穩定舒適 |
+| `tolerate_congestion` | 繼續塞車也沒關係、不改道 |
+| `avoid_congestion` | 避開壅塞、改道繞行 |
 
-> 註：`short_distance` 已移除（UXsim 只有時間成本、無距離成本，無法在不自算路徑下表達「最短距離」）。
-> UXsim 後端的 4 模式 → UXsim 參數映射（純參數、不自算路徑）見 `docs/UXSIM_MIGRATION_zh-TW.md` §5.6。
+> 註：`short_distance` 與 `comfortable` 已移除。兩者都需要 UXsim 沒有的成本維度——`short_distance` 要距離成本、
+> `comfortable` 要路型偏好（走大路）——而 UXsim 路徑選擇**唯一的方向來源是「最短時間樹」**。任何路型/距離篩選
+> 只要時間樹的下一步不在篩選集，替代邊 route_pref=0、車輛會在路口亂選而到不了（實測 comfortable：prefer 幹道 1/60、
+> avoid 小路 2/60 抵達）。在「不自算路徑（零 Dijkstra）」前提下無法實現，故移除，保留三個純參數可實現的模式。
+> UXsim 後端的 3 模式 → UXsim 參數映射見 `docs/UXSIM_MIGRATION_zh-TW.md` §5.6。
 
 mock / LLM **只回傳 mode 名字字串**；套用時（`VehicleAgent.apply_action_mode`）會依名字查 `ACTION_MODE_PROFILES` 表，帶入對應的數值與路徑策略。
 
@@ -57,7 +59,7 @@ edge_cost = length × (
 
 ---
 
-## 4. 五種 mode 的設定（預設值）
+## 4. 三種 mode 的設定（預設值）
 
 數值表（四個 weight 各列加總 ≈ 1，方便比較取向）：
 
@@ -66,8 +68,6 @@ edge_cost = length × (
 | `fast` | 55 | **0.70** | 0.20 | 0.05 | 0.05 |
 | `tolerate_congestion` | 45 | 0.55 | 0.30 | 0.10 | 0.05 |
 | `avoid_congestion` | 38 | 0.20 | 0.10 | 0.25 | **0.45** |
-| `comfortable` | 42 | 0.20 | 0.10 | **0.45** | 0.25 |
-| `short_distance` | 35 | 0.10 | **0.70** | 0.10 | 0.10 |
 
 策略旗標：
 
@@ -76,22 +76,19 @@ edge_cost = length × (
 | `fast` | 0 | — | — | true | 0.05 |
 | `tolerate_congestion` | 0 | — | — | **false** | 0.05 |
 | `avoid_congestion` | **3.0** | **0.6** | — | true | **0.20** |
-| `comfortable` | 1.0 | — | **0.4** | true | 0.10 |
-| `short_distance` | 0 | — | — | true | 0.10 |
 
 ### 各 mode 的「走法」一句話總結
 
 - **fast** — 最短時間路徑：無視壅塞，走自由流最快路線（塞了會重算找更快的）。
 - **tolerate_congestion** — 時間優先但**不繞路**：成本同 fast，但塞車不重算，路徑走到底。
 - **avoid_congestion** — **避塞**：壅塞重罰 + 對高壅塞邊（>0.6）硬避開 + 積極重算 + 高隨機分散。
-- **comfortable** — **偏好大路**：幹道打折、小路加罰，中度避塞，走大條好開的路。
-- **short_distance** — **純距離最短**：幾乎無視速度與路型，願意鑽小路抄近。
 
 > 注意：`avoid` 的繞路、`tolerate` 的不繞路等差異，**主要在模擬跑出實際壅塞後才會明顯**。零壅塞時（剛開始）各 mode 可能走相同路線。
 
-> **UXsim 後端**（`LLM_ABM_ENGINE=uxsim`）：上表是 legacy 引擎的成本權重觀點；UXsim 後端改把這 5 個 mode
-> 映射到 UXsim 既有的 `set_links_prefer`/`set_links_avoid`（`tolerate` = 偏好自由流時間路徑、不繞開壅塞）。
-> 行為一致點：**decision 一改變，下一步就重算該車的路徑選擇**。完整映射表見 `docs/UXSIM_MIGRATION_zh-TW.md` §5.6。
+> **UXsim 後端**（`LLM_ABM_ENGINE=uxsim`，現為預設）：上表是 legacy 引擎的成本權重觀點；UXsim 後端改把這 3 個 mode
+> 映射到 UXsim 既有的路徑選擇參數（`fast`=純最短時間樹、`avoid_congestion`=`set_links_avoid` 壅塞邊、
+> `tolerate_congestion`=凍結時間樹不再改道）。行為一致點：**decision 一改變，下一步就重算該車的路徑選擇**。
+> `road_class_bias` 旗標已無 mode 使用（隨 comfortable 移除）。完整映射表見 `docs/UXSIM_MIGRATION_zh-TW.md` §5.6。
 
 ---
 

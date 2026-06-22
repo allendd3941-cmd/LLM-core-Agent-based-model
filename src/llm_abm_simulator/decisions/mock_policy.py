@@ -66,7 +66,7 @@ class MockDecisionPolicy:
             if congestion > 0.7:
                 mode, reason = "avoid_congestion", "目前壅塞嚴重，改走較順的路"
             elif congestion > 0.4:
-                mode, reason = "comfortable", "路況中等，求穩定舒適"
+                mode, reason = "tolerate_congestion", "路況中等，順順走不繞路"
             elif distance < 2000:
                 mode, reason = "fast", "已接近目的地，直接前往"
             elif agent.vehicle_type == "汽車":

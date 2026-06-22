@@ -54,7 +54,6 @@ class UXsimEngine(SimulationEngine):
         self._injected: dict[str, str] = {}          # agent_id → 已注入的偏好類型（避免重複套用）
         self._reroute_cycle: dict[str, int] = {}     # agent_id → 最後一次「中途改道」的 cycle（前端顯示「改道中」）
         self._respawn_count: dict[str, int] = {}     # ambient agent_id → 已重生次數（車名唯一）
-        self._comfortable_avoid: list[str] = []      # comfortable 要避開的小路 link 名（含每節點保底；init 算一次）
         # 全域設定來自 config [uxsim]；deltan / dev_crop 另允許環境變數覆寫（本機開發方便）。
         uc = config.UXSIM_CONFIG
         self._deltan = int(_env_float("UXSIM_DELTAN", uc.deltan))
@@ -133,15 +132,13 @@ class UXsimEngine(SimulationEngine):
             except Exception as e:  # noqa: BLE001
                 logger.debug("addVehicle 失敗 %s: %s", a.agent_id, e)
         self._world = W
-        # comfortable：避開「小路類別」(residential/unclassified/service/living_street)、偏好走較大的路。
-        # 依 highway 屬性篩出小路 + 每節點保底（不全避→不崩）；靜態，init 算一次快取。查屬性，非算路徑。
-        from ..domain.agent import clean_highway
-        _MINOR = {"residential", "unclassified", "service", "living_street"}
-        minor = {rid for rid, road in self._roads_by_id.items()
-                 if clean_highway(road.highway) in _MINOR}
-        self._comfortable_avoid = self._safe_avoid_set(minor)
-        logger.info("UXsim 後端就緒：%d/%d 台車已建（deltan=%d）；comfortable 避開小路 %d",
-                    added, len(self.agents), self._deltan, len(self._comfortable_avoid))
+        from . import uxsim_sparse_routing
+        if config.UXSIM_CONFIG.sparse_route_search:
+            uxsim_sparse_routing.enable_sparse_routing()   # DUO route_search 只對實際終點算（搭配稀疏終點池）
+        else:
+            uxsim_sparse_routing.disable_sparse_routing()  # 還原原生 all-pairs（對拍/baseline）
+        logger.info("UXsim 後端就緒：%d/%d 台車已建（deltan=%d）",
+                    added, len(self.agents), self._deltan)
 
     # ------------------------------------------------------------------
     # 物理讀回：UXsim → agent / Road 欄位（讓繼承的感知/snapshot 直接可用）
@@ -302,7 +299,6 @@ class UXsimEngine(SimulationEngine):
 
         方向一律由 UXsim 自己的 route_pref（內建最短時間樹）提供；我們只用 UXsim 參數加篩選：
           fast                → homogeneous_DUO，清 prefer/avoid（純最短時間）
-          comfortable         → DUO + set_links_avoid(小路類別 link；每節點保底)（偏好走大路；查屬性篩出，非算路徑）
           avoid_congestion    → DUO + set_links_avoid(壅塞 link；每節點保底不全避 → 不崩)
           tolerate_congestion → 凍結：route_pref.copy() + principle="fixed"（不再改道、忍受壅塞）
         重算時機：decision 改變（mode 變）即套用；avoid_congestion 另在「壅塞 + 過 cooldown」時重算避開集合。
@@ -362,9 +358,7 @@ class UXsimEngine(SimulationEngine):
                 pass
             veh.set_links_avoid([])
             veh.set_links_prefer([])
-            if mode == "comfortable":
-                veh.set_links_avoid(self._comfortable_avoid)   # 避開小路（偏好走大路；含每節點保底→不崩）
-            elif mode == "avoid_congestion":
+            if mode == "avoid_congestion":
                 veh.set_links_avoid(avoid_set or [])           # 避開壅塞 link（每節點保底→不崩）
             # else：fast / 未知 → 純 DUO（prefer/avoid 已清空）
             return True
@@ -375,7 +369,7 @@ class UXsimEngine(SimulationEngine):
     def _safe_avoid_set(self, avoid_rids) -> list:
         """要避開的 link 名，但**保證每個節點至少留一個非避開出口**（出度檢查，非算路徑、無 Dijkstra）
         → UXsim route_next_link_choice 不會「出口全被避→空集合→max() 崩潰」。
-        comfortable（避小路，靜態）與 avoid_congestion（避壅塞，動態）共用。"""
+        供 avoid_congestion（避壅塞，動態）使用。"""
         if not avoid_rids or self.network is None:
             return []
         G = self.network.graph
@@ -486,7 +480,7 @@ class UXsimEngine(SimulationEngine):
             origin = a.current_node
             dest = demand_mod.sample_dest_town(self.towns, (a.x, a.y), self.rng, config.DEMAND_CONFIG)
             dtown = self._town_by_name(dest) if dest else None
-            dnode = self._node_in_town(dest) if dtown is not None else self._dest_node
+            dnode = self._dest_node_in_town(dest) if dtown is not None else self._dest_node
             if origin not in in_net or dnode not in in_net or origin == dnode:
                 continue
             k = self._respawn_count.get(a.agent_id, 0) + 1
@@ -608,4 +602,3 @@ class UXsimEngine(SimulationEngine):
         self._injected = {}
         self._reroute_cycle = {}
         self._respawn_count = {}
-        self._comfortable_avoid = []
