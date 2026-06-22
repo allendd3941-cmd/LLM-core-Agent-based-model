@@ -41,4 +41,4 @@ def test_decide_step_rules():
     a.congestion_proxy = 0.0
     a.distance_to_destination = 1000
     d = p.decide_step(agents, {}, 1)
-    assert d[a.agent_id].action_mode == "short_distance"
+    assert d[a.agent_id].action_mode == "fast"   # 已接近目的地 → 直接前往（原 short_distance 已移除）

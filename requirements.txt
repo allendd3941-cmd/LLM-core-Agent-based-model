@@ -47,6 +47,8 @@ pyproj>=3.6
 networkx>=3.2
 # 全台南路網首次啟動會自動下載建檔（graphml 已 gitignore、不再 commit），故 osmnx 為必要依賴。
 osmnx>=1.9
+# 物理/路由後端（UXsim 引擎，預設後端）。pip 會一併拉 pandas/matplotlib/pyqt5/scipy/dill/pillow/tqdm。
+uxsim>=1.13
 # web demo（WebSocket）
 websockets>=12.0
 # 測試

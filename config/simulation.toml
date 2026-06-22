@@ -95,13 +95,6 @@ congestion_penalty = 1.0
 road_class_bias = 0.4
 route_randomness = 0.10
 
-[action_modes.short_distance]    # 最短距離：純距離，願意鑽小路抄近
-desired_speed_kmh = 70.0
-time_weight = 0.10
-distance_weight = 0.70
-comfort_weight = 0.10
-capacity_weight = 0.10
-route_randomness = 0.10
 
 # ----- 道路壅塞估計與權重 -----
 [roads]

@@ -1,17 +1,16 @@
 請根據"環境資訊"與"agent旅行記憶"整理資料，與"agent profile資料"去生成各個 agent 的 decision-making 結果，且需要考量每個agents的個性、環境感受與旅行記憶去做決策。
 
-action mode包含五種如下，請依據各個agent不同的性質、旅行記憶與環境資訊，將這五種mode去填入action mode值:
+action mode包含四種如下，請依據各個agent不同的性質、旅行記憶與環境資訊，將這四種mode去填入action mode值:
 "fast"                 // 想要快一點
 "tolerate_congestion"  // 繼續塞車也沒關係
 "avoid_congestion"     // 避開壅塞
 "comfortable"          // 穩定舒適
-"short_distance"       // 想走短一點
 
 選擇 action mode 時，請特別參考環境資訊中的下列線索（結合該 agent 的性格傾向）：
 - `road_ahead`：若顯示前方有壅塞，傾向 "avoid_congestion"（除非該 agent 個性是塞車也無所謂，可選 "tolerate_congestion"）。
 - `traffic_here` / `speed_status`：腳下已壅塞或正在緩行，且前方仍塞，傾向避塞或舒適。
 - `congestion_hotspots` / `congestion_trend`：若該 agent 目前所在或將經過的行政區是熱點、或全市壅塞惡化中，較適合 "avoid_congestion"。
-- 若前方順暢且整體壅塞輕微，依 agent 性格可選 "fast" 或 "short_distance"。
+- 若前方順暢且整體壅塞輕微，依 agent 性格可選 "fast"（趕時間）或 "comfortable"（求穩）。
 
 agent name為每個agent的名字，請根據"agent profile資料"的name值去對應生成，不許有漏掉。
 vehicle_type根據"agent profile資料"的"vehicle_ownership"值去對應生成，不許有漏掉，且只能有"機車"或"汽車"兩種值。

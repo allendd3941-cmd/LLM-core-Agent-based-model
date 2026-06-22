@@ -22,6 +22,8 @@ import logging
 import math
 import os
 
+import numpy as np
+
 from .. import config
 from ..domain.agent import VehicleAgent
 from ..domain.events import RouteStatus
@@ -52,7 +54,7 @@ class UXsimEngine(SimulationEngine):
         self._injected: dict[str, str] = {}          # agent_id → 已注入的偏好類型（避免重複套用）
         self._reroute_cycle: dict[str, int] = {}     # agent_id → 最後一次「中途改道」的 cycle（前端顯示「改道中」）
         self._respawn_count: dict[str, int] = {}     # ambient agent_id → 已重生次數（車名唯一）
-        self._dest_trees: dict[str, object] = {}     # "distance"/"time" → DestinationTrees（短距/釘路用,快取）
+        self._comfortable_avoid: list[str] = []      # comfortable 要避開的小路 link 名（含每節點保底；init 算一次）
         # 全域設定來自 config [uxsim]；deltan / dev_crop 另允許環境變數覆寫（本機開發方便）。
         uc = config.UXSIM_CONFIG
         self._deltan = int(_env_float("UXSIM_DELTAN", uc.deltan))
@@ -131,8 +133,15 @@ class UXsimEngine(SimulationEngine):
             except Exception as e:  # noqa: BLE001
                 logger.debug("addVehicle 失敗 %s: %s", a.agent_id, e)
         self._world = W
-        logger.info("UXsim 後端就緒：%d/%d 台車已建（deltan=%d）",
-                    added, len(self.agents), self._deltan)
+        # comfortable：避開「小路類別」(residential/unclassified/service/living_street)、偏好走較大的路。
+        # 依 highway 屬性篩出小路 + 每節點保底（不全避→不崩）；靜態，init 算一次快取。查屬性，非算路徑。
+        from ..domain.agent import clean_highway
+        _MINOR = {"residential", "unclassified", "service", "living_street"}
+        minor = {rid for rid, road in self._roads_by_id.items()
+                 if clean_highway(road.highway) in _MINOR}
+        self._comfortable_avoid = self._safe_avoid_set(minor)
+        logger.info("UXsim 後端就緒：%d/%d 台車已建（deltan=%d）；comfortable 避開小路 %d",
+                    added, len(self.agents), self._deltan, len(self._comfortable_avoid))
 
     # ------------------------------------------------------------------
     # 物理讀回：UXsim → agent / Road 欄位（讓繼承的感知/snapshot 直接可用）
@@ -255,18 +264,30 @@ class UXsimEngine(SimulationEngine):
     def _road_ahead(self, agent, congested_proxy: float, lookahead_m: float = 0.0) -> str:
         """UXsim：只看「朝終點的下一條 OSM link」的壅塞 → 質性文字（取代 base 的固定距離掃描）。
 
-        下一條 link＝該車 current_node→終點 最短路的第一段（`_dest_path_links` 的 links[0]）；
-        其起點正是當前 link 的末端節點，故是**真正的下一段**（非腳下這條）。
-        無下一段（快到終點/不在路上）→ 順暢。比固定距離掃描更貼合 UXsim（路由逐路口即時決定）、
-        也更像真人「看到下一條路塞就改道」。``lookahead_m`` 在此忽略（保留簽章相容）。
-        註：UXsim 的 ``veh.route_next_link`` 在車仍在當前 link 時＝當前這條（會與 traffic_here 重複），
-        故不用它；改用終點樹的下一段（朝終點、對所有 mode 都穩定）。
+        下一條 link＝在當前 link 末端節點、UXsim 自己 route_pref（內建最短時間樹）最大的那條出口邊
+        （即 route_next_link_choice 的同一邏輯）。無下一段（快到終點/不在路上）→ 順暢。
+        比固定距離掃描更貼合 UXsim、也更像真人「看到下一條路塞就改道」。``lookahead_m`` 忽略（簽章相容）。
+        **不自算任何路徑**——方向完全取自 UXsim 的 route_pref。
         """
         from ..domain import agent as agent_mod
         if agent.route_status in (RouteStatus.ARRIVED, RouteStatus.ERROR):
             return ""
-        links = self._dest_path_links(agent, "time")   # 朝終點（自由流時間）路徑的 link 名清單
-        road = self._roads_by_id.get(links[0]) if links else None
+        if agent.role != "event":          # 背景車不觸發 LLM、不需前方感知
+            return agent_mod.AHEAD_CLEAR
+        # 直接讀 UXsim 自己選的「下一條」：在當前 link 末端節點，route_pref 最大的出口邊
+        # （= UXsim route_next_link_choice 的同一邏輯；route_pref 來自 ROUTECHOICE 的最短時間樹）。
+        # 不再用我們的終點樹/Dijkstra——選路一律交給 UXsim。
+        veh = self._veh.get(agent.agent_id)
+        link = getattr(veh, "link", None) if veh is not None else None
+        if link is None:
+            return agent_mod.AHEAD_CLEAR
+        try:
+            outlinks = list(link.end_node.outlinks.values())
+            rp = veh.route_pref
+            nxt = max(outlinks, key=lambda l: rp[l.id]) if (outlinks and rp is not None) else None
+        except Exception:  # noqa: BLE001
+            nxt = None
+        road = self._roads_by_id.get(getattr(nxt, "name", None)) if nxt is not None else None
         if road is None:
             return agent_mod.AHEAD_CLEAR
         if road.congestion_proxy >= congested_proxy:
@@ -277,23 +298,21 @@ class UXsimEngine(SimulationEngine):
     # action_mode → UXsim 路徑選擇參數（只用 UXsim 既有旋鈕，不自寫選路演算法）
     # ------------------------------------------------------------------
     def _inject_routes(self, cycle: int) -> None:
-        """把每台事件車的 action_mode 翻成 UXsim 既有的 route-choice 參數。
+        """把每台事件車的 action_mode 翻成 UXsim 既有的 route-choice 參數（**純 UXsim、不自算路徑**）。
 
-        映射（見 docs/UXSIM_MIGRATION_zh-TW.md）：
-          fast                → 清 prefer/avoid（純 UXsim DUO，即時旅時）
-          comfortable         → set_links_prefer(幹道)
-          short_distance      → set_links_prefer(靜態最短距離路徑的 links)
-          tolerate_congestion → set_links_prefer(自由流時間最短路) 黏著計畫、忍受壅塞（不繞開）
-          avoid_congestion    → set_links_prefer(繞塞最短路；全塞則不偏好 → DUO 走最不塞) [strand-safe]
-        重算時機：**decision 改變（mode 變）即重算路徑選擇**（first=True → 重算偏好/避開集合）；
-        此外 avoid_congestion 還會在「該車壅塞 + 過 reroute cooldown」時重算（追當前壅塞）。
-        tolerate/comfortable/short_distance 的路徑與當前壅塞無關，故只在 decision 改變時重算。
+        方向一律由 UXsim 自己的 route_pref（內建最短時間樹）提供；我們只用 UXsim 參數加篩選：
+          fast                → homogeneous_DUO，清 prefer/avoid（純最短時間）
+          comfortable         → DUO + set_links_avoid(小路類別 link；每節點保底)（偏好走大路；查屬性篩出，非算路徑）
+          avoid_congestion    → DUO + set_links_avoid(壅塞 link；每節點保底不全避 → 不崩)
+          tolerate_congestion → 凍結：route_pref.copy() + principle="fixed"（不再改道、忍受壅塞）
+        重算時機：decision 改變（mode 變）即套用；avoid_congestion 另在「壅塞 + 過 cooldown」時重算避開集合。
         背景車不經此（純 DUO）。
         """
         if self._world is None:
             return
         sc = config.SCALING_CONFIG
         sm = max(1, self.cfg.step_minutes)
+        avoid_set = None   # 本步共用、用到才算（壅塞 link 名集合，含每節點保底）
         for a in self._event_agents():
             veh = self._veh.get(a.agent_id)
             if veh is None or a.waiting_for_origin:
@@ -305,91 +324,77 @@ class UXsimEngine(SimulationEngine):
                          and (cycle - a.last_reroute_cycle) * sm >= sc.reroute_cooldown_minutes)
             if not (first or recompute):
                 continue
-            self._apply_action_mode(a, veh, mode)
+            if mode == "avoid_congestion" and avoid_set is None:
+                avoid_set = self._safe_congested_avoid_set()
+            if not self._apply_action_mode(a, veh, mode, avoid_set):
+                continue   # tolerate 終點樹未就緒 → 不標記、下步重試（避免凍結到全 0 route_pref）
             if recompute or (first and prev is not None):   # 中途改道（非初始路由）→ 前端「改道中」
                 self._reroute_cycle[a.agent_id] = cycle
             self._injected[a.agent_id] = mode
             a.last_reroute_cycle = cycle
 
-    def _apply_action_mode(self, a, veh, mode: str) -> None:
+    def _apply_action_mode(self, a, veh, mode: str, avoid_set=None) -> bool:
+        """把 mode 翻成 UXsim 參數：方向用 UXsim 自己的 route_pref（時間樹），我們只加路型/壅塞篩選或凍結。
+        **完全不自算路徑、無 Dijkstra**。回傳是否成功（tolerate 在終點時間樹尚未就緒時回 False → 下步重試）。"""
         try:
-            if mode == "comfortable":
-                veh.set_links_avoid([])
-                # 偏好「朝終點、且偏好幹道」那條路徑的 links（有方向→不亂繞；勿用全部幹道）
-                veh.set_links_prefer(self._dest_path_links(a, "comfort"))
-            elif mode == "short_distance":
-                veh.set_links_avoid([])
-                veh.set_links_prefer(self._dest_path_links(a, "distance"))
-            elif mode == "tolerate_congestion":
-                # 偏好「自由流時間最短路」的 links：黏著計畫走、不繞開壅塞（= 忍受）。
-                # 用 set_links_prefer（非 enforce_route）→ 每路口把候選邊交集到計畫路徑上、
-                # 中途呼叫安全、decision 一變即重算；該路口無偏好邊時 UXsim 自動退回全部出口邊/DUO
-                # （uxsim route_next_link_choice 的交集只在非空時才限縮）→ 全塞/被擠出原路也不卡死。
-                veh.set_links_avoid([])
-                veh.set_links_prefer(self._dest_path_links(a, "time"))
-            elif mode == "avoid_congestion":
-                # 用「偏好一條繞塞路徑」(prefer) 而非 set_links_avoid：
-                # avoid 在某節點把所有出口都避掉時 UXsim 會 max() 空集合崩潰（重壅塞下會發生）；
-                # prefer 交集為空時自動退回全部出口/DUO → strand-safe，永遠有路走。
-                veh.set_links_avoid([])
-                veh.set_links_prefer(self._congested_detour_prefer(a))
-            else:                                          # fast / 未知 → 純 DUO
+            if mode == "tolerate_congestion":
+                # 凍結「UXsim 已算好的終點時間樹」+ 設非 DUO principle → 之後不再被 DUO 更新 = 不改道、忍受。
+                # 注意：要凍結 ROUTECHOICE 的終點樹（已算好的），不能凍結車自身 route_pref——剛出發時它是全 0，
+                # 凍全 0 會讓車每路口亂選、到不了。樹未就緒（如出發前）→ 暫用 DUO、回 False 由 _inject_routes 重試。
                 veh.set_links_prefer([])
                 veh.set_links_avoid([])
+                try:
+                    tree = veh.W.ROUTECHOICE.route_pref[veh.dest.id]
+                except Exception:  # noqa: BLE001
+                    tree = None
+                if tree is not None and float(np.sum(tree)) > 0:
+                    veh.route_pref = tree.copy() if hasattr(tree, "copy") else dict(tree)
+                    veh.route_choice_principle = "fixed"
+                    return True
+                veh.route_choice_principle = "homogeneous_DUO"
+                return False
+            # 其餘模式：方向交給 UXsim 時間樹 → principle 設回 DUO，並還原 route_pref 為 UXsim 當前時間樹
+            # （從 tolerate 切回來也會復原；讀的是 UXsim 自己算好的樹,我們不算）。
+            veh.route_choice_principle = "homogeneous_DUO"
+            try:
+                veh.route_pref = veh.W.ROUTECHOICE.route_pref[veh.dest.id]
+            except Exception:  # noqa: BLE001
+                pass
+            veh.set_links_avoid([])
+            veh.set_links_prefer([])
+            if mode == "comfortable":
+                veh.set_links_avoid(self._comfortable_avoid)   # 避開小路（偏好走大路；含每節點保底→不崩）
+            elif mode == "avoid_congestion":
+                veh.set_links_avoid(avoid_set or [])           # 避開壅塞 link（每節點保底→不崩）
+            # else：fast / 未知 → 純 DUO（prefer/avoid 已清空）
+            return True
         except Exception as e:  # noqa: BLE001
             logger.debug("inject %s 失敗 %s: %s", mode, a.agent_id, e)
+            return True
 
-    def _event_dest_tree(self, kind: str):
-        """快取的反向終點樹（單一權重；distance=純距離、time=自由流時間,皆與壅塞無關→可全程快取）。
-        一個實例服務所有終點（DestinationTrees 內部對每個 dest 的反向 Dijkstra 自動快取）。"""
-        if kind not in self._dest_trees:
-            from ..spatial.routing import DestinationTrees
-            if kind == "distance":
-                strat = {"time": 0.0, "distance": 1.0, "comfort": 0.0, "capacity": 0.0, "randomness": 0.0}
-            elif kind == "comfort":   # 自由流時間 + 偏好幹道（road_class_bias）→ 朝終點走大路那條
-                strat = {"time": 1.0, "distance": 0.0, "comfort": 0.0, "capacity": 0.0,
-                         "road_class_bias": 0.4, "randomness": 0.0}
-            else:  # time（自由流）
-                strat = {"time": 1.0, "distance": 0.0, "comfort": 0.0, "capacity": 0.0, "randomness": 0.0}
-            self._dest_trees[kind] = DestinationTrees(self.network, strat, seed=self.cfg.seed)
-        return self._dest_trees[kind]
-
-    def _dest_path_links(self, a, kind: str) -> list:
-        """該車 current_node→destination_node 的單一權重最短路 → link 名清單。"""
-        if not a.current_node or not a.destination_node:
+    def _safe_avoid_set(self, avoid_rids) -> list:
+        """要避開的 link 名，但**保證每個節點至少留一個非避開出口**（出度檢查，非算路徑、無 Dijkstra）
+        → UXsim route_next_link_choice 不會「出口全被避→空集合→max() 崩潰」。
+        comfortable（避小路，靜態）與 avoid_congestion（避壅塞，動態）共用。"""
+        if not avoid_rids or self.network is None:
             return []
-        node_path = self._event_dest_tree(kind).paths_to(
-            a.destination_node, [a.current_node]).get(a.current_node, [])
-        return self._path_link_names(node_path)
+        G = self.network.graph
+        avoid = set(avoid_rids)
+        for u in G.nodes():
+            out_rids = []
+            for v in G.successors(u):
+                road = self.network.road_between(u, v)
+                if road is not None:
+                    out_rids.append(road.road_id)
+            if out_rids and all(r in avoid for r in out_rids):   # 此節點出口全在避開集 → 留一個（任一）
+                avoid.discard(out_rids[0])
+        return list(avoid)
 
-    def _path_link_names(self, node_path: list) -> list:
-        names = []
-        for u, v in zip(node_path, node_path[1:]):
-            road = self.network.road_between(u, v) if self.network else None
-            if road is not None:
-                names.append(road.road_id)
-        return names
-
-    def _congested_detour_prefer(self, a) -> list:
-        """避塞：回傳一條『繞開壅塞、仍到得了終點』的最短路徑 link 名（給 set_links_prefer）。
-
-        作法：把當前壅塞邊從圖上移除（O(1) restricted_view）後算 current→dest 最短路；其 links 交給 prefer。
-        **strand-safe**：移除壅塞後若斷路（前方全塞）→ 回 []（prefer 清空）→ UXsim DUO 走最小旅時＝最不塞那條，
-        保證一定有路、絕不卡死。用 prefer 而非 avoid，是因為 avoid 在某節點把所有出口避光會讓 UXsim 崩。"""
-        import networkx as nx
+    def _safe_congested_avoid_set(self) -> list:
+        """目前壅塞（congestion_proxy ≥ 門檻）的 link → 套每節點保底（見 _safe_avoid_set）。本步共用一次算好。"""
         thr = self.cfg.crowded_road_threshold
-        if self.network is None or not a.current_node or not a.destination_node:
-            return []
-        congested = [r for r in self._roads_by_id.values() if r.congestion_proxy >= thr]
-        if not congested:
-            return []   # 無壅塞 → 不偏好 → 純 DUO
-        avoid_edges = [(r.node_a, r.node_b) for r in congested]
-        view = nx.restricted_view(self.network.graph, [], avoid_edges)   # 不複製、O(1) view
-        try:
-            node_path = nx.shortest_path(view, a.current_node, a.destination_node, weight="length")
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
-            return []   # 前方全塞/斷路 → 不偏好 → DUO 走最不塞
-        return self._path_link_names(node_path)
+        congested = {rid for rid, r in self._roads_by_id.items() if r.congestion_proxy >= thr}
+        return self._safe_avoid_set(congested)
 
     # ------------------------------------------------------------------
     # step：UXsim 推進 + 讀回，重用父類的決策/感知/偵測器/指標/snapshot
@@ -592,4 +597,4 @@ class UXsimEngine(SimulationEngine):
         self._injected = {}
         self._reroute_cycle = {}
         self._respawn_count = {}
-        self._dest_trees = {}
+        self._comfortable_avoid = []

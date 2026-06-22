@@ -44,8 +44,8 @@ VALIDATION_CAMERAS_CSV = DATA_DIR / "validation_cameras.csv"   # 驗證用真實
 CRS_METRIC = "EPSG:3826"
 CRS_WGS84 = "EPSG:4326"
 
-# 五種 action mode（對齊 prompts/decision_making_prompt.txt 與 LLM 實際輸出）
-ACTION_MODES = ("fast", "tolerate_congestion", "avoid_congestion", "comfortable", "short_distance")
+# 四種 action mode（對齊 prompts/decision_making_prompt.txt 與 LLM 實際輸出；short_distance 已移除）
+ACTION_MODES = ("fast", "tolerate_congestion", "avoid_congestion", "comfortable")
 VEHICLE_TYPES = ("汽車", "機車")
 
 # 台南市 37 個行政區（mock profile 生成用；以 TOWN_MOI 實際載入為準，此處為 fallback）
@@ -391,10 +391,6 @@ _DEFAULT_ACTION_MODE_PROFILES: dict[str, ActionModeProfile] = {
         desired_speed_kmh=42.0, time_weight=0.20, distance_weight=0.10,
         comfort_weight=0.45, capacity_weight=0.25,
         congestion_penalty=1.0, road_class_bias=0.4, route_randomness=0.10),
-    # 最短距離：純距離、無視速度與路型，願意鑽小路抄近
-    "short_distance": ActionModeProfile(
-        desired_speed_kmh=35.0, time_weight=0.10, distance_weight=0.70,
-        comfort_weight=0.10, capacity_weight=0.10, route_randomness=0.10),
 }
 
 

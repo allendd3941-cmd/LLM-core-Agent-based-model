@@ -87,34 +87,29 @@ congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 
 > ⚠️ **`crowded_road_threshold` 語意改變**：congestion_proxy 現在是「真實占有率」（1km link 約可容 `kappa×length` 台，故同樣車數下占有率比舊 proxy 低很多）。demo 若要更敏感的壅塞觸發，**把 `crowded_road_threshold` 調低**（或日後用 `jam_density_per_lane` 讓多車道容量更真實）。
 
-## 5.6 五種 action_mode → UXsim 路徑選擇參數（最終映射）
+## 5.6 四種 action_mode → UXsim 路徑選擇參數（最終版，純參數、零自算路徑）
 
-**只用 UXsim 既有的 per-vehicle route-choice 參數**（`set_links_prefer` / `set_links_avoid`），不自寫路由器。
-路徑用快取的反向終點樹（單一權重）算出後，取其 link 名餵給 UXsim。
+**方向一律由 UXsim 自己的 `route_pref`（內建最短時間樹）提供**；我們只用 UXsim 既有參數「在它的時間路由上加篩選/凍結」，**完全不自算路徑、無 Dijkstra**。
 
-| action_mode | UXsim 動作 | 路徑來源（樹權重） | 行為 |
-|---|---|---|---|
-| `fast` | 清 prefer/avoid（純 DUO） | — | DUO 依**即時旅時**選路，自然避開壅塞 |
-| `comfortable` | `set_links_prefer(路徑 links)` | 自由流時間 + `road_class_bias`（偏好幹道） | 走大路、朝終點（有方向→不亂繞） |
-| `short_distance` | `set_links_prefer(路徑 links)` | 純距離 | 總距離最短 |
-| `tolerate_congestion` | `set_links_prefer(路徑 links)` | 自由流時間 | 黏著計畫路徑、**忍受壅塞不繞開** |
-| `avoid_congestion` | `set_links_prefer(繞塞最短路 links)` | 移除壅塞邊後的最短路 | 主動繞開塞車路段（全塞則回 DUO 走最不塞） |
+| action_mode | UXsim 參數 | UXsim 怎麼選（原理） |
+|---|---|---|
+| `fast` | `route_choice_principle="homogeneous_DUO"`，清 prefer/avoid | 純走 UXsim 最短時間，自然避開壅塞 |
+| `comfortable` | DUO + `set_links_prefer(幹道類別 link)` | 在「幹道出口」中、用時間樹挑往終點 → 偏好大路 |
+| `avoid_congestion` | DUO + `set_links_avoid(壅塞 link；每節點保底)` | 在「非壅塞出口」中、用時間樹挑往終點 → 繞開塞段 |
+| `tolerate_congestion` | `route_pref.copy()` + `principle="fixed"` | 凍結當下時間路線、不再被 DUO 更新 → 不改道、忍受 |
 
-**重算時機（驗收標準）**：`_inject_routes` 以 `first = (已注入 mode != 當前 mode)` 判斷——
-**只要 decision 改變（mode 變），下一步即重算該車的路徑選擇**（重算偏好/避開集合）。
-此外 `avoid_congestion` 還會在「該車壅塞 + 過 reroute cooldown」時追當前壅塞重算。
-`tolerate/comfortable/short_distance` 的路徑與當前壅塞無關，故只在 decision 改變時重算即可。
+- `links_prefer`/`links_avoid` 的那組 link 名只是「**查屬性篩出**」：路型(highway) init 分類一次快取、壅塞用 `congestion_proxy ≥ 門檻` 篩。**不是算路徑。**
+- **方向**全取自 UXsim 的 route_pref（它的時間樹）；選路 100% 是 UXsim 的 `route_next_link_choice`。
+- `tolerate` 只是 `route_pref.copy()`（記憶體複製）+ 非 DUO principle（讓 UXsim 不覆寫它）。
+- **`short_distance` 已移除**：UXsim 只有時間成本、無距離成本，不自算路徑就無法表達「最短距離」。
 
-**`set_links_prefer` 為何中途安全且不卡死**（見 `uxsim.py` `route_next_link_choice`）：
-每個路口先做「出口邊 ∩ 偏好清單」，**且交集非空才限縮**；若該路口沒有任何偏好邊
-（被擠出原路徑 / spillback / 前方全塞）→ 跳過限縮 → 退回全部出口邊由 DUO 選 → **永遠有路走**。
-**為何全部改用 `prefer`、完全不用 `set_links_avoid`**：`set_links_avoid` 是在每個路口「相減」掉壅塞出口，
-某節點所有出口都被避掉時 → 空集合 → UXsim `route_next_link_choice` 的 `max()` 崩潰（**重壅塞下實測會發生**，
-全域連通守衛不足以擋，因 DUO 仍可能把車帶進局部死角）。改用 `prefer` 後（交集為空才不限縮、否則退回全部出口），
-**任何路口都不會被清空 → 不崩、永遠有路走**。故：
-- `avoid_congestion` = `set_links_prefer(移除壅塞邊後的最短路)`（取代舊的 `set_links_avoid`）；
-- `tolerate` 不用 `enforce_route`（其 `specified_route` 用「已走 link 數」索引、中途套用會崩）。
-→ 5 個 mode 一律 `set_links_prefer` 或清空，**唯一會崩的 `set_links_avoid` 路徑已徹底移除**。
+**不崩的保證**：
+- `set_links_prefer` strand-safe：路口無該類出口 → UXsim 自動退回全部出口/DUO。
+- `set_links_avoid`：用 `_safe_congested_avoid_set()`——**保證每個節點至少留一個非避開出口**（出度檢查，非算路徑）→ 不會空集合崩潰。
+
+**重算時機**：`_inject_routes` 以 `first=(已注入 mode ≠ 當前 mode)` 判斷，decision 一變即套用；`avoid_congestion` 另在「壅塞 + 過 cooldown」時重算避開集合。背景車不經此（純 DUO）。
+
+**散場也自動成立**：方向都靠 UXsim 自己的時間樹，跟終點是球場或居住地隨機點無關，我們只加路型/壅塞篩選。
 
 **車輛顯示位置**：UXsim 後端覆寫 `_xy_to_latlng` → 用 `_metric_to_latlng` 真實投影
 （UXsim 的 `a.x/a.y` 是 `get_xy_coords` 給的真實連續公尺座標）。**不沿用父類「吸最近節點」近似**——

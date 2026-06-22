@@ -16,6 +16,7 @@ dependencies = [
     "pyproj>=3.6",
     "networkx>=3.2",
     "osmnx>=1.9",        # 全台南路網首次啟動自動下載建檔需要（已從 optional 移入基本依賴）
+    "uxsim>=1.13",       # 物理/路由後端（UXsim 引擎，預設後端；見 docs/UXSIM_MIGRATION_zh-TW.md）。會拉 pandas/matplotlib/pyqt5 等
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "websockets>=12.0",
@@ -30,6 +31,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+
+# uxsim → pyqt5 → pyqt5-qt5 的「最新版」只有 Linux/mac wheel；本機（Windows）開發也要能解環境，
+# 故要求 uv 解析時須同時滿足 Windows，迫使它選有 win wheel 的相容版本（uxsim 物理不需要最新 Qt）。
+[tool.uv]
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
 
 # 套件原始碼放在 src/ 之下（src layout）。find 會自動探索 llm_abm_simulator 與 llm_server。
 [tool.setuptools.packages.find]

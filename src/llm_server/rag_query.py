@@ -25,12 +25,11 @@ from . import perception
 
 # 任務子查詢（幾乎固定）：對齊 decision_making 的五種 action_mode enum。
 Q_TASK = (
-    "在壅塞與時間壓力下，選擇交通方式與車種的行為傾向。交通方式有五種："
+    "在壅塞與時間壓力下，選擇交通方式與車種的行為傾向。交通方式有四種："
     "fast（想要快一點、爭取時間）、"
     "tolerate_congestion（繼續塞車也沒關係、不改道）、"
     "avoid_congestion（避開壅塞、改道繞行）、"
-    "comfortable（穩定舒適、走主要幹道）、"
-    "short_distance（想走短一點、抄近路）"
+    "comfortable（穩定舒適、走主要幹道）"
 )
 
 _TRAIT_KEYS = ("attitudes", "habits", "decision_making_tendencies",

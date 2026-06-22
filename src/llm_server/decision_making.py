@@ -40,7 +40,7 @@ DECISION_SCHEMA = {
                     "action mode": {
                         "type": "string",
                         "enum": ["fast", "tolerate_congestion", "avoid_congestion",
-                                 "comfortable", "short_distance"],
+                                 "comfortable"],
                     },
                     "vehicle_type": {"type": "string", "enum": ["機車", "汽車"]},
                     "reason": {"type": "string"},

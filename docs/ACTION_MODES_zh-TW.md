@@ -14,7 +14,9 @@
 | `tolerate_congestion` | 繼續塞車也沒關係 |
 | `avoid_congestion` | 避開壅塞 |
 | `comfortable` | 穩定舒適 |
-| `short_distance` | 想走短一點 |
+
+> 註：`short_distance` 已移除（UXsim 只有時間成本、無距離成本，無法在不自算路徑下表達「最短距離」）。
+> UXsim 後端的 4 模式 → UXsim 參數映射（純參數、不自算路徑）見 `docs/UXSIM_MIGRATION_zh-TW.md` §5.6。
 
 mock / LLM **只回傳 mode 名字字串**；套用時（`VehicleAgent.apply_action_mode`）會依名字查 `ACTION_MODE_PROFILES` 表，帶入對應的數值與路徑策略。
 
