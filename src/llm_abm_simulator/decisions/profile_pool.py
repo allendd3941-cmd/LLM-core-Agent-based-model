@@ -96,10 +96,16 @@ def _generate(count: int) -> list[dict]:
         return []
     try:
         from llm_server import json_utils
-        from llm_server.agent_profile import run_agent_profile
+        from llm_server.agent_profile import build_profile_rag_context, run_agent_profile
     except ImportError as e:
         logger.warning("無法匯入 agent_profile 生成器：%s", e)
         return []
+
+    # RAG：整次生成只檢索一次（查詢固定、與批次無關）→ 所有批共用這份參考知識；無庫/未啟用 → 空字串（降級）。
+    rag_ctx, rag_prov = build_profile_rag_context()
+    if rag_prov:
+        srcs = sorted({str(h.get("source", "?")) for h in rag_prov})
+        logger.info("persona 生成 RAG：檢索到 %d 段參考知識（來源：%s）", len(rag_prov), "、".join(srcs))
 
     bsize = _gen_batch_size()
     sizes: list[int] = []
@@ -111,7 +117,7 @@ def _generate(count: int) -> list[dict]:
 
     def gen_one(idx: int, size: int) -> list[dict]:
         try:
-            raw = run_agent_profile(output=False, agent_count=size, seed=42 + idx)
+            raw = run_agent_profile(output=False, agent_count=size, seed=42 + idx, rag_ctx=rag_ctx)
         except Exception as e:  # noqa: BLE001  生成可能因 vLLM 不可用等失敗
             logger.warning("persona 批次 %d 生成失敗：%s", idx, e)
             return []

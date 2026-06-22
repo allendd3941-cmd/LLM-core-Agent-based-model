@@ -114,6 +114,24 @@ def build_subqueries(perception_text: str, profile_json: str) -> dict[str, str]:
     return subs
 
 
+# agent profile「生成」用的固定情境子查詢：生成時還沒有 perception/persona（我們在「創造」人物），
+# 故用固定的人口/運具/活動查詢去檢索真實資料來接地。與批次無關 → 整次生成共用一份檢索。
+_Q_PROFILE = {
+    "人口社經": "台南市居民的年齡、職業、收入與家庭結構分布（用於生成具代表性的交通模擬人物）",
+    "運具行為": "台南市居民的汽機車持有率、通勤運具選擇與駕駛習慣",
+    "活動情境": "前往亞太棒球場觀賽人潮的組成與尖峰進出場出行特性",
+}
+
+
+def build_profile_subqueries() -> dict[str, str]:
+    """agent profile 生成用的固定子查詢 {標籤: 查詢字串}（人口/運具/活動）。
+
+    與 ``build_subqueries`` 對稱，但用於「生成人物」而非「決策」：因生成時無 perception/既有 persona，
+    改用固定的領域查詢，讓 LLM 依檢索到的真實資料接地氣地生成 persona。
+    """
+    return dict(_Q_PROFILE)
+
+
 _HYDE_SYS = "你是交通疏運與管制領域的助理，只輸出一段建議文字。"
 
 

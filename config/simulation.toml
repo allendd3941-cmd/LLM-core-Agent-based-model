@@ -19,7 +19,7 @@ step_minutes = 1        # 每週期代表幾分鐘（GAML step_minutes）
 
 # ----- agent 規模與起訖 -----
 [agents]
-nb_agents = 10                      # 預設 agent 數（前端可在 [ui] 範圍內覆寫）
+nb_agents = 0                      # 預設 agent 數（前端可在 [ui] 範圍內覆寫）
 destination_town_name = "安定區"     # 球場 point 載入失敗時的 fallback 終點
 default_origin_town = "東區"         # 解析失敗時的 fallback 生成行政區
 county_name = "臺南市"
@@ -149,8 +149,8 @@ pool_size = 500                 # persona 原型數上限（建議數百；車�
 event_triggered_decisions = true   # 關閉＝退回「每步對全部 agent 決策」舊行為
 cooldown_minutes = 10              # LLM 決策 cooldown：同車幾「模擬分鐘」內不重決（與 step_minutes 無關）
 reroute_cooldown_minutes = 10      # 重算路徑 cooldown：同車幾「模擬分鐘」內不重算路徑
-batch_size = 30                    # 每批最多幾個 agent（上限；實際會被 [llm_budget] 的 token 預算再壓低）
-concurrency = 64                    # 同時並行幾批
+batch_size = 100                    # 每批最多幾個 agent（上限；實際會被 [llm_budget] 的 token 預算再壓低）
+concurrency = 96                    # 同時並行幾批
 # ----- 引擎初始化效能（皆不改模擬結果；可關閉以對拍驗證）-----
 cache_network = true               # 跨連線/重設快取已解析的 graphml 圖+節點索引（省 24MB 重解析）
 init_workers = 16                   # init 路由並行程序數（0/1=單程序；>1 才開 multiprocessing。Linux 受益最大）
@@ -188,7 +188,7 @@ min_distance_km = 0.5  # 距離下限，避免場館同區距離→0 權重爆�
 # 無人口資料（data/gis/town_population.csv 全 0）→ 自動停用。詳見 docs/AMBIENT_zh-TW.md。
 [ambient]
 enabled = true       # 是否注入背景常態車流
-count = 40           # 穩態背景車數（前端 slider 可在 0..max_count 覆寫）；初始化要為每台算路徑，越大開場越久
+count = 0           # 穩態背景車數（前端 slider 可在 0..max_count 覆寫）；初始化要為每台算路徑，越大開場越久
 respawn = true       # 抵達後以新 OD 重生，維持穩態（false＝抵達即停）
 max_count = 100000      # 前端/介入可設的背景車上限（保護效能；數百台時開場/重設較久）
 
@@ -197,7 +197,7 @@ max_count = 100000      # 前端/介入可設的背景車上限（保護效能�
 # 出發時間在 [0, 視窗] 內依 profile 抽樣（seeded）。window_minutes=0 → 全部同時出發（＝舊行為）。
 # 背景車不分批。詳見 docs/DEMO_FEATURES_zh-TW.md。
 [departure]
-window_minutes = 0      # 出發視窗（分鐘）；0＝全部同時出發
+window_minutes = 30      # 出發視窗（分鐘）；0＝全部同時出發
 profile = "uniform"     # uniform（均勻）/ front_loaded（早到多）/ peak（接近開賽尖峰多）
 
 # ----- 散場（egress）疏運評估 -----
@@ -313,5 +313,5 @@ duo_update_weight = 0.5      # 換到新最短路的強度 λ
 duo_noise = 0.01             # 路徑選擇隨機擾動（調大=更分散）
 route_choice_update_gradual = false
 instantaneous_TT_timestep_interval = 5
-no_cyclic_routing = false    # 禁止重複經過同節點（防繞圈）
+no_cyclic_routing = true    # 禁止重複經過同節點（防繞圈）
 hard_deterministic_mode = true  # 永遠走最短路、無隨機（可重現）

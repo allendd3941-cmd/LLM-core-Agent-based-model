@@ -131,6 +131,7 @@ class SimulationSession:
             await self.status("模擬已暫停")
         elif action == "step":
             if not self.engine.scheduler.finished:
+                await self.status(f"計算第 {self.engine.scheduler.cycle + 1} 步中…（首次/重算路徑表需數分鐘，請稍候）")
                 state = await asyncio.to_thread(self.engine.step)
                 await self.send(state.to_message())
                 if self.engine.scheduler.finished:  # 手動單步走到結束 → 出分析
@@ -224,6 +225,8 @@ class SimulationSession:
     async def _run_loop(self) -> None:
         try:
             while self.engine.running and not self.engine.scheduler.finished:
+                # 先送「計算中」狀態：城市尺度單步(尤其首次/重算路徑)可能數分鐘，避免前端看似凍住
+                await self.status(f"計算第 {self.engine.scheduler.cycle + 1} 步中…（首次/重算路徑表在城市尺度需數分鐘，請稍候）")
                 state = await asyncio.to_thread(self.engine.step)
                 await self.send(state.to_message())
                 await asyncio.sleep(0)   # 零等待：算完一步立刻推下一步（只讓出事件迴圈）。LLM 本來就慢，不需人工延遲

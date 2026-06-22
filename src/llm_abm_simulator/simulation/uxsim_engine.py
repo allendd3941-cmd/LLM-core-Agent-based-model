@@ -417,6 +417,8 @@ class UXsimEngine(SimulationEngine):
 
         # 物理推進到本週期末（UXsim exec_simulation；城市尺度的全節點對 route_search 成本落在 move）
         t_target = int(cycle * self.cfg.step_minutes * 60)
+        logger.info("step %d：UXsim 物理推進中…（含 DUO 路徑計算；首次與每 %ds 重算步在城市尺度需數分鐘，屬正常）",
+                    cycle, int(config.UXSIM_CONFIG.duo_update_time))
         with prof.phase("move"):
             self._world.exec_simulation(until_t=t_target)
         with prof.phase("flow"):

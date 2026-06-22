@@ -151,3 +151,36 @@ def test_hyde_expand_degrades_on_failure():
 
     assert rag_query.hyde_expand("整體壅塞", boom) == "整體壅塞"   # 降級
     assert rag_query.hyde_expand("", lambda p, **k: "x") == ""
+
+
+# ---- agent profile 生成接 RAG（共用同一 rag_store + profile 專屬查詢）----
+
+def test_build_profile_subqueries_keys():
+    subs = rag_query.build_profile_subqueries()
+    assert set(subs) == {"人口社經", "運具行為", "活動情境"}
+    assert all(isinstance(v, str) and v for v in subs.values())
+
+
+def test_profile_rag_context_disabled_degrades():
+    """無庫/未啟用 → ('', [])（降級，不影響生成；不呼叫 LLM）。"""
+    from llm_server import agent_profile
+    rag_store.enabled = False
+    ctx, prov = agent_profile.build_profile_rag_context()
+    assert ctx == "" and prov == []
+    # 空庫（啟用但無 docs）也降級
+    rag_store.enabled = True
+    ctx2, prov2 = agent_profile.build_profile_rag_context()
+    assert ctx2 == "" and prov2 == []
+
+
+def test_profile_rag_context_injects_and_prompt_contains():
+    """有語料時：檢索到 provenance、rag_ctx 含 chunk，且注入 build_user_prompt。"""
+    from llm_server import agent_profile
+    rag_store.add_text("人口調查.csv", "台南市居民汽機車持有率高，通勤多以機車為主；族群以大學生與上班族居多。")
+    ctx, prov = agent_profile.build_profile_rag_context()
+    assert prov                                       # 有檢索到（共用同一 rag_store）
+    assert "參考人口/行為知識" in ctx and "持有率" in ctx   # rag_ctx 含 RAG 標頭 + 檢索到的內容
+    p = agent_profile.build_user_prompt(10, ctx)
+    assert "參考人口/行為知識" in p and "生成 10 個" in p   # prompt 注入了 RAG 段
+    # 不傳 rag_ctx（降級/未檢索）時，prompt 不含 RAG 標頭（用標頭判據，不受 base prompt 內容影響）
+    assert "參考人口/行為知識" not in agent_profile.build_user_prompt(10)
