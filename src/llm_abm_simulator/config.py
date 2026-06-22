@@ -242,6 +242,11 @@ class UXsimConfig:
     # 只對「實際被當終點的節點」算（搭配 [demand].dest_pool_per_capita 收斂終點數）。結果完全一致、只算得少。
     # 詳見 simulation/uxsim_sparse_routing.py。關閉＝用 UXsim 原生 all-pairs（對拍/除錯用）。
     sparse_route_search: bool = True
+    # 記憶體關鍵：vehicle_logging_interval=-1 關掉 UXsim「每步每車」軌跡記錄（log_x/v/link/lane）——
+    # 預設 1 在城市尺度(7萬車×deltan=1×數千步)會線性吃爆 RAM → OOM。-1 只關每步記錄，保留 log_t_link
+    # （換 link 才記、很小，readback/偵測器仍用它）。>1 為折衷取樣。reduce_memory_route_pref=車結束後刪 route_pref。
+    vehicle_logging_interval: int = -1
+    reduce_memory_route_pref: bool = True
 
 
 @dataclass(frozen=True)

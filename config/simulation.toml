@@ -309,3 +309,6 @@ no_cyclic_routing = true    # 禁止重複經過同節點（防繞圈）
 hard_deterministic_mode = true  # 永遠走最短路、無隨機（可重現）
 sparse_route_search = true   # 稀疏 route_search：DUO 的 all-pairs Dijkstra 改成只對實際終點算（結果一致、城市尺度大幅加速）；
                              # 搭配 [demand].dest_pool_per_capita。false=用 UXsim 原生 all-pairs（對拍/除錯）
+vehicle_logging_interval = -1  # 記憶體關鍵：-1 關掉「每步每車」軌跡記錄（防 OOM；保留換 link 記錄供 readback/偵測器）。
+                               # 預設值 1 在 7萬車城市尺度會吃爆 RAM。>1=折衷取樣（軌跡較不精細）
+reduce_memory_route_pref = true  # 車抵達後刪除其 route_pref（再省記憶體）

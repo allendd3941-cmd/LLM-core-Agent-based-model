@@ -66,6 +66,8 @@ def build_world(
     instantaneous_TT_timestep_interval: int = 5,
     no_cyclic_routing: bool = False,
     hard_deterministic_mode: bool = True,
+    vehicle_logging_timestep_interval: int = -1,
+    reduce_memory_delete_vehicle_route_pref: bool = True,
     print_mode: int = 0,
 ) -> Any:
     """從 ``RoadNetwork`` 建一個已載入網路的 UXsim ``World``（不含車輛）。
@@ -90,6 +92,11 @@ def build_world(
         instantaneous_TT_timestep_interval=instantaneous_TT_timestep_interval,
         no_cyclic_routing=no_cyclic_routing,
         random_seed=seed, hard_deterministic_mode=hard_deterministic_mode,
+        # 大規模記憶體關鍵：關掉「每步每車」軌跡記錄（log_x/log_v/log_link/log_lane）——預設 1 會在
+        # 73500 車 × deltan=1 × 數千步下線性吃爆 RAM → OOM。設 -1 只關每步記錄，保留 log_t_link
+        # （換 link 才記、很小，readback/偵測器仍用它）。route_pref 在車結束後刪除，進一步省記憶體。
+        vehicle_logging_timestep_interval=vehicle_logging_timestep_interval,
+        reduce_memory_delete_vehicle_route_pref=reduce_memory_delete_vehicle_route_pref,
         print_mode=print_mode, save_mode=0, show_mode=0,
     )
 

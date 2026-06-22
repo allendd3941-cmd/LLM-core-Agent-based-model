@@ -109,7 +109,9 @@ class UXsimEngine(SimulationEngine):
             route_choice_update_gradual=uc.route_choice_update_gradual,
             instantaneous_TT_timestep_interval=uc.instantaneous_TT_timestep_interval,
             no_cyclic_routing=uc.no_cyclic_routing,
-            hard_deterministic_mode=uc.hard_deterministic_mode)
+            hard_deterministic_mode=uc.hard_deterministic_mode,
+            vehicle_logging_timestep_interval=uc.vehicle_logging_interval,
+            reduce_memory_delete_vehicle_route_pref=uc.reduce_memory_route_pref)
         self._link_by_road = {l.name: l for l in W.LINKS}
         # Road.capacity 設為 UXsim 的 jam 儲容（kappa × 長度）= 一條 link 塞死時最多容納車數。
         # 讓 build_analysis / snapshot / GIS 匯出的容量與 congestion_proxy、與物理**同源**，
@@ -182,12 +184,16 @@ class UXsimEngine(SimulationEngine):
                 a.waiting_for_origin = True
                 continue
             try:
-                links = veh.traveled_route()[0].links
+                # 直接讀 UXsim 的 link log（log_t_link 中非字串者即 Link 物件），取名字差分本步新進入的邊。
+                # 取代 veh.traveled_route()[0].links——後者每車重建 Route 物件 + 對 W.LINKS 線性搜 get_link
+                # （readback 的 93% 成本）。差分語意與舊版完全一致：prog 記未過濾的 Link 序列長度、
+                # 輸出才依 name 過濾（與 traveled_route().links 逐元素等價，見 tests/test_readback_edges.py）。
+                seq = [e[1] for e in veh.log_t_link if not isinstance(e[1], str)]
                 prog = self._veh_prog.get(a.agent_id, 0)
-                if len(links) > prog:
+                if len(seq) > prog:
                     self._step_entered_edges[a.agent_id] = [
-                        l.name for l in links[prog:] if getattr(l, "name", None)]
-                    self._veh_prog[a.agent_id] = len(links)
+                        l.name for l in seq[prog:] if getattr(l, "name", None)]
+                    self._veh_prog[a.agent_id] = len(seq)
             except Exception:  # noqa: BLE001
                 pass
             state = getattr(veh, "state", "wait")
