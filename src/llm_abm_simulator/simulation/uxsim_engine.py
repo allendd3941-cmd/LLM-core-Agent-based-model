@@ -406,27 +406,33 @@ class UXsimEngine(SimulationEngine):
 
         cycle = self.scheduler.advance()
         self._elapsed_seconds = cycle * self.cfg.step_minutes * 60.0
+        prof = self._profiler   # 每步分段計時（[scaling].profile_steps 開啟才印；關閉近乎零成本）
         self._handle_egress(cycle)
 
         # 決策（rule：每步對事件車決策；LLM 之後接）。先讀回一次讓決策有最新感知。
         env = self._environment_summary(cycle)
-        self._apply_step_decisions(env, cycle)
-        self._inject_routes(cycle)
+        with prof.phase("decide"):
+            self._apply_step_decisions(env, cycle)
+            self._inject_routes(cycle)
 
-        # 物理推進到本週期末
+        # 物理推進到本週期末（UXsim exec_simulation；城市尺度的全節點對 route_search 成本落在 move）
         t_target = int(cycle * self.cfg.step_minutes * 60)
-        self._world.exec_simulation(until_t=t_target)
-        self._readback(cycle)
+        with prof.phase("move"):
+            self._world.exec_simulation(until_t=t_target)
+        with prof.phase("flow"):
+            self._readback(cycle)
         self._respawn_arrived_ambient_ux(cycle)   # 背景車抵達 → 以重力抽新目的地重生（維持穩態負載）
 
         # 移動後感知（繼承）
-        if self.cfg.nearby_mode == "grid":
-            self._build_nearby_grid()
-        for a in self.agents:
-            if not a.waiting_for_origin:
-                self._refresh_agent_perception(a, pre_move=False)
+        with prof.phase("perceive"):
+            if self.cfg.nearby_mode == "grid":
+                self._build_nearby_grid()
+            for a in self.agents:
+                if not a.waiting_for_origin:
+                    self._refresh_agent_perception(a, pre_move=False)
 
-        self._update_detectors(cycle)
+        with prof.phase("detect"):
+            self._update_detectors(cycle)
 
         # 指標 + 階段推進 + 記錄 + snapshot（繼承）
         event_agents = self._event_agents()
@@ -456,7 +462,10 @@ class UXsimEngine(SimulationEngine):
             if not a.waiting_for_origin:
                 a.update_memory(cycle, self.cfg.step_minutes, config.MEMORY_CONFIG)
 
-        return self._snapshot(cycle, env, mode_dist, status_dist)
+        with prof.phase("snap"):
+            snap = self._snapshot(cycle, env, mode_dist, status_dist)
+        prof.flush(cycle)   # 印「step N prof: decide=… move=… flow=… perceive=… detect=… snap=… total=…」
+        return snap
 
     def _respawn_arrived_ambient_ux(self, cycle: int) -> None:
         """背景車抵達 → 從目前所在以重力抽新目的地、在 UXsim 重生一台車（維持穩態背景負載）。
