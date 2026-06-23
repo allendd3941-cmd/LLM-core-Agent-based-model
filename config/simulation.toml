@@ -28,7 +28,7 @@ county_name = "臺南市"
 [perception]
 perception_radius_m = 300.0             # 感知半徑（公尺）
 arrival_distance_threshold_m = 100      # 抵達判定容差（公尺）；⚠ 僅 legacy 引擎用，UXsim 不吃（抵達=走到終點節點）
-arrival_radius_m = 500                   # 球場「抵達圈」半徑（公尺）：事件車終點分散到圈內離出發地最近的節點
+arrival_radius_m = 600                   # 球場「抵達圈」半徑（公尺）：事件車終點分散到圈內離出發地最近的節點
                                          # （周邊停車場/入口，解單點 funnel）；前端以半透明灰圈顯示。圈內無節點→回退單一球場節點
 crowded_speed_factor = 0.55             # 壅塞時速度乘數（越小降越多）
 missing_road_speed_cap_kmh = 60.0       # 無速限資料路段的速度上限
