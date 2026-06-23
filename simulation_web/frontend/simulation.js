@@ -156,6 +156,8 @@ const TrafficUI = (() => {
     if (sigToggle) sigToggle.onchange = () => TrafficMap.toggleSignals(sigToggle.checked);
     const ambToggle = $("toggle-ambient");
     if (ambToggle) ambToggle.onchange = () => TrafficMap.toggleAmbient(ambToggle.checked);
+    const arrToggle = $("toggle-arrival-circle");
+    if (arrToggle) arrToggle.onchange = () => TrafficMap.toggleArrivalCircle(arrToggle.checked);
 
     const lm = $("llm-model");
     if (lm) lm.onchange = () => {

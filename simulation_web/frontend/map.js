@@ -12,6 +12,7 @@ const TrafficMap = (() => {
   let agentMarkers = {};      // agent_id → marker（一律 canvas 彩點）
   let agentPathLayer = null;  // 被選取 agent 的整趟行走軌跡（進場/散場分色）
   let stadiumMarker = null;
+  let arrivalCircle = null;   // 球場「抵達圈」半透明灰圈（事件車終點分散範圍）
   let onAgentSelect = null;
   let ambientOn = true;       // 背景常態車流顯示開關
   let lastAgents = [];        // 最近一次 agents（toggle 背景車時即時重繪）
@@ -317,6 +318,18 @@ const TrafficMap = (() => {
       radius: 9, color: "#fff", weight: 2, fillColor: "#ff3b3b", fillOpacity: 1,
     }).addTo(map).bindPopup(`${destName}（目的地）`);
 
+    // 抵達圈：半透明灰圈，半徑＝後端 arrival_radius_m（事件車終點分散於此圈內）。圖標窗格可開關。
+    if (arrivalCircle) { map.removeLayer(arrivalCircle); arrivalCircle = null; }
+    const arrR = Number(data.arrival_radius_m) || 0;
+    if (arrR > 0) {
+      arrivalCircle = L.circle([data.stadium.lat, data.stadium.lng], {
+        radius: arrR, color: "#888", weight: 1, opacity: 0.5,
+        fillColor: "#888", fillOpacity: 0.15, interactive: false,
+      }).bindTooltip(`抵達圈（半徑 ${Math.round(arrR)} m）`, { direction: "top" });
+      const t = document.getElementById("toggle-arrival-circle");
+      if (!t || t.checked) arrivalCircle.addTo(map);
+    }
+
     setSignals(data.signals);
     renderRegisteredDetectors(data.detectors);
 
@@ -375,6 +388,12 @@ const TrafficMap = (() => {
   function toggleSignals(on) {
     signalsOn = on;
     refreshSignalVisibility();
+  }
+
+  function toggleArrivalCircle(on) {
+    if (!arrivalCircle) return;
+    if (on) arrivalCircle.addTo(map);
+    else map.removeLayer(arrivalCircle);
   }
 
   // agent 狀態（優先序：抵達 > error > 等紅燈 > 移動中）。
@@ -528,6 +547,7 @@ const TrafficMap = (() => {
   }
 
   return { init, setInit, updateAgents, updateRoads, updateSignalPhase, toggleSignals, toggleAmbient,
+           toggleArrivalCircle,
            setViewReporter, resize, setDetectorReporter, setupDetectorDrag, addStagedDetector,
            getDetectors, detectorCount, clearDetectors, drawAgentPath, clearAgentPath };
 })();

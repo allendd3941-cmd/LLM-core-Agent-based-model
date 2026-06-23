@@ -47,6 +47,20 @@ dest_pool_per_capita = 1000  # 稀疏終點：每區取 ceil(人口/此值) 個�
 - 池用獨立 rng 建、不擾動主序列 → 既有結果可重現性不變。`0/負`＝停用（終點回到區內任一節點，舊行為）。
 - 機制與對拍詳見 [`UXSIM_MIGRATION_zh-TW.md`](UXSIM_MIGRATION_zh-TW.md) §5.8、`simulation/uxsim_sparse_routing.py`。
 
+### 球場「抵達圈」多閘門終點（`arrival_radius_m`）
+
+**問題**：事件車原本**全部以單一球場節點為終點** → 2.3 萬台全擠一個進場喉口，受該節點進場道路容量限制 →
+城市尺度 120 分鐘只 ~11% 抵達(其餘排長龍)。這是**單點 funnel**，不是真實塞車(真實球場有多個入口/停車場分流)。
+
+**做法**：以球場為心、半徑 `arrival_radius_m`(預設 800m)內的所有路網節點 = **抵達圈節點集**(對應周邊停車場/入口)。
+每台事件車的終點 = **圈內離其出發地最近的節點**(從哪個方向來就停那一側)→ 車流自動分散到數十個節點 → 解 funnel。
+- 圈內無節點(半徑過小)→ 回退單一球場節點(舊行為)。
+- 抵達車顯示會 snap 到其終點節點(否則 UXsim end 後位置卡在數 km 外的舊位置 → 綠點與移動車混)。
+- 前端：以**半透明灰色圓圈**顯示此半徑,圖標窗格「抵達圈」可開關。
+- 實測(dev-crop 8km, 2000 事件車)：抵達圈 81 節點、終點分散 28 個、**抵達率 11%→64%**、抵達車全在圈內。
+- ⚠ `arrival_distance_threshold_m` 是 **legacy 引擎專用**(UXsim 抵達=走到終點節點,不吃此值)；勿混淆。
+- 程式：`engine._build_arrival_nodes` / `_nearest_arrival_node`;測試 `tests/simulator/test_arrival_circle.py`。
+
 ## 資料來源
 
 - 人口：`data/gis/town_population.csv`（`town_name,population`，`#` 開頭為註解）。

@@ -125,6 +125,8 @@ class SimulationEngine:
         self._stadium_latlng: tuple[float, float] = (0.0, 0.0)
         self._dest_node: str | None = None
         self._dest_town: str = self.cfg.destination_town_name  # 由場景覆寫（initialize 時設）
+        self._arrival_nodes: list[str] = []          # 球場「抵達圈」內節點（事件車終點分散到這些；解單點 funnel）
+        self._arrival_coords = None                  # 上述節點的 (x,y) numpy 陣列（找「離 origin 最近」用）
         self._available_towns: list[str] = []
         self._prev_avg_congestion: float | None = None   # 上一步全市平均壅塞（算 trend 用）
         self._avoid_circles: list[tuple[float, float, float]] = []   # NL 介入：避讓區 (x,y,radius_m)
@@ -188,6 +190,7 @@ class SimulationEngine:
         self.network = load_road_network(self.cfg)
         self.signals = signals_mod.load_signal_system()
         self._dest_node = self.network.nearest_node(*self._stadium_xy)
+        self._build_arrival_nodes()     # 球場抵達圈內節點集（事件車終點分散用）
         self._build_town_node_index()   # ① 節點→行政區一次性索引（放置 O(1)）
         self._build_edge_index()        # 監測器吸附用：邊端點 numpy 索引
 
@@ -375,6 +378,41 @@ class SimulationEngine:
         logger.info("稀疏終點池建立：%d 區、共 %d 個終點節點（每 %d 人一個）",
                     len(pool), sum(len(v) for v in pool.values()), per_capita)
 
+    def _build_arrival_nodes(self) -> None:
+        """建球場「抵達圈」內的節點集（球場為心、半徑 arrival_radius_m 內的所有路網節點）。
+
+        事件車的終點分散到這些節點（=周邊停車場/入口）→ 不再全擠單一球場節點 → 解單點 funnel。
+        半徑內無節點（半徑過小）→ 退回只用單一球場節點（[_dest_node]）。"""
+        import numpy as np
+        if self.network is None:
+            self._arrival_nodes, self._arrival_coords = [], None
+            return
+        r = max(0.0, float(self.cfg.arrival_radius_m))
+        sx, sy = self._stadium_xy
+        coords = self.network._xy                           # (N,2) 公尺座標
+        d2 = (coords[:, 0] - sx) ** 2 + (coords[:, 1] - sy) ** 2
+        idx = np.where(d2 <= r * r)[0] if r > 0 else np.array([], dtype=int)
+        if len(idx) == 0:                                   # 半徑內無節點 → 退回單一球場節點
+            self._arrival_nodes = [self._dest_node] if self._dest_node else []
+            self._arrival_coords = coords[[self.network._id_to_idx[self._dest_node]]] \
+                if self._dest_node else None
+            logger.info("球場抵達圈：半徑 %.0fm 內無節點 → 回退單一球場終點節點", r)
+            return
+        self._arrival_nodes = [self.network._node_ids[i] for i in idx]
+        self._arrival_coords = coords[idx]
+        logger.info("球場抵達圈：半徑 %.0fm 內 %d 個節點（事件車終點分散於此，解單點 funnel）",
+                    r, len(self._arrival_nodes))
+
+    def _nearest_arrival_node(self, origin_node: str) -> str:
+        """事件車終點：抵達圈內「離出發地最近」的節點（從該方向接近就停在那側 → 自然分散喉口）。
+        無圈內節點 → 退回單一球場節點。"""
+        import numpy as np
+        if not self._arrival_nodes or self._arrival_coords is None:
+            return self._dest_node
+        ox, oy = self.network.node_xy(origin_node)
+        d2 = (self._arrival_coords[:, 0] - ox) ** 2 + (self._arrival_coords[:, 1] - oy) ** 2
+        return self._arrival_nodes[int(np.argmin(d2))]
+
     def _place_agent(self, agent: VehicleAgent) -> None:
         """把單一 agent 放到起點節點、算初始路徑（runtime 介入新增車用；init 走 _place_all_agents）。"""
         self._place_agent_setup(agent)
@@ -401,7 +439,8 @@ class SimulationEngine:
                          if dtown is not None else self._dest_node)
         else:
             agent.destination_town = self._dest_town
-            dest_node = self._dest_node
+            # 抵達圈多閘門：終點＝圈內離出發地最近的節點（周邊停車場/入口），分散進場喉口、解單點 funnel。
+            dest_node = self._nearest_arrival_node(origin_node)
             agent.phase = "ingress"
             self._assign_home(agent, origin_node)   # 散場目的地（居住地 / 出生地）
 
@@ -1900,6 +1939,7 @@ class SimulationEngine:
                 "zoom": scenarios.active().zoom,
             },
             "stadium": {"lat": self._stadium_latlng[0], "lng": self._stadium_latlng[1]},
+            "arrival_radius_m": float(self.cfg.arrival_radius_m),   # 前端畫「抵達圈」半透明灰圈用
             "detectors": self.detectors_payload(),
             "agent_profiles": self._load_agent_profiles(),
             "config": {

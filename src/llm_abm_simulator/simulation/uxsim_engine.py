@@ -69,8 +69,9 @@ class UXsimEngine(SimulationEngine):
         if self._dev_crop_km > 0:
             self.network = uxsim_builder.crop_to_region(
                 self.network, self._stadium_latlng, self._dev_crop_km)
-            # 裁切後：重算球場節點 + 重建索引/偵測器 + 重新放置（起點/終點都落在裁切後網內）
+            # 裁切後：重算球場節點 + 重建抵達圈/索引/偵測器 + 重新放置（起點/終點都落在裁切後網內）
             self._dest_node = self.network.nearest_node(*self._stadium_xy)
+            self._build_arrival_nodes()     # 裁切後節點變了 → 重建抵達圈內節點集
             self._build_town_node_index()
             self._build_edge_index()
             self._register_detectors()
@@ -239,6 +240,13 @@ class UXsimEngine(SimulationEngine):
                 a.selected_action = "none"
             if state == "end" and a.arrival_cycle is None and a.role == "event":
                 a.arrival_cycle = cycle
+            # 抵達車顯示：UXsim end 後 veh.link=None、位置不再更新會卡在「end 前一步的舊位置」(離終點可能數 km)。
+            # 把已抵達事件車的顯示座標 snap 到其終點節點(抵達圈內的停車節點)→ 綠點正確聚在球場周邊、不與移動車混。
+            if state == "end" and a.role == "event" and a.destination_node:
+                try:
+                    a.x, a.y = self.network.node_xy(a.destination_node)
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _current_road(self, agent):
         """改用 agent 目前的 UXsim link 對應的 Road（取代 current_path 推導）。"""

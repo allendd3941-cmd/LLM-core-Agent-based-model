@@ -79,6 +79,11 @@ class SimulationConfig:
     # === 感知 / 移動 / 抵達（GAML 同名參數）===
     perception_radius_m: float = 300.0
     arrival_distance_threshold_m: float = 50.0   # GAML 原為 0；0 在離散步進下幾乎無法判定抵達，改用一格容差
+                                                 # ⚠ 僅 legacy 引擎用（UXsim 抵達=走到終點節點，不吃此值）
+    # 球場「抵達圈」半徑（公尺）：事件車的終點不再全擠單一球場節點，而是分配到圈內離其出發地最近的
+    # 路網節點（=周邊停車場/入口，分散進場喉口、解單點 funnel）。前端以半透明灰圈顯示此半徑。
+    # 圈內無節點（半徑過小）→ 回退單一球場節點。詳見 docs。
+    arrival_radius_m: float = 800.0
     crowded_speed_factor: float = 0.55
     missing_road_speed_cap_kmh: float = 40.0
     crowded_road_threshold: float = 0.5          # congestion_proxy ≥ 此值視為壅塞 / 觸發 recompute
