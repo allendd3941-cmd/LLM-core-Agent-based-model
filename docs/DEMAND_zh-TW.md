@@ -53,13 +53,21 @@ dest_pool_per_capita = 1000  # 稀疏終點：每區取 ceil(人口/此值) 個�
 城市尺度 120 分鐘只 ~11% 抵達(其餘排長龍)。這是**單點 funnel**，不是真實塞車(真實球場有多個入口/停車場分流)。
 
 **做法**：以球場為心、半徑 `arrival_radius_m`(預設 800m)內的所有路網節點 = **抵達圈節點集**(對應周邊停車場/入口)。
-每台事件車的終點 = **圈內離其出發地最近的節點**(從哪個方向來就停那一側)→ 車流自動分散到數十個節點 → 解 funnel。
+每台事件車的終點 = 圈內節點之一(從哪個方向來就停那一側)→ 車流分散到數十個節點 → 解 funnel。**抵達 = 走到該節點**(非進圈即算)。
+
+**K-nearest 分流(`arrival_gates_per_car`,預設 5)**：若只挑「離出發地**最近 1 個**」節點,因出生地由重力模型集中在少數方向 →
+同方向車全擠少數熱門節點(實測 top-1 仍佔 **44%**,等於只把單點 funnel 變成幾個小 funnel)。改為從「**最近 K 個**節點」中
+以**穩定 hash**(crc32(agent_id|seed),跨進程可重現)挑一個 → 主流方向車流散到鄰近數個節點、仍維持「就近停」(只在最近 K 內)。
+- 實測(R=600, 2000 車)：top-1 佔比 **44%→13%**、用到節點 16→35、每節點 max 873→257(K=5 vs K=1,~70% 改善)。
+- `K=1` = 回退「只挑最近」舊行為;圈內節點 < K → 用現有全部。
+
 - 圈內無節點(半徑過小)→ 回退單一球場節點(舊行為)。
 - 抵達車顯示會 snap 到其終點節點(否則 UXsim end 後位置卡在數 km 外的舊位置 → 綠點與移動車混)。
 - 前端：以**半透明灰色圓圈**顯示此半徑,圖標窗格「抵達圈」可開關。
-- 實測(dev-crop 8km, 2000 事件車)：抵達圈 81 節點、終點分散 28 個、**抵達率 11%→64%**、抵達車全在圈內。
+- 抵達率(dev-crop 8km, 2000 事件車)：單點 funnel 時代 ~11% → 多閘門 ~64%;抵達車全在圈內。
 - ⚠ `arrival_distance_threshold_m` 是 **legacy 引擎專用**(UXsim 抵達=走到終點節點,不吃此值)；勿混淆。
-- 程式：`engine._build_arrival_nodes` / `_nearest_arrival_node`;測試 `tests/simulator/test_arrival_circle.py`。
+- 程式：`engine._build_arrival_nodes` / `_nearest_arrival_node` / `_assign_arrival_node`(K-nearest);
+  測試 `tests/simulator/test_arrival_circle.py`、`test_arrival_spread.py`。
 
 ## 資料來源
 

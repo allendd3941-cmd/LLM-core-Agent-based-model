@@ -413,6 +413,31 @@ class SimulationEngine:
         d2 = (self._arrival_coords[:, 0] - ox) ** 2 + (self._arrival_coords[:, 1] - oy) ** 2
         return self._arrival_nodes[int(np.argmin(d2))]
 
+    def _assign_arrival_node(self, origin_node: str, agent: VehicleAgent) -> str:
+        """事件車終點（分流版）：從「離出發地最近的 K 個」抵達圈節點中**確定性挑一個**。
+
+        只挑「最近 1 個」會把同方向的車全擠少數熱門節點(實測 top-1 佔 43% → 仍是小 funnel)；
+        改從最近 K 個(`arrival_gates_per_car`)中以**穩定 hash**(crc32(agent_id|seed),跨進程可重現)挑選
+        → 主流方向車流散到鄰近數個節點、仍維持「就近停」(只在最近 K 內)。
+        K=1 → 完全等同 `_nearest_arrival_node`(最近那個)。無圈內節點 → 退回單一球場節點。"""
+        import zlib
+
+        import numpy as np
+        if not self._arrival_nodes or self._arrival_coords is None:
+            return self._dest_node
+        k = max(1, int(self.cfg.arrival_gates_per_car))
+        ox, oy = self.network.node_xy(origin_node)
+        d2 = (self._arrival_coords[:, 0] - ox) ** 2 + (self._arrival_coords[:, 1] - oy) ** 2
+        k_eff = min(k, len(self._arrival_nodes))
+        # 取最近 K 個的索引，並**依距離排序**(讓「第 pick 近」語意穩定、不受 argpartition 內部順序影響)
+        if k_eff < len(d2):
+            cand = np.argpartition(d2, k_eff - 1)[:k_eff]
+        else:
+            cand = np.arange(len(d2))
+        cand = cand[np.argsort(d2[cand])]
+        pick = zlib.crc32(f"{agent.agent_id}|{self.cfg.seed}".encode()) % k_eff
+        return self._arrival_nodes[int(cand[pick])]
+
     def _place_agent(self, agent: VehicleAgent) -> None:
         """把單一 agent 放到起點節點、算初始路徑（runtime 介入新增車用；init 走 _place_all_agents）。"""
         self._place_agent_setup(agent)
@@ -439,8 +464,9 @@ class SimulationEngine:
                          if dtown is not None else self._dest_node)
         else:
             agent.destination_town = self._dest_town
-            # 抵達圈多閘門：終點＝圈內離出發地最近的節點（周邊停車場/入口），分散進場喉口、解單點 funnel。
-            dest_node = self._nearest_arrival_node(origin_node)
+            # 抵達圈多閘門：終點＝圈內「離出發地最近 K 個」節點中確定性挑一個（周邊停車場/入口），
+            # 分散進場喉口、解單點 funnel（K-nearest 分流，避免同方向車全擠單一熱門節點）。
+            dest_node = self._assign_arrival_node(origin_node, agent)
             agent.phase = "ingress"
             self._assign_home(agent, origin_node)   # 散場目的地（居住地 / 出生地）
 

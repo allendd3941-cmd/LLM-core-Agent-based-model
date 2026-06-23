@@ -86,6 +86,10 @@ class SimulationConfig:
     # 路網節點（=周邊停車場/入口，分散進場喉口、解單點 funnel）。前端以半透明灰圈顯示此半徑。
     # 圈內無節點（半徑過小）→ 回退單一球場節點。詳見 docs。
     arrival_radius_m: float = 800.0
+    # 抵達圈分流：事件車不只挑「最近 1 個」圈內節點，而是從「最近 K 個」中確定性挑一個（穩定 hash，可重現）。
+    # 解決「最近節點」把同方向車全擠少數熱門節點(實測 top-1 佔 43%)的問題 → 主流方向車流散到鄰近數個節點。
+    # K=1 = 回退「只挑最近」舊行為。圈內節點 < K → 用現有全部。
+    arrival_gates_per_car: int = 5
     crowded_speed_factor: float = 0.55
     missing_road_speed_cap_kmh: float = 40.0
     crowded_road_threshold: float = 0.5          # congestion_proxy ≥ 此值視為壅塞 / 觸發 recompute
