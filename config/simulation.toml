@@ -27,7 +27,7 @@ county_name = "臺南市"
 # ----- 感知 / 移動 / 抵達 -----
 [perception]
 perception_radius_m = 300.0             # 感知半徑（公尺）
-arrival_distance_threshold_m = 100     # 抵達判定容差（公尺）
+arrival_distance_threshold_m = 1500     # 抵達判定容差（公尺）
 crowded_speed_factor = 0.55             # 壅塞時速度乘數（越小降越多）
 missing_road_speed_cap_kmh = 60.0       # 無速限資料路段的速度上限
 crowded_road_threshold = 0.6            # congestion_proxy ≥ 此值視為壅塞 / 觸發重算路徑

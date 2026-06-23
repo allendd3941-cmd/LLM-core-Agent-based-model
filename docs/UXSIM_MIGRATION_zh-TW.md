@@ -176,6 +176,36 @@ scipy all-pairs Dijkstra（N≈1.5 萬節點）→ O(N·(E+N·logN))、**單核*
 （respawn/散場才首次用到）→ 該終點 route_pref 等**下次重算**才建好，中間該車可能短暫亂走。實務上車數遠多於池節點
 → 幾乎每池節點時時有車要去，極少發生且下次自癒。原生 all-pairs 無此延遲。詳見 `uxsim_sparse_routing.py` docstring。
 
+## 5.9 readback 去 `traveled_route()`（readback 熱點優化）
+
+`_readback` 每步把每台車狀態讀回 agent，其中「本步走過哪些 link（供偵測器計數）」原用
+`veh.traveled_route()[0].links`——它每車**重建 Route 物件**、每條 link 對 `W.LINKS`（list）線性搜 `get_link`。
+cProfile 實測：城市尺度下 **`get_link` 佔 readback 的 93%**（3500 車：readback ~13s/步、其中 get_link 36.8s/3 次）。
+
+**改法**：直接讀 UXsim 的 `veh.log_t_link`（換 link 才記的 (t, Link) 序列；非字串者即 Link），取名字差分本步新進入的邊。
+**完全免重建 Route、免 get_link**。差分語意與舊版逐元素一致（prog 記未過濾長度、輸出依 name 過濾）。
+- 實測：`get_link` 從 36.8s → 0.3s；每步平均 30.8s → 21.3s。
+- 正確性：`tests/test_readback_edges.py` 證明兩種抽取法逐元素等價（含一步跨多 link）；偵測器計數不變（見 §5.10 對拍）。
+
+## 5.10 ⚠️ 記憶體 / OOM：關掉 UXsim 每步軌跡記錄（城市尺度必須）
+
+**症狀**：城市尺度（73500 車）跑到第 8 步左右，server 進程**無 log、無預兆瞬間消失**＝ Linux **OOM killer（SIGKILL）**
+（SIGKILL 攔不住，來不及印任何東西）。`flow` 每步從 48s 一路漲到 251s 是記憶體暴增的可見徵兆。
+
+**根因**：UXsim 的 `vehicle_logging_timestep_interval` **預設 1**＝每個時間步、每台車都記 `log_x/log_v/log_link/log_lane/…`。
+73500 車 × deltan=1 × 數千時間步 → 記憶體**線性暴增** → 撐爆 RAM。
+
+**修法**（`[uxsim]`）：
+- `vehicle_logging_interval = -1`：關掉「每步每車」軌跡記錄。**只關每步記錄**——`log_t_link`（換 link 才記、很小）
+  **照常產生**，故 readback（§5.9）與偵測器仍正常；`get_xy_coords()` 取當前位置用 `veh.x/link`（非 log）也不受影響。
+- `reduce_memory_route_pref = true`：車結束後刪其 per-vehicle `route_pref`（road_ahead 已防呆 `route_pref is None`）。
+
+**驗收（嚴格對拍，`tests/simulator/test_logging_off_equiv.py`）**：同一模擬 logging **ON vs OFF**，
+**①進入邊序列 ②偵測器累計計數 ③車輛位置/狀態 三者逐位元相等**，且關掉後進入邊非空 → 證明
+「偵測器與模組邏輯完全不受影響」（logging 純觀測、不影響物理）。另確認固定 `PYTHONHASHSEED` 下模擬可重現。
+
+> 註：跨進程的「黃金指紋」比對需固定 `PYTHONHASHSEED`（set/dict 迭代序會隨進程變）；同進程兩跑則恆等。
+
 ## 6. 進度
 - **Phase 0 spike ✅**：UXsim 能支撐 Design 2 + 介入（不退 SUMO）。唯 deltan=1 城市尺度吞吐待 server 量。
 - **Phase 1 ext_id ✅**（+ 連帶修 `app.py` logging import 副作用 → lifespan；全套 53 測試通過）。
