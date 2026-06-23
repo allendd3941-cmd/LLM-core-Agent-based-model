@@ -225,6 +225,20 @@ class UXsimEngine(SimulationEngine):
                     a.distance_moved_last_step = math.hypot(a.x - prev_x, a.y - prev_y)
                 except Exception:  # noqa: BLE001
                     pass
+                # 距離抵達：位置已更新 → 若事件車已踏進「抵達圈」(對球場中心 ≤ arrival_radius_m) 就算抵達。
+                # 先更新位置、再判定 → 綠點必在圈內。抵達即把車安全移出路網(解終點前 sink 回堵)，
+                # 但 agent 物件保留、座標凍在踏入點(畫面不消失、顯示已抵達)。
+                if (a.role == "event" and self.cfg.arrival_on_circle_entry
+                        and a.route_status != RouteStatus.ARRIVED
+                        and self.cfg.arrival_radius_m > 0):
+                    sx, sy = self._stadium_xy
+                    if math.hypot(a.x - sx, a.y - sy) <= self.cfg.arrival_radius_m:
+                        a.route_status = RouteStatus.ARRIVED
+                        if a.arrival_cycle is None:
+                            a.arrival_cycle = cycle
+                        a.waiting_at_signal = False
+                        self._remove_vehicle_from_network(veh)   # 解塞；agent 留畫面、位置凍於此
+                        link = None
             # selected_action（前端「狀態」列用；與 legacy 同詞彙，前端轉中文）
             if a.route_status == RouteStatus.ARRIVED:
                 a.selected_action = "arrived"
@@ -240,13 +254,54 @@ class UXsimEngine(SimulationEngine):
                 a.selected_action = "none"
             if state == "end" and a.arrival_cycle is None and a.role == "event":
                 a.arrival_cycle = cycle
-            # 抵達車顯示：UXsim end 後 veh.link=None、位置不再更新會卡在「end 前一步的舊位置」(離終點可能數 km)。
-            # 把已抵達事件車的顯示座標 snap 到其終點節點(抵達圈內的停車節點)→ 綠點正確聚在球場周邊、不與移動車混。
+            # 經 UXsim「走到終點節點」結束的車（state=end；非我距離抵達移除的那種，那種 local state 仍是 "run"）：
+            # veh.link=None、位置卡在「end 前一步舊位置」(離終點可能數 km) → snap 到終點節點（本就在抵達圈內）。
+            # 距離抵達的車(上方 path a)local state="run"、不進此分支 → 保留「踏進圈那一刻」的真實位置。
             if state == "end" and a.role == "event" and a.destination_node:
                 try:
                     a.x, a.y = self.network.node_xy(a.destination_node)
                 except Exception:  # noqa: BLE001
                     pass
+
+    def _remove_vehicle_from_network(self, veh) -> None:
+        """安全地把一台車從 UXsim 路網移除（=抵達/停車離網）：**只動該車與其後車的跟車鏈，不碰其他車/引擎**。
+        用於距離抵達——車踏進抵達圈即離網，解「終點前 sink 回堵」。在 step 末（readback）呼叫＝步間、無競態。
+        agent 物件不刪（畫面保留、座標凍結）；只移除其 UXsim Vehicle。失敗則降級保留該車（不崩）。"""
+        try:
+            W = veh.W
+            link = getattr(veh, "link", None)
+            follower = getattr(veh, "follower", None)
+            leader = getattr(veh, "leader", None)
+            if follower is not None:          # 後車改跟前車（間隙閉合、物理正確）
+                follower.leader = leader
+            if leader is not None:
+                leader.follower = follower
+            if link is not None:
+                # 若車已在 link 末端、已排入節點轉移佇列 → 一併移除（否則下一步 node.transfer
+                # 會對已移除車存取 veh.link.vehicles[0]，link=None → 崩潰）。
+                end_node = getattr(link, "end_node", None)
+                inc = getattr(end_node, "incoming_vehicles", None)
+                if inc is not None:
+                    try:
+                        inc.remove(veh)
+                    except ValueError:
+                        pass
+                try:
+                    link.vehicles.remove(veh)          # 依值移除（非 popleft，可移中途車）
+                except ValueError:
+                    pass
+                try:
+                    link.cum_departure[-1] += W.DELTAN  # 流量帳：車離開該 link
+                except Exception:  # noqa: BLE001
+                    pass
+            veh.state = "end"
+            veh.link = None
+            veh.leader = None
+            veh.follower = None
+            W.VEHICLES_RUNNING.pop(veh.name, None)
+            W.VEHICLES_LIVING.pop(veh.name, None)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("距離抵達移除車輛失敗 %s: %s", getattr(veh, "name", "?"), e)
 
     def _current_road(self, agent):
         """改用 agent 目前的 UXsim link 對應的 Road（取代 current_path 推導）。"""
