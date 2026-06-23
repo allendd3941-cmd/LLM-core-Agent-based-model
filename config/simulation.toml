@@ -302,7 +302,7 @@ jam_density = 0.2             # link 堵塞密度 veh/m/lane（FD 校準對象�
 dev_crop_km = 0              # 本機開發裁切半徑（球場為心；0=全市。本機開發可設 8；env UXSIM_DEV_CROP_KM 可覆寫）
 reaction_time = 1            # UXsim 跟車反應時間 s
 route_choice_principle = "homogeneous_DUO"
-duo_update_time = 600        # 路徑重算間隔 s（調大=更省、改路更少）
+duo_update_time = 1800        # 路徑重算間隔 s（調大=更省、改路更少）
 duo_update_weight = 0.5      # 換到新最短路的強度 λ
 duo_noise = 0.01             # 路徑選擇隨機擾動（調大=更分散）
 route_choice_update_gradual = false
