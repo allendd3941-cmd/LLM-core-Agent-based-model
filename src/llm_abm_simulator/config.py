@@ -33,7 +33,9 @@ CONFIG_TOML = PROJECT_ROOT / "config" / "simulation.toml"   # 使用者可編輯
 
 # GIS 來源檔（對齊 GAML shape_file_* 設定；ROADLINK 在本專案不存在，改由 OSM/synthetic 取代）
 TOWN_SHP = GIS_DIR / "TOWN_MOI_1140318_3826.shp"
-STADIUM_SHP = GIS_DIR / "亞太棒球場_point.shp"
+# 球場固定終點：優先用較精準的 _accurate（若已放入 data/gis/），否則回退舊的 _point（不破壞既有行為）。
+STADIUM_SHP = (GIS_DIR / "亞太棒球場_accurate.shp") if (GIS_DIR / "亞太棒球場_accurate.shp").exists() \
+    else (GIS_DIR / "亞太棒球場_point.shp")
 # 註：舊的「亞太棒球場_研究範圍.shp」已移除——OSM 下載邊界改用 TOWN_MOI 縣界 union（全台南市）。
 TOWN_POPULATION_CSV = GIS_DIR / "town_population.csv"   # 各區人口（重力模型需求生成；近似值可替換）
 ROAD_GRAPHML = DATA_DIR / "tainan_roads.graphml"   # bundle 的真實 OSM 路網（重現用）
