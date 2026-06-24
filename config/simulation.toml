@@ -31,7 +31,6 @@ arrival_distance_threshold_m = 100      # 抵達判定容差（公尺）；⚠ �
 arrival_radius_m = 600                   # 球場「抵達圈」半徑（公尺）：事件車終點分散到圈內離出發地最近的節點
                                          # （周邊停車場/入口，解單點 funnel）；前端以半透明灰圈顯示。圈內無節點→回退單一球場節點
 arrival_gates_per_car = 5                # 抵達圈分流：從「最近 K 個」節點中挑一個（解同方向車擠單點）；1=只挑最近(舊行為)
-arrival_on_circle_entry = true           # 踏進抵達圈即算抵達 + 把車移出路網（解終點前 sink 回堵；agent 仍留畫面）；false=走到節點才算
 crowded_speed_factor = 0.55             # 壅塞時速度乘數（越小降越多）
 missing_road_speed_cap_kmh = 60.0       # 無速限資料路段的速度上限
 crowded_road_threshold = 0.6            # congestion_proxy ≥ 此值視為壅塞 / 觸發重算路徑
@@ -295,7 +294,7 @@ lanes = 1
 [highway_specs.default]
 speed_car = 70
 speed_moto = 70
-lanes = 1
+lanes = 2
 
 # UXsim 後端全域設定（僅 LLM_ABM_ENGINE=uxsim 時生效；見 docs/UXSIM_MIGRATION_zh-TW.md）
 [uxsim]

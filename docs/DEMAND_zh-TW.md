@@ -53,16 +53,16 @@ dest_pool_per_capita = 1000  # 稀疏終點：每區取 ceil(人口/此值) 個�
 城市尺度 120 分鐘只 ~11% 抵達(其餘排長龍)。這是**單點 funnel**，不是真實塞車(真實球場有多個入口/停車場分流)。
 
 **做法**：以球場為心、半徑 `arrival_radius_m`(預設 800m)內的所有路網節點 = **抵達圈節點集**(對應周邊停車場/入口)。
-每台事件車的終點 = 圈內節點之一(從哪個方向來就停那一側)→ 路由方向分散。
+每台事件車的終點 = 圈內節點之一(從哪個方向來就停那一側),抵達 = 車走到該節點(用 **UXsim 自己的 lane-safe end_trip**)。
 
-**距離抵達(`arrival_on_circle_entry`,預設 true)— 解「終點前 sink 回堵」的關鍵**：
-只「分散終點節點」還不夠——車仍要**走到節點**才算抵達,於是在節點前排成 sink 隊伍(實測城市尺度排空僅 ~10 台/分、移動中車數整場卡在數千不降)。
-改為:**事件車一踏進抵達圈(對球場中心 ≤ `arrival_radius_m`)就算抵達,並把該車安全移出 UXsim 路網**(=停在周邊、離開車流)。
-- 沒有 sink 節點了 → 車在圈周各處跨界即離網,接近道路只承載「流量」不承載「排到節點的隊伍」→ 終點前人造回堵消失。
-- **判定順序**:每步物理跑完(readback)先更新位置、**再**判距離 → 綠點必在圈內才標抵達(「踏進那一刻才算」)。
-- **agent 不從畫面消失**:只移除 UXsim Vehicle(解塞),agent 物件保留、座標凍在「踏入點」、顯示為已抵達(綠點停在圈內)。
-- **安全移除不破壞物理**:`_remove_vehicle_from_network` 只重接該車的 leader/follower 鏈 + 從 link.vehicles 與節點 incoming_vehicles 依值移除 + cum_departure 計數 + pop registry;在 step 末(步間)執行,不碰其他車/號誌/引擎。
-- `false` = 回退「走到終點節點才算抵達」(會在終點前回堵;節點抵達車 snap 到終點節點顯示)。
+**放大 `arrival_radius_m` 是解「終點前回堵」的主要槓桿**：半徑越大,抵達節點散到越外圈,車在「進入球場核心之前」就到達/離網 →
+不全部匯聚到核心 → 終點前回堵紓解。實測(dev-crop 8km, 2000 事件車, 14 步)：
+- R=600m → **53%** 抵達;R=1200m → **68%**(120 節點);R=2000m → **76%**(275 節點)。
+- 取捨:半徑越大抵達越多,但「抵達」語意越寬(車在離球場 1.2~2km 就算到 = 周邊停車+步行/接駁集客圈)。建議 1200~1500 平衡。
+
+> ⚠ **不要用「中途把車移出路網」來解塞**：曾試「踏進圈即把 UXsim Vehicle 移除」,但 UXsim 多車道是
+> **deque 位置 = 車道**、只支援前端 popleft(出 link/end_trip);**中途 `vehicles.remove()` 會打亂車道循環 →
+> `assert veh.leader.lane == veh.lane` 崩潰**。已移除該做法。解塞改靠「放大半徑 + 節點抵達(UXsim 原生 lane-safe)」。
 
 **K-nearest 分流(`arrival_gates_per_car`,預設 5)**：若只挑「離出發地**最近 1 個**」節點,因出生地由重力模型集中在少數方向 →
 同方向車全擠少數熱門節點(實測 top-1 仍佔 **44%**,等於只把單點 funnel 變成幾個小 funnel)。改為從「**最近 K 個**節點」中
@@ -71,11 +71,11 @@ dest_pool_per_capita = 1000  # 稀疏終點：每區取 ceil(人口/此值) 個�
 - `K=1` = 回退「只挑最近」舊行為;圈內節點 < K → 用現有全部。
 
 - 圈內無節點(半徑過小)→ 回退單一球場節點(舊行為)。
+- 抵達車顯示 snap 到其終點節點(UXsim end 後位置卡在數 km 外的舊位置 → 不 snap 會與移動車混)。
 - 前端：以**半透明灰色圓圈**顯示此半徑,圖標窗格「抵達圈」可開關。
-- ⚠ `arrival_distance_threshold_m` 是 **legacy 引擎專用**(UXsim 不吃此值)；勿與 `arrival_radius_m`/`arrival_on_circle_entry` 混淆。
-- 程式：`engine._build_arrival_nodes` / `_assign_arrival_node`(K-nearest 路由方向);
-  `uxsim_engine._readback`(距離抵達判定)/ `_remove_vehicle_from_network`(安全移除)。
-  測試 `tests/simulator/test_arrival_circle.py`、`test_arrival_spread.py`、`test_circle_arrival.py`。
+- ⚠ `arrival_distance_threshold_m` 是 **legacy 引擎專用**(UXsim 不吃此值)；勿與 `arrival_radius_m` 混淆。
+- 程式：`engine._build_arrival_nodes` / `_assign_arrival_node`(K-nearest);
+  測試 `tests/simulator/test_arrival_circle.py`、`test_arrival_spread.py`。
 
 ## 資料來源
 

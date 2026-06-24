@@ -8,8 +8,7 @@
 7. residential_location 請填台南市實際存在的行政區，例如「安平區」。
 8. name 請填中文姓名，例如「黃俊祺」。
 9. traits 中 attitudes、habits、decision_making_tendencies、economic_preferences_and_tradeoffs 各欄位皆為 array，內容請用十個字以內的中文片語描述。
-10. agents 需具差異性，可包含球賽觀眾、通勤者、附近居民、接送者、場館工作人員、親友接送者、周邊商家員工等，但不得新增類型欄位，只能透過 identity 與 traits 表現差異。
-11. "vehicle_ownership"的值只能為「機車」或「汽車」。
+10. "vehicle_ownership"的值只能為「機車」或「汽車」。
 
 輸出結構範例如下：
 

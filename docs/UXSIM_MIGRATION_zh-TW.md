@@ -69,8 +69,10 @@ UXsim 內建 route choice 用**全對最短路**：`dist/pred/next = n_nodes²`�
 ```
 congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 ```
-- `kappa` = UXsim link 的 **jam density**（即 `build_world` 傳入的 `[uxsim].jam_density`）、`length` = link 長度
+- `kappa` = UXsim link 的 **jam density**。`build_world` 以 **`jam_density_per_lane`** 傳入 `[uxsim].jam_density`
+  → `kappa = 該值 × number_of_lanes`（**每車道**堵塞密度 × 車道數）、`length` = link 長度
   → `kappa × length` = 該 link 堵塞時最多容納車數（＝ UXsim 判斷 spillback/壅塞的同一儲容）。
+  **儲容(kappa×length)與吞吐(基本圖 q)皆隨車道數「線性」放大**（3 車道≈停 3 倍車、過 3 倍車；1 車道行為不變）。
 - **單一容量來源**：`UXsimEngine._build_world_and_vehicles` 把 `Road.capacity` 設為 `kappa × length`（jam 儲容），
   之後 `congestion_proxy`、`build_analysis` 的 V/C、snapshot、GIS 匯出**全部讀同一個 `Road.capacity`** → 報表與即時地圖、與物理完全一致。
 - 此 proxy 驅動 `is_crowded` / `avoid_congestion` 觸發 / 前端壅塞上色 / `build_analysis` 的 V/C（皆同一儲容）。
@@ -81,11 +83,11 @@ congestion_proxy = min(1, num_vehicles / (kappa × length))   # 占有率
 | highway_specs 欄位 | 是否進 UXsim 物理 | 說明 |
 |---|---|---|
 | `speed_car` / `lanes` | ✅ 是 | 下載時烤進 graphml（OSM 真實值優先）→ `addLink(free_flow_speed, number_of_lanes)`。**改了要重建 graphml**。 |
-| jam density（容量來源） | 來自 `[uxsim].jam_density` | 容量 = `kappa×length`，**全路型統一**；要分路型需改用 `jam_density_per_lane`（未做，屬 Phase 6 FD 校準）。 |
+| jam density（容量來源） | 來自 `[uxsim].jam_density`（以 `jam_density_per_lane` 傳入） | `kappa = 每車道值 × 車道數` → 容量/儲容 = `kappa×length`，**隨車道線性放大**（✅ 已改，2026-06；舊「全路型統一、車道不影響儲容」已淘汰）。 |
 
 > **引擎預設已改 UXsim**：`web/websocket._make_engine` 預設 `uxsim`；本機記憶體不足（UXsim 全市約 9GB）時設 `LLM_ABM_ENGINE=legacy` 退回自寫物理引擎當逃生口/baseline。`tests/simulator/test_engine.py` 仍以 legacy 引擎做輕量整合測試（筆電可跑）。
 
-> ⚠️ **`crowded_road_threshold` 語意改變**：congestion_proxy 現在是「真實占有率」（1km link 約可容 `kappa×length` 台，故同樣車數下占有率比舊 proxy 低很多）。demo 若要更敏感的壅塞觸發，**把 `crowded_road_threshold` 調低**（或日後用 `jam_density_per_lane` 讓多車道容量更真實）。
+> ⚠️ **`crowded_road_threshold` 語意改變**：congestion_proxy 現在是「真實占有率」（1km link 約可容 `kappa×length` 台，故同樣車數下占有率比舊 proxy 低很多）。demo 若要更敏感的壅塞觸發，**把 `crowded_road_threshold` 調低**。（多車道容量已用 `jam_density_per_lane` 隨車道線性放大；多車道路占有率因儲容變大會更低，壅塞更難飽和。）
 
 ## 5.6 三種 action_mode → UXsim 路徑選擇參數（最終版，純參數、零自算路徑）
 

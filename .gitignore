@@ -47,3 +47,10 @@ data/traffic_light/metadata/
 data/traffic_light/processed/
 data/traffic_light/raw/
 data/traffic_light/shapefile/
+
+# QGIS 檢視用：由 data/tainan_roads.graphml 轉出的路網 shapefile（可重生、不進 repo）
+data/tainan_roads.shp
+data/tainan_roads.shx
+data/tainan_roads.dbf
+data/tainan_roads.prj
+data/tainan_roads.cpg

@@ -76,7 +76,8 @@ def build_world(
         tmax: 模擬總時長（秒）。
         deltan: 平台聚合單位（1 = 每車獨立，個體 LLM agent 必需；成本 ∝ 1/deltan²）。
         seed: 隨機種子（搭配 hard_deterministic_mode 保可重現）。
-        jam_density: 每車道堵塞密度 veh/m。
+        jam_density: 每車道堵塞密度 veh/m（以 jam_density_per_lane 傳入 UXsim →
+            kappa = 此值 × 車道數，儲容與吞吐皆隨車道線性放大）。
         signals: 可選的 ``SignalSystem``；雙相位號誌節點→``addNode(signal=[半,半], signal_offset=off)``、
             其入口邊→``addLink(signal_group=該方向相位組)``。映射合成方向相位（ax 軸±45°=組0、垂直=組1）。
     """
@@ -131,7 +132,10 @@ def build_world(
             length=max(float(road.length), 1.0),
             free_flow_speed=max(float(road.speed_car) / 3.6, 1.0),   # km/h → m/s
             number_of_lanes=max(1, int(round(float(road.lanes)))),
-            jam_density=jam_density, signal_group=sg,
+            # 以「每車道」傳入 → UXsim kappa = jam_density × number_of_lanes：儲容(kappa×length)與
+            # 吞吐(基本圖)都隨車道數「線性」放大（合物理:3 車道≈停 3 倍車、過 3 倍車）。
+            # 若改傳 jam_density=（總量），則 kappa 固定、車道只次線性提升吞吐、儲容完全不增（舊行為）。
+            jam_density_per_lane=jam_density, signal_group=sg,
         )
         n_links += 1
 
