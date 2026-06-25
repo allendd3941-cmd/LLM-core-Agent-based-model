@@ -29,6 +29,7 @@ import networkx as nx
 import numpy as np
 
 from .. import config
+from .signals import _GROUP_HALF_WIDTH   # 與 runtime 相位分組同一門檻（單一來源，避免再次門檻不一致）
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +101,12 @@ def build_signals(snap_threshold_m: float = 40.0, base_cycle_s: int = 90) -> dic
             skipped_minor += 1
             continue
         ref_axis = float(axes[0])
-        # 是否為真正的兩相位路口：存在與 ref 夾角 > 30° 的approach（不同路軸）
-        two_phase = any(_circ_dist_180(a, ref_axis) > 30.0 for a in axes)
+        # 是否為真正的兩相位路口：approach 必須「實際落入兩個不同相位組」才算。
+        # 用與 runtime 相同的 45° 門檻分組（signals.py 的 _GROUP_HALF_WIDTH）→ 兩組都有 approach 才設 two_phase。
+        # 修正 H7：舊版用 30° 判 two_phase 但分組用 45°，會讓「30~45° 的 approach」被判兩相位卻全落同一組
+        # → 另一相位整段空轉（45s 綠燈給沒車的方向）、有車那組吞吐被無謂砍半（實測 160/4899 節點受害）。
+        groups = {0 if _circ_dist_180(a, ref_axis) <= _GROUP_HALF_WIDTH else 1 for a in axes}
+        two_phase = len(groups) > 1
         lat, lng = latlng[node]
         signals[node] = {
             "lat": round(lat, 6),
