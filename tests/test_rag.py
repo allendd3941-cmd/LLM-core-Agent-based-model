@@ -142,15 +142,42 @@ def test_hyde_gate():
 
 
 def test_hyde_expand_degrades_on_failure():
-    """HyDE 生成成功回假想文件；失敗/空 → 降級回原 query（不影響檢索）。"""
-    assert rag_query.hyde_expand("整體壅塞", lambda p, **k: "散場應啟動替代道路分流。") \
-        == "散場應啟動替代道路分流。"
-
+    """生成失敗/空/空查詢 → 降級回原 query（不串接、等同無擴充）。"""
     def boom(prompt, **kw):
         raise RuntimeError("LLM down")
 
-    assert rag_query.hyde_expand("整體壅塞", boom) == "整體壅塞"   # 降級
-    assert rag_query.hyde_expand("", lambda p, **k: "x") == ""
+    assert rag_query.hyde_expand("整體壅塞", boom) == "整體壅塞"          # 例外降級
+    assert rag_query.hyde_expand("整體壅塞", lambda p, **k: "") == "整體壅塞"  # 空生成降級
+    assert rag_query.hyde_expand("整體壅塞", lambda p, **k: "   ") == "整體壅塞"  # 全空白降級
+    assert rag_query.hyde_expand("", lambda p, **k: "x") == ""           # 空查詢
+
+
+def test_hyde_expand_concatenates_and_keeps_query():
+    """Query2Doc 式：成功時「串接」原查詢（重複 n 次）+ pseudo-document，不取代。"""
+    q, doc = "整體壅塞", "散場應啟動替代道路分流。"
+    out = rag_query.hyde_expand(q, lambda p, **k: doc)
+    assert doc in out                                       # 含 pseudo-document
+    assert q in out                                         # 保留原查詢詞（關鍵性質）
+    assert out.count(q) == rag_query.HYDE_QUERY_REPEAT       # 原查詢重複 n 次（權重平衡）
+    assert out != doc                                       # 不再是「取代」舊行為
+
+
+def test_hyde_concat_retrieval_keeps_query_and_adds_expansion():
+    """檢索層證明串接同時保留『原查詢訊號』與加上『pseudo-doc 擴充』。
+
+    塊A 只含原查詢詞彙、塊B 只含 pseudo-doc 詞彙：
+      純查詢→只中A、純 pseudo（舊取代行為）→只中B、串接（新行為）→A、B 都中。
+    """
+    A, B = "整體壅塞情勢嚴重", "替代道路分流引導"
+    rag_store.add_text("A", A)
+    rag_store.add_text("B", B)
+    q, doc = "整體壅塞", "散場替代道路分流"
+    query_only = set(rag_store.retrieve(q, k=5))
+    pseudo_only = set(rag_store.retrieve(doc, k=5))         # 舊「取代」行為
+    concat = set(rag_store.retrieve(rag_query.hyde_expand(q, lambda p, **k: doc), k=5))
+    assert A in query_only and B not in query_only          # 純查詢漏掉 B
+    assert B in pseudo_only and A not in pseudo_only         # 純 pseudo（舊行為）漏掉 A
+    assert A in concat and B in concat                       # 串接：A、B 都召回
 
 
 # ---- agent profile 生成接 RAG（共用同一 rag_store + profile 專屬查詢）----

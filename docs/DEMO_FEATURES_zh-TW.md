@@ -99,8 +99,9 @@ population_csv、signals_json、dest_lat/lng + dest_town、map center/zoom。引
 - 注入點：`decision_making.run_decision_making` 回 `(LLM 文字, provenance)`；provenance 隨回傳值經 `llm_adapter → engine` 上送。
 - **provenance 顯示**：決策日誌每步顯示「本批參考知識 N 段」（面向色標+來源#塊號+預覽），**點擊看完整片段+相似度**——讓決策的在地知識依據可被檢視。
 - 協定：`GET /api/rag/status`、`POST /api/rag/add`{name,text}、`/api/rag/clear`、`/api/rag/toggle`。
-- HyDE（opt-in，`rag_store.hyde_enabled`，**預設關**）：語料夠大（塊數 > `HYDE_GATE_CHUNKS`）時，先把各子查詢改寫成「假想手冊片段」再檢索，
-  橋接「現狀描述↔文件規範」落差；每子查詢多一次輕量 LLM 生成，失敗自動降級。短語料不划算 → 自動走純檢索。
+- pseudo-document 查詢擴充（opt-in，`rag_store.hyde_enabled`，**預設關**）：語料夠大（塊數 > `HYDE_GATE_CHUNKS`）時，用 LLM 生「假想手冊片段」
+  **串接在原查詢後**（原查詢重複 `HYDE_QUERY_REPEAT` 次平衡權重）再檢索，橋接「現狀描述↔文件規範」落差；每子查詢多一次輕量 LLM 生成，失敗自動降級。短語料不划算 → 純檢索。
+  （Query2Doc 式、sparse 設定；概念源自 HyDE 但原為 dense，詳見 `PAPER_SYSTEM_DESIGN_zh-TW.md` §20。）
 - 誠實定位：上傳「真正影響決策的知識」（交通管制計畫、疏運手冊）才有意義；只透過「LLM 選 action_mode」影響模擬、不修路網/號誌/需求/人口。
 
 ## 8. 自然語言介入（P2⑨）

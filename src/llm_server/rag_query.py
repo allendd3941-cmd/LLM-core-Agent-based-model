@@ -134,11 +134,22 @@ def build_profile_subqueries() -> dict[str, str]:
 _HYDE_SYS = "你是交通疏運與管制領域的助理，只輸出一段建議文字。"
 
 
-def hyde_expand(query: str, generate) -> str:
-    """HyDE：把查詢改寫成「假想的權威文件片段」再去檢索，橋接 descriptive↔prescriptive 落差。
+# 原查詢在串接結果中重複的次數：pseudo-document 較長，char n-gram TF-IDF 下會壓過原查詢的字；
+# 重複原查詢以平衡其詞頻權重。Query2Doc 對 BM25 用 5；char-TF-IDF 最佳值不同，預設保守 3（可調）。
+HYDE_QUERY_REPEAT = 3
 
-    ``generate`` 為可呼叫物件（通常傳 ``llm_client.generate``）。生成失敗/空 → 回原 query（降級，不影響檢索）。
-    僅在 rag_store.hyde_active() 為真時被呼叫（長文件才划算）。
+
+def hyde_expand(query: str, generate) -> str:
+    """以 LLM 生成的 pseudo-document 做「查詢擴充」：把假想文件**串接**在原查詢之後（原查詢
+    重複 ``HYDE_QUERY_REPEAT`` 次以平衡權重），橋接 descriptive↔prescriptive 落差。
+
+    這是 **Query2Doc**（Wang, Yang & Wei, EMNLP 2023）式的查詢擴充，套用在本專案的 char n-gram
+    TF-IDF（sparse/lexical）檢索上；概念源自 HyDE（Gao et al., ACL 2023），但 HyDE 原為
+    zero-shot **dense** 檢索（靠 dense encoder 去噪），故此處改採「串接、保留原查詢詞」而非「取代」，
+    以免 lexical 檢索丟失原查詢訊號、且更抗 LLM 漂移。
+
+    ``generate`` 為可呼叫物件（通常傳 ``llm_client.generate``）。生成失敗/空 → 回原 query
+    （降級、不串接、等同無擴充）。僅在 rag_store.hyde_active() 為真時被呼叫（語料夠大才划算）。
     """
     if not query:
         return query
@@ -149,6 +160,9 @@ def hyde_expand(query: str, generate) -> str:
     try:
         out = generate(prompt, system=_HYDE_SYS, think="low", label="hyde")
         out = (out or "").strip()
-        return out or query
-    except Exception:  # noqa: BLE001  HyDE 失敗一律降級回原 query
+    except Exception:  # noqa: BLE001  生成失敗一律降級回原 query
         return query
+    if not out:
+        return query
+    # Query2Doc 式串接：原查詢（重複 n 次平衡權重）+ pseudo-document
+    return ((query + " ") * HYDE_QUERY_REPEAT + out).strip()

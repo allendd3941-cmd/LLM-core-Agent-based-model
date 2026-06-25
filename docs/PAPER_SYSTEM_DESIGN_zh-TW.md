@@ -380,9 +380,14 @@ HTTP（`web/app.py`）：`/`、`/ws`、`/healthz`、`/api/llm/models`、`/api/ra
 **論文定位與引用**（誠實、不過度宣稱）：基底為 **Naive RAG（Lewis et al., 2020；分類見 Gao et al., 2023 survey「Naive/Advanced/Modular RAG」）**；
 查詢端用 **multi-query + RRF**（RAG-Fusion；RRF＝Cormack et al., 2009《Reciprocal Rank Fusion outperforms Condorcet…》），屬 survey 的
 **Advanced RAG → Query Transformation**；provenance 透明化承接 **Self-RAG（Asai et al., 2024）「檢索內容應可被檢視」** 的精神（未做整套反思）。
-HyDE（Gao et al., 2022）已實作為**長文件查詢增強的 opt-in**（`rag_query.hyde_expand`）：`rag_store.hyde_active()`＝`hyde_enabled`
-（**預設關閉**）且語料塊數 > `HYDE_GATE_CHUNKS=50` 時，先用 LLM 把各子查詢改寫成「假想手冊片段」再檢索（橋接 descriptive↔prescriptive；
-每子查詢多一次輕量生成，失敗自動降級回原 query）；短語料不划算 → 走純檢索。**引用年份/venue 入稿前請再核對**。
+LLM **pseudo-document 查詢擴充**（`rag_query.hyde_expand`）已實作為 opt-in：`rag_store.hyde_active()`＝`hyde_enabled`
+（**預設關閉**）且語料塊數 > `HYDE_GATE_CHUNKS=50` 時，用 LLM 把各子查詢生成「假想手冊片段」，**串接在原查詢之後**
+（原查詢重複 `HYDE_QUERY_REPEAT=3` 次以平衡 char n-gram TF-IDF 詞頻權重）再檢索（橋接 descriptive↔prescriptive；
+每子查詢多一次輕量生成，失敗自動降級回原 query）；短語料不划算 → 走純檢索。
+⚠ **引用對齊**：本專案 retriever 為 **char n-gram TF-IDF（sparse/lexical）**，故主引 **Query2Doc（Wang, Yang & Wei, EMNLP 2023）**
+（LLM pseudo-doc 擴充、在 sparse retriever 上驗證、且**串接保留原查詢詞**）；**HyDE（Gao et al., ACL 2023）為概念源頭**但原屬
+zero-shot **dense** 檢索（dense encoder 去噪）、做法為「取代」，與本 sparse 設定不同——勿直接以 HyDE 當 sparse 做法的 justification。
+若要名正言順 dense-HyDE 需換 dense embedding retriever（列 future work）。**引用年份/venue 入稿前請再核對**。
 
 **ablation（免改 code，靠旗標切換）**：四段對照——`無 RAG`（`enabled=False`）→ `single`（`query_mode="single"`，只用 perception）→
 `multi`（預設，多重查詢+RRF）→ `multi+HyDE`（`hyde_enabled=True` 且語料夠大）；固定 seed、同一情境，比同一指標（散場清空時間／停等分布是否更貼近上傳報告）。
