@@ -1879,10 +1879,13 @@ class SimulationEngine:
 
         ``case`` ∈ {"weekend","weekday"}：決定時間視窗起點（weekend 14:00 / weekday 16:30）與檔名。
         zip 內含三檔：
-          - ``<case>_gameday.csv``    每相機每 5 分鐘「事件車-only」通過數（= doc_count；對應 observed impact）。
-          - ``<case>_nogameday.csv``  同結構、doc_count 全 0（模型在非球賽日無事件車流；供 main.py game−nogame）。
+          - ``<case>_gameday.csv``    每相機每 5 分鐘三種流量：``doc_count``＝事件車-only（對應 observed impact）、
+                                      ``total_count``＝總流量（事件+背景）、``background_count``＝背景車（=總−事件）。
+          - ``<case>_nogameday.csv``  同結構、三流量全 0（模型在非球賽日無事件車流；供 main.py game−nogame）。
           - ``<case>_run_params.csv`` 本次模擬所有參數（供 paper 標註）。
-        欄位對齊 observed report：``camera_name,device_group_id,stream_id,time_start,doc_count,avg_speed``。
+        欄位：``camera_name,device_group_id,stream_id,time_start,doc_count,avg_speed,total_count,background_count``。
+        前 6 欄（含 doc_count）名稱與順序與 observed report 完全不變（向後相容）；新增兩欄追加在末尾，
+        且每列滿足 ``total_count == doc_count + background_count``。
         只匯出帶 ext_id（相機 UUID）的偵測器，以 ``device_group_id=UUID`` 與真實相機配對。
         """
         import csv as _csv
@@ -1911,21 +1914,29 @@ class SimulationEngine:
             return [int(sum(series[k * steps_per_bin:(k + 1) * steps_per_bin])) for k in range(n_bins)]
 
         cams = [d for d in self._detectors if d.get("ext_id")]
-        fields = ["camera_name", "device_group_id", "stream_id", "time_start", "doc_count", "avg_speed"]
+        # doc_count 維持＝事件車-only（co-author impact 計算讀此欄，語意不可變）。
+        # 末尾追加 total_count（總流量）/ background_count（背景＝總−事件）→ 原 6 欄名稱與順序不變，向後相容。
+        fields = ["camera_name", "device_group_id", "stream_id", "time_start",
+                  "doc_count", "avg_speed", "total_count", "background_count"]
 
         def build_rows(zero: bool) -> list[dict[str, object]]:
             rows: list[dict[str, object]] = []
             for d in cams:
-                ev = binned(self._detector_series_event.get(d["id"], []))
+                ev = binned(self._detector_series_event.get(d["id"], []))   # 事件車（現有）
+                tot = binned(self._detector_series.get(d["id"], []))        # 總流量（資料已在 _update_detectors 收集）
                 for k in range(n_bins):
                     ts = window_start + timedelta(minutes=5 * k)
+                    ev_k = 0 if zero else ev[k]
+                    tot_k = 0 if zero else tot[k]
                     rows.append({
                         "camera_name": d.get("ext_name") or d.get("label", ""),
                         "device_group_id": d["ext_id"],
                         "stream_id": "",
                         "time_start": ts.strftime("%Y-%m-%d %H:%M:%S"),
-                        "doc_count": 0 if zero else ev[k],
+                        "doc_count": ev_k,
                         "avg_speed": "",
+                        "total_count": tot_k,
+                        "background_count": max(0, tot_k - ev_k),  # 背景＝總−事件；clamp≥0 防 dedup 邊界負值
                     })
             return rows
 

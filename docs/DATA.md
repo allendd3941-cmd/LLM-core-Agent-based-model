@@ -124,13 +124,21 @@ observed report CSVs, i.e. the join key for pairing each real camera with its si
 
 **Exporting validation CSVs.** After running a scenario in the demo, the "匯出驗證 CSV" control
 (`export_validation` WS action → `engine.export_validation_csv(case)`) writes a zip containing
-`<case>_gameday.csv` (per-camera 5-minute **event-vehicle** passage counts, keyed by `device_group_id`=UUID),
+`<case>_gameday.csv` (per-camera 5-minute passage counts, keyed by `device_group_id`=UUID),
 `<case>_nogameday.csv` (all zeros — the model produces no event traffic on a non-game day), and
 `<case>_run_params.csv` (the run's parameters, for paper annotation). `case`∈{weekend,weekday} sets the
 clock window (14:00 / 16:30) and filename that the validation script expects; the simulation itself only
 needs to cover two hours (relative time is mapped to the window at export). Run weekend-game and
 weekday-game once each, unzip the four CSVs into the validation handoff's `simulation_result/`, and run
 `python main.py --max-distance-km 5`.
+
+Each gameday/nogameday row carries **three flow columns**:
+`doc_count` = **event-vehicle** flow (unchanged; the validation script reads this for game−nogame impact),
+`total_count` = **all-vehicle** flow (event + background), and `background_count` = **background-vehicle**
+flow (= `total_count − doc_count`). Every row satisfies `total_count == doc_count + background_count`.
+The first six columns (`camera_name,device_group_id,stream_id,time_start,doc_count,avg_speed`) keep their
+names and order; `total_count`/`background_count` are appended at the end, so the existing validation
+pipeline is unaffected.
 
 ## Generated Outputs
 
