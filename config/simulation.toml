@@ -253,48 +253,48 @@ step_minutes_options = [1, 2, 5, 10]
 [highway_specs.motorway]
 speed_car = 100
 speed_moto = 80
-lanes = 3
+lanes = 5
 
 [highway_specs.trunk]
 speed_car = 100
 speed_moto = 80
-lanes = 2
+lanes = 5
 
 [highway_specs.primary]
 speed_car = 70
 speed_moto = 70
-lanes = 2
+lanes = 5
 
 [highway_specs.secondary]
 speed_car = 60
 speed_moto = 60
-lanes = 2
+lanes = 3
 
 [highway_specs.tertiary]
 speed_car = 60
 speed_moto = 60
-lanes = 1
+lanes = 2
 
 [highway_specs.residential]
 speed_car = 60
 speed_moto = 60
-lanes = 1
+lanes = 2
 
 [highway_specs.unclassified]
 speed_car = 60
 speed_moto = 60
-lanes = 1
+lanes = 2
 
 [highway_specs.service]
 speed_car = 40
 speed_moto = 40
-lanes = 1
+lanes = 2
 
 # 未列出的 highway 型別套用此預設
 [highway_specs.default]
 speed_car = 70
 speed_moto = 70
-lanes = 2
+lanes = 3
 
 # UXsim 後端全域設定（僅 LLM_ABM_ENGINE=uxsim 時生效；見 docs/UXSIM_MIGRATION_zh-TW.md）
 [uxsim]
