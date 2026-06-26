@@ -1,0 +1,59 @@
+%% LLM-ABM Traffic Simulator — system architecture (landscape / left-to-right)
+%% Render at https://mermaid.live ; then beautify in figurelab.
+%% Technique: overall LR, each subsystem uses `direction TB` -> compact vertical clusters arranged horizontally.
+flowchart LR
+  %% ===== Inputs (left) =====
+  subgraph INPUTS["Spatial · Demand · Data (init / inputs)"]
+    direction TB
+    DATA["Data Artifacts<br/>graphml · signals.json · population.csv · cameras.csv · stadium.shp · RAG corpus"]
+    SP["Spatial Build<br/>road_network (OSM→graphml) · signals · gis_loader"]
+    DEM["Demand — Gravity<br/>event: attraction-constrained<br/>background: production-constrained"]
+    DATA -->|"graphml · signals · population · stadium · cameras"| SP
+  end
+
+  %% ===== Simulation core (centre) =====
+  subgraph CORE["Simulation Core"]
+    direction TB
+    ENG["Simulation Engine<br/>step loop: decide → inject routes → physics → readback → detectors → snapshot"]
+    UX["Mesoscopic Physics — UXsim<br/>Newell car-following / kinematic wave + DUO route choice"]
+    ENG -->|"build World; inject routes (action_mode); exec_simulation(t)"| UX
+    UX -->|"readback: vehicles → road flow & occupancy (congestion)"| ENG
+  end
+
+  %% ===== Cognition (below core) =====
+  subgraph COG["LLM Cognition + RAG"]
+    direction TB
+    PER["Perception<br/>deterministic env text"]
+    RAG["RAG<br/>rag_query → rag_store<br/>TF-IDF char n-gram + RRF · Query2Doc expand"]
+    DEC["LLM Decision<br/>decision_making"]
+    GEN["Persona Generation<br/>profile_pool · agent_profile"]
+    LLM["LLM backend<br/>vLLM / ollama"]
+    PER -->|"sub-queries (road / task / persona)"| RAG
+    RAG -->|"retrieved chunks + provenance"| DEC
+    DEC -->|"prompt"| LLM
+    LLM -->|"JSON: agent → action mode"| DEC
+    GEN -->|"profile sub-queries (demographic / mode / activity) + prompt"| LLM
+    LLM -->|"20k personas (identity + traits)"| GEN
+  end
+
+  %% ===== Interface (right) =====
+  subgraph IFACE["Interface"]
+    direction TB
+    WEB["FastAPI + WebSocket<br/>app.py · websocket.py"]
+    FE["Browser UI<br/>Leaflet map · live charts · control panel"]
+    FE -->|"control: start / step / apply_config / set_mode / export …"| WEB
+    WEB -->|"init_payload + per-step snapshot"| FE
+  end
+
+  OUT["Outputs<br/>validation CSV (event / total / background)<br/>GIS (LOS / flow / congestion)"]
+
+  %% ===== Cross-subsystem flows =====
+  SP -->|"RoadNetwork · SignalSystem · towns+population · stadium xy"| ENG
+  DEM -->|"event origins / background OD  (population × distance-decay)"| ENG
+  DATA -->|"uploaded docs → chunk + index"| RAG
+  ENG -->|"step state (traffic + agents) + persona batch"| PER
+  DEC -->|"action_mode (fast / avoid / tolerate) + reason + provenance"| ENG
+  GEN -->|"assign personas (decoupled from origin)"| ENG
+  ENG -->|"initialize() / step()"| WEB
+  WEB -->|"SimulationState"| ENG
+  ENG -->|"detector counts · road LOS / flow / congestion"| OUT
