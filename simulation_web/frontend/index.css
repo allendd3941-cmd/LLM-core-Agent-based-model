@@ -156,6 +156,7 @@ body {
 .card {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg);
   overflow: hidden;
+  flex-shrink: 0;   /* 在可捲動的 flex 面板裡不被壓縮(否則 overflow:hidden 會讓卡片縮小裁切、面板不捲動) */
 }
 .card h2 {
   font-size: 11px; font-weight: 500; margin: 0; color: var(--text-dim);
@@ -443,20 +444,22 @@ h3.sub.layer-tag { color: var(--text); border-left: 3px solid var(--accent); bor
 
 /* ── 對話 ─────────────────────────────────────── */
 .chat-wrap { max-width: 760px; }
-.chat-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+/* chat 欄:只有 chat-log 伸縮填滿+內捲,其餘固定高度(不被一起放大/裁切) */
+.chat-wrap > .seg, .chat-wrap > .hint { flex: 0 0 auto; }
+.chat-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; flex: 0 0 auto; }
 .chat-chips .chip { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border);
   border-radius: var(--r-sm); padding: 4px 10px; font-size: 11px; cursor: pointer; transition: .12s; }
 .chat-chips .chip:hover { color: var(--accent-deep); border-color: var(--accent); }
-.chat-log { max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.chat-log { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .chat-msg { font-size: 12px; padding: 7px 10px; border-radius: var(--r-sm); white-space: pre-wrap; max-width: 88%; line-height: 1.6; animation: fadein .2s; }
 .chat-user { align-self: flex-end; background: var(--accent-soft); border: 1px solid var(--accent); color: var(--text); }
 .chat-bot { align-self: flex-start; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-.chat-input { display: flex; gap: 6px; }
+.chat-input { display: flex; gap: 6px; flex: 0 0 auto; }
 .chat-input input { flex: 1; min-width: 0; background: var(--surface); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 10px; font-size: 12.5px; font-family: var(--font); }
 .chat-input input:focus { border-color: var(--accent); outline: none; }
 .chat-input .seg-btn { flex: 0 0 44px; border: 1px solid var(--border); border-radius: var(--r-sm); }
-.btn-clear-intv { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--r-sm); max-width: 160px; }
+.btn-clear-intv { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--r-sm); max-width: 160px; flex: 0 0 auto; }
 
 /* ── 日誌分頁 ─────────────────────────────────── */
 .log-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
