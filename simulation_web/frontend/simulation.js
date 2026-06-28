@@ -238,7 +238,7 @@ const TrafficUI = (() => {
       `<p class="hint">${T("上傳本專案格式的路網 graphml（由 build_scenario / build_roads 產生）＋選填人口 CSV。")}</p>`
       + `<div class="prompt-field"><label>${T("場景 key（英數）")}</label><input id="up-key" type="text" /></div>`
       + `<div class="prompt-field"><label>${T("顯示名稱")}</label><input id="up-name" type="text" /></div>`
-      + `<div class="prompt-field"><label>${T("縣市篩選（如 高雄）")}</label><input id="up-county" type="text" value="臺南|台南" /></div>`
+      + `<div class="prompt-field"><label>${T("縣市篩選（如 高雄）")}</label><input id="up-county" type="text" placeholder="optional · OSM county name(s)" /></div>`
       + `<div class="prompt-field"><label>${T("目的地 lat / lng / 區名")}</label>`
       + `<input id="up-lat" type="text" placeholder="lat" /> <input id="up-lng" type="text" placeholder="lng" /> <input id="up-town" type="text" placeholder="${T("區名")}" /></div>`
       + `<div class="prompt-field"><label>${T("路網 graphml")}</label><input id="up-graphml" type="file" accept=".graphml,.xml" /></div>`
