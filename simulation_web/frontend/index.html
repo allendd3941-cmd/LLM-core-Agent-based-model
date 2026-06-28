@@ -240,6 +240,29 @@
           <div><span class="lg-dot lg-ag-ambient"></span>背景常態車流</div>
           <div><span class="lg lg-dest"></span>目的地（球場）</div>
         </div>
+
+        <!-- 浮動聊天機器人(地圖左下角):圓鈕 → 彈出對話框 -->
+        <button id="chat-fab" class="chat-fab" title="Assistant" aria-label="Open assistant"><i class="ti ti-message-chatbot" aria-hidden="true"></i></button>
+        <div id="chat-popup" class="chat-popup" hidden>
+          <div class="chat-popup-head">
+            <span><i class="ti ti-message-chatbot" aria-hidden="true"></i> Assistant</span>
+            <button id="chat-popup-close" class="mini-btn" title="Close" aria-label="Close chat"><i class="ti ti-x" aria-hidden="true"></i></button>
+          </div>
+          <div class="chat-wrap">
+            <div class="seg seg-sm">
+              <button id="chat-mode-ask" class="seg-btn active"><i class="ti ti-help-circle" aria-hidden="true"></i> 問（唯讀）</button>
+              <button id="chat-mode-act" class="seg-btn"><i class="ti ti-wand" aria-hidden="true"></i> 介入</button>
+            </div>
+            <p class="hint" id="chat-hint">暫停時詢問當前路況（唯讀）。</p>
+            <div class="chat-chips" id="chat-chips"></div>
+            <div id="chat-log" class="chat-log"></div>
+            <div class="chat-input">
+              <input id="chat-text" type="text" placeholder="輸入問題後按 Enter…" />
+              <button id="chat-send" class="seg-btn"><i class="ti ti-send" aria-hidden="true"></i></button>
+            </div>
+            <button id="btn-clear-intervene" class="seg-btn btn-clear-intv"><i class="ti ti-eraser" aria-hidden="true"></i> 清除介入</button>
+          </div>
+        </div>
       </div>
 
       <!-- 可拖曳分隔條：調整底部面板高度（雙擊還原） -->
@@ -251,7 +274,6 @@
           <div class="tabbar">
             <button class="tab-btn active" data-tab="live"><i class="ti ti-chart-line" aria-hidden="true"></i> 即時</button>
             <button class="tab-btn" data-tab="analysis"><i class="ti ti-chart-histogram" aria-hidden="true"></i> 分析</button>
-            <button class="tab-btn" data-tab="chat"><i class="ti ti-message-2" aria-hidden="true"></i> 對話</button>
             <button class="tab-btn" data-tab="log"><i class="ti ti-terminal-2" aria-hidden="true"></i> 日誌</button>
           </div>
           <button id="btn-dock-toggle" class="dock-toggle" data-tip="收合 / 展開"><i class="ti ti-chevron-down" aria-hidden="true"></i></button>
@@ -329,23 +351,6 @@
               </div>
             </section>
             <p class="hint dock-empty" id="analysis-empty">模擬完成後在此顯示交通分析。</p>
-          </div>
-
-          <div class="tab-pane" id="tab-chat">
-            <div class="chat-wrap">
-              <div class="seg seg-sm">
-                <button id="chat-mode-ask" class="seg-btn active"><i class="ti ti-help-circle" aria-hidden="true"></i> 問（唯讀）</button>
-                <button id="chat-mode-act" class="seg-btn"><i class="ti ti-wand" aria-hidden="true"></i> 介入</button>
-              </div>
-              <p class="hint" id="chat-hint">暫停時詢問當前路況（唯讀）。</p>
-              <div class="chat-chips" id="chat-chips"></div>
-              <div id="chat-log" class="chat-log"></div>
-              <div class="chat-input">
-                <input id="chat-text" type="text" placeholder="輸入問題後按 Enter…" />
-                <button id="chat-send" class="seg-btn"><i class="ti ti-send" aria-hidden="true"></i></button>
-              </div>
-              <button id="btn-clear-intervene" class="seg-btn btn-clear-intv"><i class="ti ti-eraser" aria-hidden="true"></i> 清除介入</button>
-            </div>
           </div>
 
           <div class="tab-pane" id="tab-log">

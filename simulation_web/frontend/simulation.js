@@ -192,6 +192,19 @@ const TrafficUI = (() => {
     if (ci) ci.onclick = () => send("clear_intervention");
     if ($("chat-chips")) setChatMode("ask");
 
+    // 浮動聊天機器人:圓鈕開關彈出對話框(內容/ID 與原對話分頁相同,行為不變)
+    const chatFab = $("chat-fab"), chatPop = $("chat-popup"), chatPopClose = $("chat-popup-close");
+    if (chatFab && chatPop) {
+      const showChat = (on) => {
+        const open = (on === undefined) ? chatPop.hasAttribute("hidden") : on;
+        if (open) chatPop.removeAttribute("hidden"); else chatPop.setAttribute("hidden", "");
+        chatFab.classList.toggle("active", open);
+        if (open) { const t = $("chat-text"); if (t) t.focus(); }
+      };
+      chatFab.onclick = () => showChat();
+      if (chatPopClose) chatPopClose.onclick = () => showChat(false);
+    }
+
     const ragBtn = $("btn-rag");
     if (ragBtn) ragBtn.onclick = openRag;
     const upBtn = $("btn-upload-scenario");

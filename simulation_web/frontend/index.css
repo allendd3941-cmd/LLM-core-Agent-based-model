@@ -285,12 +285,40 @@ body.mode-llm .llm-only { display: block; }
 .kpi b { font-size: 17px; font-weight: 500; color: var(--text); font-family: var(--mono); }
 
 .legend {
-  position: absolute; bottom: 12px; left: 12px; z-index: 600;
+  position: absolute; bottom: 22px; right: 12px; z-index: 600;
   background: var(--glass); border: 1px solid var(--border);
   border-radius: var(--r-sm); padding: 8px 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;
 }
 .legend div { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
 .lg { width: 14px; height: 5px; display: inline-block; }
+
+/* 浮動聊天機器人:地圖左下角圓鈕 + 彈出對話框 */
+.chat-fab {
+  position: absolute; left: 14px; bottom: 14px; z-index: 1000;
+  width: 54px; height: 54px; border-radius: 50%; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #fff; border: none; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(20, 40, 80, .28); font-size: 24px;
+  transition: transform .15s ease, background .15s ease;
+}
+.chat-fab:hover { background: var(--accent-deep); transform: translateY(-1px); }
+.chat-fab.active { background: var(--accent-deep); }
+.chat-popup {
+  position: absolute; left: 14px; bottom: 80px; z-index: 1001;
+  width: 330px; max-width: calc(100% - 28px);
+  height: 58%; min-height: 280px; max-height: 470px;
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: 0 8px 28px rgba(20, 40, 80, .22); overflow: hidden;
+}
+.chat-popup[hidden] { display: none; }
+.chat-popup-head {
+  display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto;
+  padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--bg);
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.chat-popup-head span { display: flex; align-items: center; gap: 6px; }
+.chat-popup .chat-wrap { flex: 1; min-height: 0; padding: 10px 12px; max-width: none; }
 .lg-green { background: var(--c-free); } .lg-yellow { background: var(--c-light); }
 .lg-orange { background: var(--c-heavy); } .lg-red { background: var(--c-severe); }
 .lg-dest { background: var(--c-severe); border-radius: 50%; width: 10px; height: 10px; }

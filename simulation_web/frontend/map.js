@@ -120,7 +120,7 @@ const TrafficMap = (() => {
     baseLayers[T("淺色（CARTO Positron）")].addTo(map);  // 預設底圖：淺色(配淺色 UI);key 已 i18n，查找用同一個 T()
     L.control.layers(baseLayers, null, { position: "topright" }).addTo(map);
     addAppearanceControl();
-    L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(map);
+    L.control.scale({ metric: true, imperial: false, position: "topleft" }).addTo(map);
 
     // 游標座標 / zoom → QGIS 式狀態列(元素不在則略過)
     map.on("mousemove", (e) => {
