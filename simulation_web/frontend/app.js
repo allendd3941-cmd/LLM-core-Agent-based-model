@@ -14,9 +14,9 @@
     "regenerate_profiles", "set_agents", "set_ambient", "set_max_steps", "set_step_minutes",
   ]);
   const ACTION_LABEL = {
-    start: "開始模擬", step: "單步", reset: "重設", apply_config: "套用設定",
-    set_scenario: "切換場景", regenerate_profiles: "重新生成人物", set_agents: "設定事件車數",
-    set_ambient: "設定背景車", set_max_steps: "設定週期數", set_step_minutes: "設定每週期分鐘",
+    start: T("開始模擬"), step: T("單步"), reset: T("重設"), apply_config: T("套用設定"),
+    set_scenario: T("切換場景"), regenerate_profiles: T("重新生成人物"), set_agents: T("設定事件車數"),
+    set_ambient: T("設定背景車"), set_max_steps: T("設定週期數"), set_step_minutes: T("設定每週期分鐘"),
   };
 
   function wsUrl() {
@@ -28,7 +28,7 @@
     TrafficUI.setBusyBar(true);
     TrafficUI.setRunState("busy");
     clearTimeout(busyTimer);
-    busyTimer = setTimeout(() => { endBusy(); TrafficUI.log("warn", "操作逾時（90 秒未回應），已解除忙碌狀態。"); }, 90000);
+    busyTimer = setTimeout(() => { endBusy(); TrafficUI.log("warn", "Operation timed out (no response in 90 s); cleared busy state."); }, 90000);
   }
 
   function endBusy() {
@@ -42,11 +42,11 @@
     if (ws && ws.readyState === WebSocket.OPEN) {
       if (HEAVY.has(action)) {
         beginBusy(action);
-        TrafficUI.log("info", "送出指令：" + (ACTION_LABEL[action] || action));
+        TrafficUI.log("info", "Command sent: " + (ACTION_LABEL[action] || action));
       }
       ws.send(JSON.stringify({ type: "control", action, value }));
     } else {
-      TrafficUI.log("error", "未連線，指令未送出：" + (ACTION_LABEL[action] || action));
+      TrafficUI.log("error", "Not connected; command not sent: " + (ACTION_LABEL[action] || action));
     }
   }
 
@@ -71,13 +71,13 @@
 
     ws.onopen = () => {
       TrafficUI.setConnected(true);
-      TrafficUI.log("success", "WebSocket 已連線。");
+      TrafficUI.log("success", T("WebSocket 已連線。"));
       clearTimeout(reconnectTimer);
     };
 
     ws.onclose = () => {
       TrafficUI.setConnected(false);
-      TrafficUI.log("warn", "連線中斷，2 秒後自動重連…");
+      TrafficUI.log("warn", T("連線中斷，2 秒後自動重連…"));
       endBusy();
       reconnectTimer = setTimeout(connect, 2000);
     };
@@ -96,7 +96,7 @@
           TrafficCharts.reset();
           endBusy();
           TrafficUI.setRunState("idle");
-          TrafficUI.log("success", "初始化完成，可開始模擬。");
+          TrafficUI.log("success", T("初始化完成，可開始模擬。"));
           break;
         case "state_update":
           TrafficMap.updateRoads(msg.roads);
@@ -108,19 +108,19 @@
           endBusy();
           TrafficUI.setRunState("running", msg.cycle);
           TrafficUI.log("step",
-            `第 ${msg.cycle} 步 · 抵達 ${(msg.status_distribution && msg.status_distribution.arrived) || 0}`
-            + ` · 移動 ${(msg.status_distribution && msg.status_distribution.moving) || 0}`
-            + ` · 平均壅塞 ${Number(msg.metrics.average_congestion_proxy).toFixed(2)}`);
+            `Step ${msg.cycle} · arrived ${(msg.status_distribution && msg.status_distribution.arrived) || 0}`
+            + ` · moving ${(msg.status_distribution && msg.status_distribution.moving) || 0}`
+            + ` · avg congestion ${Number(msg.metrics.average_congestion_proxy).toFixed(2)}`);
           break;
         case "analysis":
           TrafficCharts.renderAnalysis(msg);
           TrafficUI.activateTab("analysis");
           TrafficUI.expandDock();
-          TrafficUI.log("success", "交通分析已產生（分析分頁）。");
+          TrafficUI.log("success", T("交通分析已產生（分析分頁）。"));
           break;
         case "chat":
           TrafficUI.appendChat("bot", msg.text);
-          TrafficUI.log("info", "對話回覆已接收。");
+          TrafficUI.log("info", T("對話回覆已接收。"));
           break;
         case "status":
           TrafficUI.toast(msg.message);
@@ -131,14 +131,14 @@
             TrafficMap.addStagedDetector(msg.lat, msg.lng, msg.label);
             TrafficUI.onDetectorPlaced(msg.label);
           } else {
-            const d = msg.dist ? `（最近道路在 ~${Math.round(msg.dist)} m 外）` : "";
-            TrafficUI.toast("這裡離道路太遠，請靠近一點或放大地圖再放。" + d);
-            TrafficUI.log("warn", "監測器放置失敗：附近沒有道路可吸附。" + d);
+            const d = msg.dist ? ` (nearest road ~${Math.round(msg.dist)} m away)` : "";
+            TrafficUI.toast("Too far from any road; move closer or zoom in and try again." + d);
+            TrafficUI.log("warn", "Detector placement failed: no road nearby to snap to." + d);
           }
           break;
         case "download":
           triggerDownload(msg.url, msg.name);
-          TrafficUI.log("success", "已產生下載檔：" + (msg.label || msg.name));
+          TrafficUI.log("success", "Download ready: " + (msg.label || msg.name));
           break;
         case "agent_path":
           if (typeof TrafficMap !== "undefined" && TrafficMap.drawAgentPath) {
@@ -166,7 +166,7 @@
     TrafficMap.setDetectorReporter((lat, lng) => send("snap_detector", { lat, lng }));
     TrafficCharts.init();
     TrafficUI.bind(send);
-    TrafficUI.log("info", "前端介面已就緒，連線中…");
+    TrafficUI.log("info", "Frontend ready; connecting…");
     connect();
   });
 })();

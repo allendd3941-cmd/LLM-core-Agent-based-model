@@ -193,9 +193,12 @@
       </section>
 
       <section class="card">
-        <h2><i class="ti ti-car" aria-hidden="true"></i> Agent 檢視</h2>
-        <p class="hint">點地圖上的車輛查看狀態。</p>
-        <div id="agent-inspect" class="inspect">尚未選取。</div>
+        <h2><i class="ti ti-stack-2" aria-hidden="true"></i> Layers</h2>
+        <div class="layers-list">
+          <label class="lg-toggle" title="放大到街區層級才會顯示號誌"><input id="toggle-signals" type="checkbox" checked /> <i class="ti ti-traffic-lights" aria-hidden="true"></i> 號誌</label>
+          <label class="lg-toggle" title="顯示/隱藏背景常態車流"><input id="toggle-ambient" type="checkbox" checked /> <i class="ti ti-car-4wd" aria-hidden="true"></i> 背景車流</label>
+          <label class="lg-toggle" title="顯示/隱藏球場抵達圈（事件車終點分散於此圈內的停車節點）"><input id="toggle-arrival-circle" type="checkbox" checked /> <span class="lg lg-arrival" aria-hidden="true"></span> 抵達圈</label>
+        </div>
       </section>
     </aside>
 
@@ -234,10 +237,6 @@
           <div><span class="lg-dot lg-ag-arr"></span>已抵達</div>
           <div><span class="lg-dot lg-ag-ambient"></span>背景常態車流</div>
           <div><span class="lg lg-dest"></span>目的地（球場）</div>
-          <div class="lg-sep"></div>
-          <label class="lg-toggle" title="放大到街區層級才會顯示號誌"><input id="toggle-signals" type="checkbox" checked /> <i class="ti ti-traffic-lights" aria-hidden="true"></i> 號誌</label>
-          <label class="lg-toggle" title="顯示/隱藏背景常態車流"><input id="toggle-ambient" type="checkbox" checked /> <i class="ti ti-car-4wd" aria-hidden="true"></i> 背景車流</label>
-          <label class="lg-toggle" title="顯示/隱藏球場抵達圈（事件車終點分散於此圈內的停車節點）"><input id="toggle-arrival-circle" type="checkbox" checked /> <span class="lg lg-arrival" aria-hidden="true"></span> 抵達圈</label>
         </div>
       </div>
 
@@ -365,7 +364,46 @@
         </div>
       </div>
     </section>
+
+    <!-- ── 右：Vehicle Inspector(專屬 dock)── -->
+    <aside class="panel panel-right">
+      <section class="card">
+        <h2><i class="ti ti-car" aria-hidden="true"></i> Vehicle inspector</h2>
+        <p class="hint">點地圖上的車輛查看狀態。</p>
+        <div id="agent-inspect" class="inspect">尚未選取。</div>
+      </section>
+    </aside>
   </main>
+
+  <!-- ── 底部：Timeline 進度 scrubber(唯讀)── -->
+  <div class="timeline" id="timeline">
+    <div class="tl-head">
+      <span class="tl-label">Timeline</span>
+      <span class="tl-phase active" id="tl-phase-ingress">進場</span>
+      <span class="phase-arrow">→</span>
+      <span class="tl-phase" id="tl-phase-egress">散場</span>
+      <span class="tl-spacer"></span>
+      <span class="tl-time" id="tl-elapsed">0 分</span>
+      <span class="tl-time" id="tl-progress">0 / 0</span>
+    </div>
+    <div class="tl-track" id="tl-track">
+      <div class="tl-fill" id="tl-fill"></div>
+      <svg class="tl-spark" viewBox="0 0 600 14" preserveAspectRatio="none" aria-hidden="true"><polyline id="tl-spark-line" points="" fill="none" stroke="#7aa7c6" stroke-width="1.4"/></svg>
+      <div class="tl-head-pos" id="tl-head-pos" style="left:0%"></div>
+      <div class="tl-knob" id="tl-knob" style="left:0%"></div>
+    </div>
+  </div>
+
+  <!-- ── 底部：QGIS 式狀態列 ── -->
+  <div class="statusbar" id="statusbar">
+    <span id="sb-coord">—</span>
+    <span id="sb-zoom">Zoom —</span>
+    <span>EPSG:4326</span>
+    <span id="sb-scenario" class="sb-em">—</span>
+    <span class="sb-spacer"></span>
+    <span id="sb-cycle">—</span>
+    <span id="sb-conn" class="sb-off">● offline</span>
+  </div>
 
   <div id="toast" class="toast"></div>
 
@@ -386,6 +424,8 @@
     </div>
   </div>
 
+  <!-- i18n：UI 介面文字中→英(論文截圖用);必須在其他前端模組之前載入(頂層用到 T()) -->
+  <script src="i18n.js"></script>
   <script src="map.js"></script>
   <script src="charts.js"></script>
   <script src="simulation.js"></script>

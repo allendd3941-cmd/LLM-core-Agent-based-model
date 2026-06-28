@@ -28,8 +28,8 @@ const TrafficCharts = (() => {
     congestionChart = new Chart(document.getElementById("chart-congestion"), {
       type: "line",
       data: { labels: [], datasets: [
-        { label: "平均壅塞", data: [], borderColor: "#FF8A3D", backgroundColor: "rgba(255,138,61,.15)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "壅塞路段數", data: [], borderColor: "#FF4D4D", tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: T("平均壅塞"), data: [], borderColor: "#FF8A3D", backgroundColor: "rgba(255,138,61,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: T("壅塞路段數"), data: [], borderColor: "#FF4D4D", tension: .3, pointRadius: 0, yAxisID: "y1" },
       ] },
       options: { ...lineOpts(1), scales: { ...lineOpts(1).scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
     });
@@ -37,15 +37,15 @@ const TrafficCharts = (() => {
     arrivedChart = new Chart(document.getElementById("chart-arrived"), {
       type: "line",
       data: { labels: [], datasets: [
-        { label: "已抵達", data: [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "移動中", data: [], borderColor: "#3FB6FF", tension: .3, pointRadius: 0 },
+        { label: T("已抵達"), data: [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: T("移動中"), data: [], borderColor: "#3FB6FF", tension: .3, pointRadius: 0 },
       ] },
       options: lineOpts(),
     });
 
     modeChart = new Chart(document.getElementById("chart-mode"), {
       type: "bar",
-      data: { labels: [], datasets: [{ label: "累積選擇次數", data: [], backgroundColor: "#3FB6FF" }] },
+      data: { labels: [], datasets: [{ label: T("累積選擇次數"), data: [], backgroundColor: "#3FB6FF" }] },
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true, ticks: { stepSize: 1 } } } },
     });
@@ -135,18 +135,18 @@ const TrafficCharts = (() => {
     const s = data.summary || {};
     const sum = document.getElementById("analysis-summary");
     if (sum) sum.innerHTML =
-      `<div class="row"><span>抵達率</span><b>${s.arrived}/${s.total_agents}（${s.arrival_pct}%）</b></div>`
-      + `<div class="row"><span>平均旅行時間</span><b>${s.avg_travel_min} 分</b></div>`
-      + `<div class="row"><span>號誌停等總次數</span><b>${s.total_signal_stops}</b></div>`;
+      `<div class="row"><span>${T("抵達率")}</span><b>${s.arrived}/${s.total_agents}（${s.arrival_pct}%）</b></div>`
+      + `<div class="row"><span>${T("平均旅行時間")}</span><b>${s.avg_travel_min} min</b></div>`
+      + `<div class="row"><span>${T("號誌停等總次數")}</span><b>${s.total_signal_stops}</b></div>`;
 
     const labels = data.cycles || [];
     arrivalChart && arrivalChart.destroy();
     arrivalChart = new Chart(document.getElementById("chart-arrival"), {
       type: "line",
       data: { labels, datasets: [
-        { label: "累積抵達", data: data.cumulative_arrived || [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "每步抵達率", data: data.arrival_rate || [], borderColor: "#FFB020", tension: .3, pointRadius: 0, yAxisID: "y1" },
-        { label: "每步出發", data: data.departures || [], borderColor: "#B388FF", borderDash: [4, 3], tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: T("累積抵達"), data: data.cumulative_arrived || [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: T("每步抵達率"), data: data.arrival_rate || [], borderColor: "#FFB020", tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: T("每步出發"), data: data.departures || [], borderColor: "#B388FF", borderDash: [4, 3], tension: .3, pointRadius: 0, yAxisID: "y1" },
       ] },
       options: { ...lineOpts(), scales: { ...lineOpts().scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
     });
@@ -155,7 +155,7 @@ const TrafficCharts = (() => {
     travelChart && travelChart.destroy();
     travelChart = new Chart(document.getElementById("chart-traveltime"), {
       type: "bar",
-      data: { labels: h.labels, datasets: [{ label: "agent 數", data: h.counts, backgroundColor: "#3FB6FF" }] },
+      data: { labels: h.labels, datasets: [{ label: T("agent 數"), data: h.counts, backgroundColor: "#3FB6FF" }] },
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true } } },
     });
@@ -167,8 +167,8 @@ const TrafficCharts = (() => {
     odChart = new Chart(document.getElementById("chart-od"), {
       type: "bar",
       data: { labels: od.map((r) => r[0]), datasets: [
-        { label: "實際", data: od.map((r) => r[1]), backgroundColor: "#3FB6FF" },
-        { label: "重力期望", data: od.map((r) => Math.round((expShare[r[0]] || 0) * total)), backgroundColor: "rgba(255,176,32,.7)" },
+        { label: T("實際"), data: od.map((r) => r[1]), backgroundColor: "#3FB6FF" },
+        { label: T("重力期望"), data: od.map((r) => Math.round((expShare[r[0]] || 0) * total)), backgroundColor: "rgba(255,176,32,.7)" },
       ] },
       options: { responsive: true, animation: false, plugins: { legend: { labels: { boxWidth: 12 } } },
         scales: { x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 60 } }, y: { grid: { color: GRID }, beginAtZero: true } } },
@@ -207,11 +207,11 @@ const TrafficCharts = (() => {
     const viewEl = document.getElementById("detector-view");
     const view = (viewEl && viewEl.value) || "total";
     if (!_lastDetectors.length) {
-      box.innerHTML = '<p class="muted">尚未放置監測器（在左側「車流監測器」放置後按「套用設定」，再跑模擬）。</p>';
+      box.innerHTML = `<p class="muted">${T("尚未放置監測器（在左側「車流監測器」放置後按「套用設定」，再跑模擬）。")}</p>`;
       return;
     }
-    const VL = { total: "總車流量", car: "汽車", moto: "機車", event: "事件車", ambient: "背景車" };
-    box.innerHTML = `<table><thead><tr><th>監測器</th><th>路段</th><th>${VL[view]}</th><th>上行/下行</th><th>汽/機·事/背</th></tr></thead><tbody>`
+    const VL = { total: T("總車流量"), car: T("汽車"), moto: T("機車"), event: T("事件車"), ambient: T("背景車") };
+    box.innerHTML = `<table><thead><tr><th>${T("監測器")}</th><th>${T("路段")}</th><th>${VL[view]}</th><th>${T("上行/下行")}</th><th>${T("汽/機·事/背")}</th></tr></thead><tbody>`
       + _lastDetectors.map((d) => {
           const b = d.both || {}, a = d.dir_a || {}, bb = d.dir_b || {};
           return `<tr><td>${esc(d.id)}</td><td>${esc(d.label)}</td>`
@@ -260,7 +260,7 @@ const TrafficCharts = (() => {
       const canvas = card.querySelector("canvas");
       if (!canvas) return;
       const btn = document.createElement("button");
-      btn.className = "chart-dl"; btn.type = "button"; btn.title = "下載此圖 PNG";
+      btn.className = "chart-dl"; btn.type = "button"; btn.title = T("下載此圖 PNG");
       btn.innerHTML = '<i class="ti ti-download" aria-hidden="true"></i>';
       btn.onclick = () => {
         try {
@@ -280,22 +280,22 @@ const TrafficCharts = (() => {
   function renderEgress(eg, labels) {
     const sum = document.getElementById("egress-summary");
     if (!eg.enabled) {
-      if (sum) sum.innerHTML = `<div class="row"><span>散場</span><b>尚未宣告（按「宣告散場」後產生）</b></div>`;
+      if (sum) sum.innerHTML = `<div class="row"><span>${T("散場")}</span><b>${T("尚未宣告（按「宣告散場」後產生）")}</b></div>`;
       [egressChart, egressTravelChart, egressOdChart].forEach((c) => { if (c) c.destroy(); });
       egressChart = egressTravelChart = egressOdChart = null;
       return;
     }
     const s = eg.summary || {};
     if (sum) sum.innerHTML =
-      `<div class="row"><span>返家率</span><b>${s.returned_home}/${s.reached_stadium}（${s.return_pct}%）</b></div>`
-      + `<div class="row"><span>平均散場旅時</span><b>${s.avg_egress_travel_min} 分</b></div>`
-      + `<div class="row"><span>清場時間（90% 返家）</span><b>${s.clearance_min != null ? s.clearance_min + " 分" : "未達 90%"}</b></div>`;
+      `<div class="row"><span>${T("返家率")}</span><b>${s.returned_home}/${s.reached_stadium}（${s.return_pct}%）</b></div>`
+      + `<div class="row"><span>${T("平均散場旅時")}</span><b>${s.avg_egress_travel_min} min</b></div>`
+      + `<div class="row"><span>${T("清場時間（90% 返家）")}</span><b>${s.clearance_min != null ? s.clearance_min + " min" : T("未達 90%")}</b></div>`;
     egressChart && egressChart.destroy();
     egressChart = new Chart(document.getElementById("chart-egress"), {
       type: "line",
       data: { labels, datasets: [
-        { label: "累積返家", data: eg.cumulative_home || [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "每步離場", data: eg.departures || [], borderColor: "#FF8A3D", tension: .3, pointRadius: 0, yAxisID: "y1" },
+        { label: T("累積返家"), data: eg.cumulative_home || [], borderColor: "#2FD17A", backgroundColor: "rgba(47,209,122,.15)", fill: true, tension: .3, pointRadius: 0 },
+        { label: T("每步離場"), data: eg.departures || [], borderColor: "#FF8A3D", tension: .3, pointRadius: 0, yAxisID: "y1" },
       ] },
       options: { ...lineOpts(), scales: { ...lineOpts().scales, y1: { position: "right", grid: { display: false }, beginAtZero: true } } },
     });
@@ -303,7 +303,7 @@ const TrafficCharts = (() => {
     egressTravelChart && egressTravelChart.destroy();
     egressTravelChart = new Chart(document.getElementById("chart-egress-travel"), {
       type: "bar",
-      data: { labels: h.labels, datasets: [{ label: "agent 數", data: h.counts, backgroundColor: "#FF8A3D" }] },
+      data: { labels: h.labels, datasets: [{ label: T("agent 數"), data: h.counts, backgroundColor: "#FF8A3D" }] },
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false } }, y: { grid: { color: GRID }, beginAtZero: true } } },
     });
@@ -311,7 +311,7 @@ const TrafficCharts = (() => {
     egressOdChart && egressOdChart.destroy();
     egressOdChart = new Chart(document.getElementById("chart-egress-od"), {
       type: "bar",
-      data: { labels: od.map((r) => r[0]), datasets: [{ label: "返家數", data: od.map((r) => r[1]), backgroundColor: "#2FD17A" }] },
+      data: { labels: od.map((r) => r[0]), datasets: [{ label: T("返家數"), data: od.map((r) => r[1]), backgroundColor: "#2FD17A" }] },
       options: { responsive: true, animation: false, plugins: { legend: { display: false } },
         scales: { x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 60 } }, y: { grid: { color: GRID }, beginAtZero: true } } },
     });
@@ -322,18 +322,18 @@ const TrafficCharts = (() => {
     const los = net.los || {};
     const ns = document.getElementById("network-summary");
     if (ns) ns.innerHTML =
-      `<div class="row"><span>背景常態車流</span><b>${net.ambient_count || 0} 台</b></div>`
-      + `<div class="row"><span>服務水準 LOS（平均 / 尖峰）</span><b>${los.mean_grade || "—"} / ${los.peak_grade || "—"}</b></div>`
-      + `<div class="row"><span>平均 / 尖峰壅塞</span><b>${(los.mean_congestion || 0).toFixed(2)} / ${(los.peak_congestion || 0).toFixed(2)}</b></div>`
-      + `<div class="row"><span>路網負載占比（事件 / 背景）</span><b>${net.event_load_share || 0}% / ${net.ambient_load_share || 0}%</b></div>`;
+      `<div class="row"><span>${T("背景常態車流")}</span><b>${net.ambient_count || 0} veh</b></div>`
+      + `<div class="row"><span>${T("服務水準 LOS（平均 / 尖峰）")}</span><b>${los.mean_grade || "—"} / ${los.peak_grade || "—"}</b></div>`
+      + `<div class="row"><span>${T("平均 / 尖峰壅塞")}</span><b>${(los.mean_congestion || 0).toFixed(2)} / ${(los.peak_congestion || 0).toFixed(2)}</b></div>`
+      + `<div class="row"><span>${T("路網負載占比（事件 / 背景）")}</span><b>${net.event_load_share || 0}% / ${net.ambient_load_share || 0}%</b></div>`;
 
     const vopts = lineOpts();
     volumeChart && volumeChart.destroy();
     volumeChart = new Chart(document.getElementById("chart-volume"), {
       type: "line",
       data: { labels, datasets: [
-        { label: "事件車", data: net.volume_event || [], borderColor: "#3FB6FF", backgroundColor: "rgba(63,182,255,.35)", fill: true, tension: .3, pointRadius: 0 },
-        { label: "背景車", data: net.volume_ambient || [], borderColor: "#586275", backgroundColor: "rgba(88,98,117,.4)", fill: true, tension: .3, pointRadius: 0 },
+        { label: T("事件車"), data: net.volume_event || [], borderColor: "#3FB6FF", backgroundColor: "rgba(63,182,255,.35)", fill: true, tension: .3, pointRadius: 0 },
+        { label: T("背景車"), data: net.volume_ambient || [], borderColor: "#586275", backgroundColor: "rgba(88,98,117,.4)", fill: true, tension: .3, pointRadius: 0 },
       ] },
       options: { ...vopts, scales: { ...vopts.scales, y: { ...vopts.scales.y, stacked: true } } },
     });
@@ -341,11 +341,11 @@ const TrafficCharts = (() => {
     const bt = document.getElementById("bottleneck-table");
     const rows = net.bottlenecks || [];
     if (bt) bt.innerHTML = rows.length
-      ? `<table><thead><tr><th>路段</th><th>V/C</th><th>LOS</th><th>尖峰車流/容量</th></tr></thead><tbody>`
+      ? `<table><thead><tr><th>${T("路段")}</th><th>V/C</th><th>LOS</th><th>${T("尖峰車流/容量")}</th></tr></thead><tbody>`
         + rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.vc}</td>`
           + `<td class="los los-${r.los}">${r.los}</td><td>${r.peak_flow}/${r.capacity}</td></tr>`).join("")
         + `</tbody></table>`
-      : `<p class="muted">無瓶頸資料（無背景車或路網未壅塞）。</p>`;
+      : `<p class="muted">${T("無瓶頸資料（無背景車或路網未壅塞）。")}</p>`;
   }
 
   return { init, update, reset, renderAnalysis, downloadAnalysisCSV };

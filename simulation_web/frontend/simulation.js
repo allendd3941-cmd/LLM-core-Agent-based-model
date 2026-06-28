@@ -13,15 +13,15 @@ const TrafficUI = (() => {
   function updateDetectorCount() {
     const el = $("detector-count");
     const n = (typeof TrafficMap !== "undefined" && TrafficMap.detectorCount) ? TrafficMap.detectorCount() : 0;
-    if (el) el.textContent = `已放置 ${n} 隻監測器`;
+    if (el) el.textContent = `${n} detectors placed`;
   }
 
   // app.js 收到後端吸附成功後呼叫
   function onDetectorPlaced(label) {
     markPending();
     updateDetectorCount();
-    toast("已放置監測器：" + (label || "路段"));
-    log("success", "監測器已吸附到路段：" + (label || ""));
+    toast("Detector placed: " + (label || T("路段")));
+    log("success", "Detector snapped to road: " + (label || ""));
   }
 
   // 「套用設定」待套用狀態（拖滑桿後高亮，套用/初始化後清除）
@@ -30,7 +30,7 @@ const TrafficUI = (() => {
 
   // 數值輸入防呆：超出 [min,max] 或非數字 → 跳專業提示（警示 toast + 系統日誌 + 欄位閃紅抖動）並夾回。
   // 後端 apply_config 仍會再 clamp 一次保險。
-  const FIELD_LABELS = { agents: "事件車數量", ambient: "背景常態車流", steps: "週期數", "departure-window": "進場出發視窗", "egress-window": "散場離場視窗" };
+  const FIELD_LABELS = { agents: T("事件車數量"), ambient: T("背景常態車流"), steps: T("週期數"), "departure-window": T("進場出發視窗"), "egress-window": T("散場離場視窗") };
   function flagInvalid(el) {
     el.classList.add("invalid");
     clearTimeout(el._invTimer);
@@ -39,20 +39,20 @@ const TrafficUI = (() => {
   function clampField(el) {
     const lo = parseInt(el.min, 10);
     const hi = parseInt(el.max, 10);
-    const name = FIELD_LABELS[el.id] || "數值";
+    const name = FIELD_LABELS[el.id] || T("數值");
     const v = parseInt(el.value, 10);
     if (Number.isNaN(v)) {
       el.value = lo; flagInvalid(el);
-      toast(`${name}需為數字，已重設為 ${lo}。`, "warn");
-      log("warn", `${name}輸入非數字 → 重設為 ${lo}`);
+      toast(`${name} must be a number; reset to ${lo}.`, "warn");
+      log("warn", `${name}: non-numeric input → reset to ${lo}`);
     } else if (v > hi) {
       el.value = hi; flagInvalid(el);
-      toast(`${name}已達上限 ${hi.toLocaleString()}，自動調整。`, "warn");
-      log("warn", `${name} 輸入 ${v} 超過上限 ${hi} → 調整為 ${hi}`);
+      toast(`${name} hit the max ${hi.toLocaleString()}; auto-adjusted.`, "warn");
+      log("warn", `${name}: input ${v} exceeds max ${hi} → set to ${hi}`);
     } else if (v < lo) {
       el.value = lo; flagInvalid(el);
-      toast(`${name}最小為 ${lo}，自動調整。`, "warn");
-      log("warn", `${name} 輸入 ${v} 低於下限 ${lo} → 調整為 ${lo}`);
+      toast(`${name} min is ${lo}; auto-adjusted.`, "warn");
+      log("warn", `${name}: input ${v} below min ${lo} → set to ${lo}`);
     }
   }
 
@@ -117,7 +117,7 @@ const TrafficUI = (() => {
       if (typeof TrafficMap !== "undefined") TrafficMap.clearDetectors();
       updateDetectorCount();
       markPending();
-      toast("已清除監測器，按「套用設定」生效。");
+      toast("Detectors cleared; click \"Apply Settings\" to take effect.");
     };
 
     // GIS 主題圖層匯出（Shapefile）/ 分析數據 CSV
@@ -125,7 +125,7 @@ const TrafficUI = (() => {
     if (gisBtn) gisBtn.onclick = () => {
       const layer = ($("gis-layer") && $("gis-layer").value) || "los";
       send("export_gis", layer);
-      log("info", "請求匯出 GIS 圖層：" + layer);
+      log("info", "Requesting GIS layer export: " + layer);
     };
     const csvBtn = $("btn-analysis-csv");
     if (csvBtn) csvBtn.onclick = () => TrafficCharts.downloadAnalysisCSV();
@@ -135,7 +135,7 @@ const TrafficUI = (() => {
     if (valBtn) valBtn.onclick = () => {
       const cas = ($("val-case") && $("val-case").value) || "weekend";
       send("export_validation", cas);
-      log("info", "請求匯出驗證 CSV：" + cas);
+      log("info", "Requesting validation CSV export: " + cas);
     };
 
     $("mode-mock").onclick = () => setMode("rule");
@@ -207,20 +207,20 @@ const TrafficUI = (() => {
 
   // ===== RAG 知識庫 =====
   async function openRag() {
-    $("util-title").textContent = "RAG 知識庫";
+    $("util-title").textContent = T("RAG 知識庫");
     $("util-body").innerHTML =
-      `<p class="hint">上傳純文字 / markdown / csv，decision 時會檢索相關內容注入。</p>`
-      + `<label class="lg-toggle"><input type="checkbox" id="rag-enabled"> 啟用 RAG</label>`
+      `<p class="hint">${T("上傳純文字 / markdown / csv，decision 時會檢索相關內容注入。")}</p>`
+      + `<label class="lg-toggle"><input type="checkbox" id="rag-enabled"> ${T("啟用 RAG")}</label>`
       + `<div style="margin:8px 0"><input type="file" id="rag-file" accept=".txt,.md,.csv,.json" /> `
-      + `<button class="seg-btn" id="rag-add">加入</button></div>`
+      + `<button class="seg-btn" id="rag-add">${T("加入")}</button></div>`
       + `<div id="rag-stat" class="hint"></div>`
-      + `<button class="seg-btn" id="rag-clear" style="margin-top:6px">清空知識庫</button>`;
+      + `<button class="seg-btn" id="rag-clear" style="margin-top:6px">${T("清空知識庫")}</button>`;
     $("util-modal").style.display = "flex";
     const refresh = async () => {
       const s = await (await fetch("/api/rag/status")).json();
       $("rag-enabled").checked = s.enabled;
-      $("rag-stat").textContent = `共 ${s.chunks} 塊；來源：`
-        + (s.sources.map((x) => `${x.name}(${x.chunks})`).join("、") || "無");
+      $("rag-stat").textContent = `${s.chunks} chunks; sources: `
+        + (s.sources.map((x) => `${x.name}(${x.chunks})`).join(", ") || "none");
     };
     await refresh();
     $("rag-enabled").onchange = async () => { await postJson("/api/rag/toggle", { enabled: $("rag-enabled").checked }); refresh(); };
@@ -233,25 +233,25 @@ const TrafficUI = (() => {
 
   // ===== 上傳自訂場景 =====
   function openUpload() {
-    $("util-title").textContent = "上傳自訂場景";
+    $("util-title").textContent = T("上傳自訂場景");
     $("util-body").innerHTML =
-      `<p class="hint">上傳本專案格式的路網 graphml（由 build_scenario / build_roads 產生）＋選填人口 CSV。</p>`
-      + `<div class="prompt-field"><label>場景 key（英數）</label><input id="up-key" type="text" /></div>`
-      + `<div class="prompt-field"><label>顯示名稱</label><input id="up-name" type="text" /></div>`
-      + `<div class="prompt-field"><label>縣市篩選（如 高雄）</label><input id="up-county" type="text" value="臺南|台南" /></div>`
-      + `<div class="prompt-field"><label>目的地 lat / lng / 區名</label>`
-      + `<input id="up-lat" type="text" placeholder="lat" /> <input id="up-lng" type="text" placeholder="lng" /> <input id="up-town" type="text" placeholder="區名" /></div>`
-      + `<div class="prompt-field"><label>路網 graphml</label><input id="up-graphml" type="file" accept=".graphml,.xml" /></div>`
-      + `<div class="prompt-field"><label>人口 CSV（選填）</label><input id="up-pop" type="file" accept=".csv" /></div>`
-      + `<button class="seg-btn" id="up-go">上傳並註冊</button> <span id="up-stat" class="hint"></span>`;
+      `<p class="hint">${T("上傳本專案格式的路網 graphml（由 build_scenario / build_roads 產生）＋選填人口 CSV。")}</p>`
+      + `<div class="prompt-field"><label>${T("場景 key（英數）")}</label><input id="up-key" type="text" /></div>`
+      + `<div class="prompt-field"><label>${T("顯示名稱")}</label><input id="up-name" type="text" /></div>`
+      + `<div class="prompt-field"><label>${T("縣市篩選（如 高雄）")}</label><input id="up-county" type="text" value="臺南|台南" /></div>`
+      + `<div class="prompt-field"><label>${T("目的地 lat / lng / 區名")}</label>`
+      + `<input id="up-lat" type="text" placeholder="lat" /> <input id="up-lng" type="text" placeholder="lng" /> <input id="up-town" type="text" placeholder="${T("區名")}" /></div>`
+      + `<div class="prompt-field"><label>${T("路網 graphml")}</label><input id="up-graphml" type="file" accept=".graphml,.xml" /></div>`
+      + `<div class="prompt-field"><label>${T("人口 CSV（選填）")}</label><input id="up-pop" type="file" accept=".csv" /></div>`
+      + `<button class="seg-btn" id="up-go">${T("上傳並註冊")}</button> <span id="up-stat" class="hint"></span>`;
     $("util-modal").style.display = "flex";
     $("up-go").onclick = doUpload;
   }
 
   async function doUpload() {
-    const stat = $("up-stat"); stat.textContent = "上傳中…";
+    const stat = $("up-stat"); stat.textContent = "Uploading…";
     const gf = $("up-graphml").files[0];
-    if (!gf) { stat.textContent = "請選 graphml"; return; }
+    if (!gf) { stat.textContent = "Please select a graphml"; return; }
     const pf = $("up-pop").files[0];
     const body = {
       key: $("up-key").value, name: $("up-name").value, county_filter: $("up-county").value,
@@ -261,11 +261,11 @@ const TrafficUI = (() => {
     };
     const r = await postJson("/api/scenario/upload", body);
     if (r.ok) {
-      stat.textContent = `成功（${r.nodes} 節點）。切換中…`;
+      stat.textContent = `Success (${r.nodes} nodes). Switching…`;
       setScenarios({ list: r.scenarios, active: body.key });
       send("set_scenario", body.key);
     } else {
-      stat.textContent = "失敗：" + (r.error || "未知");
+      stat.textContent = "Failed: " + (r.error || "unknown");
     }
   }
 
@@ -283,7 +283,7 @@ const TrafficUI = (() => {
     const models = llmVllmModels;
     lm.innerHTML = models.length
       ? models.map((m) => `<option value="${m.id}">${escapeHtml(m.label || m.id)}</option>`).join("")
-      : `<option value="">（無可用模型）</option>`;
+      : `<option value="">${T("（無可用模型）")}</option>`;
     if (preselect && models.some((m) => m.id === preselect)) lm.value = preselect;
     updateLlmHint();
   }
@@ -294,11 +294,11 @@ const TrafficUI = (() => {
     const id = $("llm-model").value;
     const m = llmVllmModels.find((x) => x.id === id);
     hint.textContent = m
-      ? `${m.params} · context ${m.max_context}（${m.note}）· 對齊目標：請自行 vllm serve 此模型`
-      : "vLLM：請先 vllm serve 對應模型";
+      ? `${m.params} · context ${m.max_context} (${m.note}) · alignment: run \`vllm serve\` for this model`
+      : "vLLM: run `vllm serve` for the chosen model first";
   }
 
-  const CORE_LABEL = { rule: "規則式", llm: "LLM", mock: "規則式" };
+  const CORE_LABEL = { rule: T("規則式"), llm: "LLM", mock: T("規則式") };
 
   function setMode(mode) {
     $("mode-mock").classList.toggle("active", mode !== "llm");
@@ -322,7 +322,7 @@ const TrafficUI = (() => {
       if (steps) { steps.min = ui.steps_min; steps.max = ui.steps_max; steps.step = ui.steps_step; }
       const sm = $("step-minutes");
       if (sm && ui.step_minutes_options) {
-        sm.innerHTML = ui.step_minutes_options.map((m) => `<option value="${m}">${m} 分</option>`).join("");
+        sm.innerHTML = ui.step_minutes_options.map((m) => `<option value="${m}">${m} min</option>`).join("");
       }
     }
 
@@ -366,7 +366,7 @@ const TrafficUI = (() => {
   function updateStats(state) {
     const m = state.metrics || {};
     $("m-cycle").textContent = `${state.cycle} / ${state.max_steps}`;
-    $("m-elapsed").textContent = `${state.elapsed_minutes} 分`;
+    $("m-elapsed").textContent = `${state.elapsed_minutes} min`;
     $("m-source").textContent = CORE_LABEL[state.decision_source] || state.decision_source;
     $("m-arrived").textContent = m.arrived_event != null ? m.arrived_event : (state.status_distribution.arrived || 0);
     $("m-home").textContent = m.returned_home || 0;
@@ -375,6 +375,39 @@ const TrafficUI = (() => {
     $("m-crowded").textContent = m.crowded_road_count;
     $("m-avgcong").textContent = Number(m.average_congestion_proxy).toFixed(2);
     updatePhase(!!m.egress_declared);
+    renderTimeline(state);
+    renderStatusbar(state);
+  }
+
+  // 底部 Timeline 進度(唯讀):進度條/播放頭/相位/壅塞 sparkline 由 state 驅動
+  function renderTimeline(state) {
+    const max = state.max_steps || 1;
+    const pct = Math.max(0, Math.min(100, (state.cycle / max) * 100));
+    const fill = $("tl-fill"); if (fill) fill.style.width = pct + "%";
+    const hp = $("tl-head-pos"); if (hp) hp.style.left = pct + "%";
+    const kn = $("tl-knob"); if (kn) kn.style.left = pct + "%";
+    const el = $("tl-elapsed"); if (el) el.textContent = `${state.elapsed_minutes} min`;
+    const pr = $("tl-progress"); if (pr) pr.textContent = `${state.cycle} / ${max}`;
+    const declared = !!(state.metrics && state.metrics.egress_declared);
+    const pi = $("tl-phase-ingress"), pe = $("tl-phase-egress");
+    if (pi) pi.classList.toggle("active", !declared);
+    if (pe) pe.classList.toggle("active", declared);
+    const hist = (state.metrics && state.metrics.history) || [];
+    const line = $("tl-spark-line");
+    if (line && hist.length) {
+      const n = hist.length;
+      line.setAttribute("points", hist.map((h, i) => {
+        const x = n > 1 ? (i / (n - 1)) * 600 : 0;
+        const y = 13 - Math.max(0, Math.min(1, h.average_congestion_proxy || 0)) * 12;
+        return `${x.toFixed(0)},${y.toFixed(1)}`;
+      }).join(" "));
+    }
+  }
+
+  // QGIS 式狀態列:週期/歷時(座標+zoom 由 map.js 寫;scenario/conn 由各自函式寫)
+  function renderStatusbar(state) {
+    const c = $("sb-cycle");
+    if (c) c.textContent = `Cycle ${state.cycle}/${state.max_steps} · ${state.elapsed_minutes} min`;
   }
 
   // 活動階段（進場 / 散場）+ 宣告散場按鈕狀態
@@ -385,23 +418,23 @@ const TrafficUI = (() => {
     if (b) {
       b.disabled = declared;
       b.innerHTML = declared
-        ? '<i class="ti ti-door-exit" aria-hidden="true"></i> 散場進行中'
-        : '<i class="ti ti-door-exit" aria-hidden="true"></i> 宣告散場開始';
+        ? `<i class="ti ti-door-exit" aria-hidden="true"></i> ${T("散場進行中")}`
+        : `<i class="ti ti-door-exit" aria-hidden="true"></i> ${T("宣告散場開始")}`;
     }
   }
 
   const ACTION_LABELS = {
-    goto_destination: "前往目的地",
-    goto_destination_recompute_path: "改道中",
-    wait_at_signal: "等紅燈",
-    arrived: "已抵達",
-    error: "路徑異常",
+    goto_destination: T("前往目的地"),
+    goto_destination_recompute_path: T("改道中"),
+    wait_at_signal: T("等紅燈"),
+    arrived: T("已抵達"),
+    error: T("路徑異常"),
     none: "—",
   };
   function actionLabel(a) {
     const m = ACTION_LABELS[a.selected_action];
     if (m) return m;
-    return a.waiting_at_signal ? "等紅燈" : (a.route_status || "—");  // 後備：舊資料/未設時
+    return a.waiting_at_signal ? T("等紅燈") : (a.route_status || "—");  // 後備：舊資料/未設時
   }
 
   function inspectAgent(a) {
@@ -409,29 +442,29 @@ const TrafficUI = (() => {
     if (a && a.agent_id && a.role !== "ambient" && send) send("get_agent_path", { agent_id: a.agent_id });
     const rows = [
       ["ID", a.agent_id],
-      ["姓名", a.profile_name || "—"],
-      ["車種", a.vehicle_type],
-      ["行為模式", a.action_mode],
-      ["狀態", actionLabel(a)],
-      ["起點區", a.origin_town],
-      ["目前區", a.current_town || "—"],
-      ["速度", `${a.speed_kmh} km/h`],
-      ["壅塞", Number(a.congestion_proxy).toFixed(2)],
-      ["距終點", `${(a.distance_to_destination / 1000).toFixed(2)} km`],
-      ["鄰近車輛", a.nearby_agent_count],
-      ["上次重決", a.last_decision_cycle != null ? `第 ${a.last_decision_cycle} 步` : "—"],
+      [T("姓名"), a.profile_name || "—"],
+      [T("車種"), a.vehicle_type],
+      [T("行為模式"), a.action_mode],
+      [T("狀態"), actionLabel(a)],
+      [T("起點區"), a.origin_town],
+      [T("目前區"), a.current_town || "—"],
+      [T("速度"), `${a.speed_kmh} km/h`],
+      [T("壅塞"), Number(a.congestion_proxy).toFixed(2)],
+      [T("距終點"), `${(a.distance_to_destination / 1000).toFixed(2)} km`],
+      [T("鄰近車輛"), a.nearby_agent_count],
+      [T("上次重決"), a.last_decision_cycle != null ? `step ${a.last_decision_cycle}` : "—"],
     ];
     const rowsHtml = rows
       .map(([k, v]) => `<div class="row"><span>${k}</span><b>${escapeHtml(String(v))}</b></div>`)
       .join("");
 
     const reason = a.decision_reason
-      ? `<div class="inspect-block"><span>決策理由（選此行為模式的原因）</span><p>${escapeHtml(a.decision_reason)}</p></div>`
+      ? `<div class="inspect-block"><span>${T("決策理由（選此行為模式的原因）")}</span><p>${escapeHtml(a.decision_reason)}</p></div>`
       : "";
 
     const summary = a.trip_summary
-      ? `<div class="inspect-block"><span>旅次摘要</span><p>${escapeHtml(a.trip_summary)}</p></div>`
-      : `<div class="inspect-block"><span>旅次摘要</span><p class="muted">尚無旅次記憶。</p></div>`;
+      ? `<div class="inspect-block"><span>${T("旅次摘要")}</span><p>${escapeHtml(a.trip_summary)}</p></div>`
+      : `<div class="inspect-block"><span>${T("旅次摘要")}</span><p class="muted">${T("尚無旅次記憶。")}</p></div>`;
 
     const persona = renderPersona(a.profile_name);
 
@@ -444,19 +477,19 @@ const TrafficUI = (() => {
     const id = p.identity || {};
     const tr = p.traits || {};
     const idRows = [
-      ["年齡", id.age], ["職業", id.occupation], ["個人收入", id.wage],
-      ["家戶收入", id.household_income], ["交通工具", id.vehicle_ownership],
-      ["居住地", id.residential_location],
+      [T("年齡"), id.age], [T("職業"), id.occupation], [T("個人收入"), id.wage],
+      [T("家戶收入"), id.household_income], [T("交通工具"), id.vehicle_ownership],
+      [T("居住地"), id.residential_location],
     ].filter(([, v]) => v);
     const first = (x) => Array.isArray(x) ? (x[0] || "") : (x || "");
     const trRows = [
-      ["態度", first(tr.attitudes)], ["習慣", first(tr.habits)],
-      ["決策傾向", first(tr.decision_making_tendencies)],
-      ["經濟取捨", first(tr.economic_preferences_and_tradeoffs)],
+      [T("態度"), first(tr.attitudes)], [T("習慣"), first(tr.habits)],
+      [T("決策傾向"), first(tr.decision_making_tendencies)],
+      [T("經濟取捨"), first(tr.economic_preferences_and_tradeoffs)],
     ].filter(([, v]) => v);
     const idHtml = idRows.map(([k, v]) => `<div class="row"><span>${k}</span><b>${escapeHtml(String(v))}</b></div>`).join("");
     const trHtml = trRows.map(([k, v]) => `<div class="persona-trait"><span>${k}</span><p>${escapeHtml(String(v))}</p></div>`).join("");
-    return `<div class="inspect-block"><span>人物背景</span>${idHtml}${trHtml}</div>`;
+    return `<div class="inspect-block"><span>${T("人物背景")}</span>${idHtml}${trHtml}</div>`;
   }
 
   function setProfiles(p) { profiles = p || {}; }
@@ -473,9 +506,9 @@ const TrafficUI = (() => {
     const h = $("decision-health");
     if (h) {
       h.innerHTML = health.source === "rule"
-        ? `<b>規則式核心</b>：無 LLM 決策日誌（確定性、不產生 LLM 決策）。`
-        : `本步重決 <b>${health.triggered || 0}</b> 台 · 解析成功 <b>${health.decided || 0}</b>`
-          + ` · fallback <b>${health.fallback || 0}</b>（fallback 多＝LLM 解析有問題）`;
+        ? `<b>${T("規則式核心")}</b>: ${T("無 LLM 決策日誌（確定性、不產生 LLM 決策）。")}`
+        : `Re-decided <b>${health.triggered || 0}</b> this step · parsed <b>${health.decided || 0}</b>`
+          + ` · fallback <b>${health.fallback || 0}</b> (many fallbacks = LLM parsing issues)`;
     }
     const box = $("decision-output");
     if (!box || !decisions.length) return;   // 本步無重決 → 保留歷史、不覆蓋
@@ -484,9 +517,9 @@ const TrafficUI = (() => {
     block.className = "dec-step";
     // RAG 依據（批級；點擊看全文）。無注入則不顯示。
     const ragHtml = rag.length
-      ? `<details class="dec-rag" open><summary><i class="ti ti-book-2" aria-hidden="true"></i> 本批參考知識 ${rag.length} 段</summary>`
+      ? `<details class="dec-rag" open><summary><i class="ti ti-book-2" aria-hidden="true"></i> Reference knowledge this batch · ${rag.length} segments</summary>`
         + rag.map((r, i) =>
-            `<div class="rag-chip" data-i="${i}" title="點擊看完整片段">`
+            `<div class="rag-chip" data-i="${i}" title="Click to view the full segment">`
             + (r.via || []).map((v) =>
                 `<span class="rag-tag rag-${RAG_TAG_CLASS[v] || "task"}">${escapeHtml(v)}</span>`).join("")
             + `<span class="rag-src">${escapeHtml(r.source || "?")} #${r.idx}</span>`
@@ -495,7 +528,7 @@ const TrafficUI = (() => {
         + `</details>`
       : "";
     block.innerHTML =
-      `<div class="dec-step-h">第 ${cycle != null ? cycle : "?"} 步 · 重決 ${decisions.length} 台</div>`
+      `<div class="dec-step-h">Step ${cycle != null ? cycle : "?"} · re-decided ${decisions.length}</div>`
       + ragHtml
       + decisions.map((d) =>
         `<div class="dec-row"><b>${escapeHtml(d.name)}</b> → <span class="dec-mode">${escapeHtml(d.mode)}</span>`
@@ -514,10 +547,10 @@ const TrafficUI = (() => {
     if (!r) return;
     const scores = r.scores
       ? Object.entries(r.scores).map(([k, v]) => `${k} ${v}`).join("／") : "";
-    $("util-title").textContent = `RAG 片段 · ${r.source || "?"} #${r.idx}`;
+    $("util-title").textContent = `RAG segment · ${r.source || "?"} #${r.idx}`;
     $("util-body").innerHTML =
-      `<div class="hint">檢索面向：${escapeHtml((r.via || []).join("、"))}`
-      + (scores ? `　相似度：${escapeHtml(scores)}` : "") + `</div>`
+      `<div class="hint">Retrieval facets: ${escapeHtml((r.via || []).join("、"))}`
+      + (scores ? `　similarity: ${escapeHtml(scores)}` : "") + `</div>`
       + `<pre class="rag-full">${escapeHtml(String(r.chunk || ""))}</pre>`;
     $("util-modal").style.display = "flex";
   }
@@ -525,7 +558,7 @@ const TrafficUI = (() => {
   // 重設時清掉決策歷史（避免吃到上次模擬的資料）
   function resetDecisions() {
     const box = $("decision-output");
-    if (box) box.innerHTML = `<span class="muted dec-placeholder">尚無決策（LLM 壅塞觸發時記錄，逐步累積）。</span>`;
+    if (box) box.innerHTML = `<span class="muted dec-placeholder">${T("尚無決策（LLM 壅塞觸發時記錄，逐步累積）。")}</span>`;
     const h = $("decision-health");
     if (h) h.innerHTML = "";
   }
@@ -547,7 +580,9 @@ const TrafficUI = (() => {
 
   function setConnected(ok) {
     $("conn-dot").className = "dot " + (ok ? "dot-on" : "dot-off");
-    $("conn-text").textContent = ok ? "已連線" : "連線中斷";
+    $("conn-text").textContent = ok ? T("已連線") : T("連線中斷");
+    const sb = $("sb-conn");
+    if (sb) { sb.textContent = ok ? "● connected" : "● offline"; sb.className = ok ? "sb-on" : "sb-off"; }
   }
 
   // ===== 系統日誌（專業 logging）=====
@@ -574,11 +609,11 @@ const TrafficUI = (() => {
     const el = $("run-state"), t = $("run-state-text");
     if (!el || !t) return;
     el.className = "run-state run-" + state;
-    t.textContent = state === "running" ? `執行中 第 ${cycle || 0} 步`
-      : state === "paused" ? "已暫停"
-      : state === "done" ? "已完成"
-      : state === "busy" ? "處理中…"
-      : "待命";
+    t.textContent = state === "running" ? `${T("執行中")} · step ${cycle || 0}`
+      : state === "paused" ? T("已暫停")
+      : state === "done" ? T("已完成")
+      : state === "busy" ? T("處理中…")
+      : T("待命");
   }
 
   function expandDock() {
@@ -657,7 +692,7 @@ const TrafficUI = (() => {
   // ===== 編輯 Prompts =====
   async function openPrompts() {
     const box = $("prompt-fields");
-    box.innerHTML = "載入中…";
+    box.innerHTML = "Loading…";
     $("prompt-modal").style.display = "flex";
     try {
       const data = await (await fetch("/api/prompts")).json();
@@ -666,11 +701,11 @@ const TrafficUI = (() => {
         const wrap = document.createElement("div");
         wrap.className = "prompt-field";
         wrap.innerHTML =
-          `<label>${escapeHtml(p.label)} ${p.overridden ? "<em>(已自訂)</em>" : ""}</label>`
+          `<label>${escapeHtml(p.label)} ${p.overridden ? `<em>${T("(已自訂)")}</em>` : ""}</label>`
           + `<textarea data-name="${name}">${escapeHtml(p.current)}</textarea>`
           + `<div class="prompt-btns">`
-          + `<button class="seg-btn" data-act="save" data-name="${name}">套用</button>`
-          + `<button class="seg-btn" data-act="reset" data-name="${name}">還原預設</button></div>`;
+          + `<button class="seg-btn" data-act="save" data-name="${name}">${T("套用")}</button>`
+          + `<button class="seg-btn" data-act="reset" data-name="${name}">${T("還原預設")}</button></div>`;
         box.appendChild(wrap);
       });
       box.querySelectorAll("button[data-act]").forEach((b) => {
@@ -685,7 +720,7 @@ const TrafficUI = (() => {
         };
       });
     } catch (e) {
-      box.innerHTML = "載入失敗（伺服器未連線？）。";
+      box.innerHTML = "Load failed (server not connected?).";
     }
   }
 
@@ -697,14 +732,17 @@ const TrafficUI = (() => {
       (s) => `<option value="${s.key}">${escapeHtml(s.name)}</option>`).join("");
     if (scn.active) sel.value = scn.active;
     sel.onchange = () => send("set_scenario", sel.value);
+    const sb = $("sb-scenario");
+    if (sb) { const a = (scn.list || []).find((s) => s.key === scn.active); sb.textContent = (a && a.name) || scn.active || "—"; }
   }
 
   // ===== 對話 / 介入 =====
   let chatMode = "ask";
+  // 注意：每組第 1 個元素是「送給後端/LLM 的問句」(保留中文,LLM 對中文較佳)、第 2 個是 UI 顯示的 chip 標籤(英文)。
   const CHIPS = {
-    ask: [["現在哪裡最塞？", "哪裡最塞？"], ["目前抵達多少人？還有多少在路上？", "抵達多少？"],
-          ["整體交通狀況與趨勢如何？", "整體如何？"]],
-    act: [["避開東區一帶", "避開東區"], ["從永康區湧入 300 台車", "永康湧入300"], ["避開北區", "避開北區"]],
+    ask: [["現在哪裡最塞？", "Where's most congested?"], ["目前抵達多少人？還有多少在路上？", "How many arrived?"],
+          ["整體交通狀況與趨勢如何？", "Overall status?"]],
+    act: [["避開東區一帶", "Avoid East District"], ["從永康區湧入 300 台車", "300 from Yongkang"], ["避開北區", "Avoid North District"]],
   };
 
   function setChatMode(m) {
@@ -712,9 +750,9 @@ const TrafficUI = (() => {
     $("chat-mode-ask").classList.toggle("active", m === "ask");
     $("chat-mode-act").classList.toggle("active", m === "act");
     $("chat-hint").textContent = m === "act"
-      ? "介入指令：避開某區 / 某區湧入 N 台。"
-      : "詢問當前路況（唯讀）。";
-    $("chat-text").placeholder = m === "act" ? "例如：避開東區 / 從永康區湧入300台" : "輸入問題後按 Enter…";
+      ? "Intervention: avoid a district / send N vehicles in from a district."
+      : "Ask about current conditions (read-only).";
+    $("chat-text").placeholder = m === "act" ? "e.g. avoid East District / 300 from Yongkang" : T("輸入問題後按 Enter…");
     $("chat-chips").innerHTML = (CHIPS[m] || [])
       .map(([q, l]) => `<button class="chip" data-q="${q}">${l}</button>`).join("");
   }

@@ -58,11 +58,11 @@ const TrafficMap = (() => {
     const osm = "&copy; OpenStreetMap contributors";
     const esri = "Tiles &copy; Esri";
     return {
-      "暗色（CARTO Dark）": L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { attribution: carto, maxZoom: 19 }),
-      "淺色（CARTO Positron）": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: carto, maxZoom: 19 }),
-      "街道（CARTO Voyager）": L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { attribution: carto, maxZoom: 19 }),
-      "OSM 標準": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: osm, maxZoom: 19 }),
-      "衛星影像（Esri）": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: esri, maxZoom: 19 }),
+      [T("暗色（CARTO Dark）")]: L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { attribution: carto, maxZoom: 19 }),
+      [T("淺色（CARTO Positron）")]: L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: carto, maxZoom: 19 }),
+      [T("街道（CARTO Voyager）")]: L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { attribution: carto, maxZoom: 19 }),
+      [T("OSM 標準")]: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: osm, maxZoom: 19 }),
+      [T("衛星影像（Esri）")]: L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: esri, maxZoom: 19 }),
     };
   }
 
@@ -73,13 +73,13 @@ const TrafficMap = (() => {
       onAdd() {
         const div = L.DomUtil.create("div", "map-appearance");
         div.innerHTML =
-          `<button class="ma-toggle" id="ma-toggle" title="地圖色調" aria-label="地圖色調"><i class="ti ti-adjustments" aria-hidden="true"></i></button>`
+          `<button class="ma-toggle" id="ma-toggle" title="${T("地圖色調")}" aria-label="${T("地圖色調")}"><i class="ti ti-adjustments" aria-hidden="true"></i></button>`
           + `<div class="ma-body" id="ma-body">`
-          + `<div class="ma-title"><i class="ti ti-adjustments" aria-hidden="true"></i> 地圖色調</div>`
-          + `<label>亮度 <span id="ma-b-v">100%</span></label><input id="ma-bright" type="range" min="40" max="160" value="100">`
-          + `<label>對比 <span id="ma-c-v">100%</span></label><input id="ma-contrast" type="range" min="40" max="160" value="100">`
-          + `<label>飽和 <span id="ma-s-v">100%</span></label><input id="ma-sat" type="range" min="0" max="200" value="100">`
-          + `<button class="ma-reset" id="ma-reset">還原</button>`
+          + `<div class="ma-title"><i class="ti ti-adjustments" aria-hidden="true"></i> ${T("地圖色調")}</div>`
+          + `<label>${T("亮度")} <span id="ma-b-v">100%</span></label><input id="ma-bright" type="range" min="40" max="160" value="100">`
+          + `<label>${T("對比")} <span id="ma-c-v">100%</span></label><input id="ma-contrast" type="range" min="40" max="160" value="100">`
+          + `<label>${T("飽和")} <span id="ma-s-v">100%</span></label><input id="ma-sat" type="range" min="0" max="200" value="100">`
+          + `<button class="ma-reset" id="ma-reset">${T("還原")}</button>`
           + `</div>`;
         L.DomEvent.disableClickPropagation(div);
         L.DomEvent.disableScrollPropagation(div);
@@ -117,9 +117,22 @@ const TrafficMap = (() => {
       zoomSnap: 0, zoomDelta: 0.5, wheelDebounceTime: 20, wheelPxPerZoomLevel: 140,
     }).setView([23.06, 120.23], 12);
     const baseLayers = buildBaseLayers();
-    baseLayers["暗色（CARTO Dark）"].addTo(map);     // 預設底圖
+    baseLayers[T("淺色（CARTO Positron）")].addTo(map);  // 預設底圖：淺色(配淺色 UI);key 已 i18n，查找用同一個 T()
     L.control.layers(baseLayers, null, { position: "topright" }).addTo(map);
     addAppearanceControl();
+    L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(map);
+
+    // 游標座標 / zoom → QGIS 式狀態列(元素不在則略過)
+    map.on("mousemove", (e) => {
+      const el = document.getElementById("sb-coord");
+      if (el) el.textContent = `${e.latlng.lat.toFixed(4)}°N ${e.latlng.lng.toFixed(4)}°E`;
+    });
+    const reportZoom = () => {
+      const z = document.getElementById("sb-zoom");
+      if (z) z.textContent = `Zoom ${map.getZoom().toFixed(0)}`;
+    };
+    map.on("zoomend", reportZoom);
+    reportZoom();
 
     signalRenderer = L.canvas({ padding: 0.5 });
     // 車輛專屬高 z-index pane → 永遠畫在彩色道路之上
@@ -199,7 +212,7 @@ const TrafficMap = (() => {
   function makeDetMarker(lat, lng, label, registered) {
     const m = L.marker([lat, lng], { icon: detIcon(registered), keyboard: false })
       .addTo(detectorLayer);
-    m.bindTooltip("📍 " + (label || "監測器"), { direction: "top", offset: [0, -6] });
+    m.bindTooltip("📍 " + (label || T("監測器")), { direction: "top", offset: [0, -6] });
     m._det = { lat, lng, label, registered };
     detMarkers.push(m);
     return m;
@@ -325,7 +338,7 @@ const TrafficMap = (() => {
       arrivalCircle = L.circle([data.stadium.lat, data.stadium.lng], {
         radius: arrR, color: "#888", weight: 1, opacity: 0.5,
         fillColor: "#888", fillOpacity: 0.15, interactive: false,
-      }).bindTooltip(`抵達圈（半徑 ${Math.round(arrR)} m）`, { direction: "top" });
+      }).bindTooltip(`${T("抵達圈")} (radius ${Math.round(arrR)} m)`, { direction: "top" });
       const t = document.getElementById("toggle-arrival-circle");
       if (!t || t.checked) arrivalCircle.addTo(map);
     }
@@ -534,13 +547,13 @@ const TrafficMap = (() => {
     const start = (ingress && ingress[0]) || (egress && egress[0]);
     if (start) {
       L.circleMarker(start, { radius: 5, color: "#fff", weight: 1.5, fillColor: "#2FD17A", fillOpacity: 1 })
-        .bindTooltip("出發地", { direction: "top" }).addTo(grp);
+        .bindTooltip(T("出發地"), { direction: "top" }).addTo(grp);
     }
     const endArr = (egress && egress.length) ? egress : ingress;
     const end = endArr && endArr[endArr.length - 1];
     if (end) {
       L.circleMarker(end, { radius: 5, color: "#fff", weight: 1.5, fillColor: "#ff3b3b", fillOpacity: 1 })
-        .bindTooltip(egress && egress.length ? "返家終點" : "目前位置／目的地", { direction: "top" }).addTo(grp);
+        .bindTooltip(egress && egress.length ? T("返家終點") : T("目前位置／目的地"), { direction: "top" }).addTo(grp);
     }
     grp.addTo(map);
     agentPathLayer = grp;
