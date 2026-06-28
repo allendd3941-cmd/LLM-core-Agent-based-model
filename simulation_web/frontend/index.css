@@ -157,16 +157,15 @@ body {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg);
   overflow: hidden;
   flex-shrink: 0;   /* 在可捲動的 flex 面板裡不被壓縮(否則 overflow:hidden 會讓卡片縮小裁切、面板不捲動) */
+  padding: 0 12px 12px;   /* 內容左右下內距;標頭列用負 margin 滿版(見下) */
 }
 .card h2 {
-  font-size: 11px; font-weight: 500; margin: 0; color: var(--text-dim);
+  font-size: 11px; font-weight: 500; margin: 0 -12px 11px; color: var(--text-dim);   /* 負左右 margin → 標頭列拉到卡片邊緣滿版 */
   letter-spacing: .09em; text-transform: uppercase; display: flex; align-items: center; gap: 7px;
   padding: 6px 11px; background: var(--head); border-bottom: 1px solid var(--border);
 }
 .card h2 i { font-size: 15px; color: var(--text-mut); }
-.card > *:not(h2) { margin-left: 12px; margin-right: 12px; }
-.card > h2 + * { margin-top: 11px; }
-.card > *:last-child { margin-bottom: 12px; }
+.card > *:last-child { margin-bottom: 0; }
 
 /* ── 表單元件 ─────────────────────────────────── */
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 11px; font-size: 12px; color: var(--text-dim); }
@@ -246,7 +245,6 @@ body.mode-llm .llm-only { display: block; }
 
 .llm-pick { display: flex; gap: 6px; }
 .llm-pick select { flex: 1; min-width: 0; padding: 7px 8px; }
-.llm-pick select:first-child { flex: 0 0 80px; }
 
 /* ── Vehicle Inspector(右 dock,GIS 要素屬性表)──── */
 .inspect { font-size: 12px; line-height: 1.6; color: var(--text-dim); }
