@@ -102,9 +102,9 @@ def _load_manifests() -> None:
 
 # ---- 內建場景 ----
 # 預設：台南亞太棒球場（dest_lat/lng=None → 用既有 STADIUM_SHP，行為與原本完全一致）
-register(Scenario(key="tainan_stadium", name="台南亞太棒球場（預設）", dest_town="安定區"))
+register(Scenario(key="tainan_stadium", name="Tainan Asia-Pacific Stadium (default)", dest_town="安定區"))
 # 示範：同城換事件地點（台南火車站，在路網覆蓋內、與球場不同方位 → 不同 OD/壅塞）
-register(Scenario(key="tainan_station", name="台南火車站（示範事件）",
+register(Scenario(key="tainan_station", name="Tainan Station (demo event)",
                   dest_lat=22.9971, dest_lng=120.2128, dest_town="東區",
                   center_lat=23.00, center_lng=120.21, zoom=13))
 _load_manifests()

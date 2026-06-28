@@ -89,12 +89,12 @@ class SimulationSession:
     async def handle(self) -> None:
         session_id_var.set(uuid.uuid4().hex[:4])   # 本連線短 id（log 帶 [sess xxxx]，多連線不交錯）
         await self.ws.accept()
-        await self.status("正在載入 GIS 資料與路網…")
+        await self.status("Loading GIS data and road network…")
         # init 在大規模(數萬車逐車路由)可能很久；放背景執行緒跑、同時每隔幾秒送 keepalive 進度，
         # 避免長時間無資料流動被瀏覽器/代理 idle timeout 斷線。
         await self._initialize_with_keepalive()
         await self.send(self.engine.init_payload())
-        await self.status("初始化完成，可開始模擬。")
+        await self.status("Initialization complete; ready to run.")
 
         try:
             while True:
@@ -118,7 +118,7 @@ class SimulationSession:
                 await asyncio.wait_for(asyncio.shield(init_task), timeout=interval_s)
             except asyncio.TimeoutError:
                 elapsed += interval_s
-                await self.status(f"初始化中…（已 {int(elapsed)} 秒；大規模路網/車流首次計算較久）")
+                await self.status(f"Initializing… ({int(elapsed)}s; first compute of a large network/fleet takes longer)")
         await init_task   # 取結果並讓 init 內的例外正常傳遞
 
     # ------------------------------------------------------------------
@@ -128,10 +128,10 @@ class SimulationSession:
         elif action == "pause":
             self.engine.pause()
             await self._stop_run_task()
-            await self.status("模擬已暫停")
+            await self.status("Simulation paused")
         elif action == "step":
             if not self.engine.scheduler.finished:
-                await self.status(f"計算第 {self.engine.scheduler.cycle + 1} 步中…（首次/重算路徑表需數分鐘，請稍候）")
+                await self.status(f"Computing step {self.engine.scheduler.cycle + 1}… (first run / route recompute can take a few minutes)")
                 state = await asyncio.to_thread(self.engine.step)
                 await self.send(state.to_message())
                 if self.engine.scheduler.finished:  # 手動單步走到結束 → 出分析
@@ -151,19 +151,19 @@ class SimulationSession:
             from llm_server import prompt_store
             prompt_store.set_override(str(v.get("name", "")), v.get("text"))
             ov = bool((v.get("text") or "").strip())
-            await self.status(f"已{'套用自訂' if ov else '還原預設'} prompt：{v.get('name')}")
+            await self.status(f"{'Applied custom' if ov else 'Restored default'} prompt: {v.get('name')}")
         elif action == "reset":
             await self._reset()
         elif action == "set_speed":
             default = UI_CONFIG.speed_default
             self.speed_multiplier = max(UI_CONFIG.speed_min,
                                         min(float(value or default), UI_CONFIG.speed_max))
-            await self.status(f"速度設為 {self.speed_multiplier:.1f} 倍")
+            await self.status(f"Speed set to {self.speed_multiplier:.1f}×")
         elif action == "set_agents":
             await self._set_agents(int(value or self.cfg.nb_agents))
         elif action == "set_mode":
             self._set_mode(str(value or "rule"))
-            await self.status(f"決策核心：{'LLM 認知核心' if self.cfg.use_llm else '規則式（Rule-based）'}")
+            await self.status(f"Decision core: {'LLM cognitive core' if self.cfg.use_llm else 'Rule-based'}")
         elif action == "set_ambient":
             await self._set_ambient(int(value) if value is not None else 0)
         elif action == "set_view":
@@ -216,11 +216,11 @@ class SimulationSession:
         if self._run_task and not self._run_task.done():
             return
         if self.engine.scheduler.finished:
-            await self.status("已達最大步數，請先重設。")
+            await self.status("Reached max steps; reset first.")
             return
         self.engine.resume()
         self._run_task = asyncio.create_task(self._run_loop())
-        await self.status("模擬開始執行")
+        await self.status("Simulation started")
 
     async def _run_loop(self) -> None:
         try:
@@ -236,8 +236,8 @@ class SimulationSession:
             self.engine.pause()
             if self.engine.scheduler.finished:
                 await self.status(
-                    f"模擬完成：共 {self.engine.scheduler.cycle} 步"
-                    f"（{self.engine.scheduler.elapsed_minutes} 分鐘）"
+                    f"Simulation complete: {self.engine.scheduler.cycle} steps"
+                    f" ({self.engine.scheduler.elapsed_minutes} min)"
                 )
                 await self._send_analysis()
 
@@ -255,11 +255,11 @@ class SimulationSession:
         await self._stop_run_task()
         await asyncio.to_thread(self.engine.reset)
         await self.send(self.engine.init_payload())
-        await self.status("模擬已重設")
+        await self.status("Simulation reset")
 
     async def _set_agents(self, n: int) -> None:
         if self.engine.running or self.engine.scheduler.cycle > 0:
-            await self.status("模擬進行中無法變更 agent 數，請先重設。")
+            await self.status("Cannot change event-vehicle count while running; reset first.")
             return
         n = max(UI_CONFIG.agents_min, min(n, UI_CONFIG.agents_max))
         self.cfg = dataclasses.replace(self.cfg, nb_agents=n)
@@ -267,7 +267,7 @@ class SimulationSession:
         self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
-        await self.status(f"agent 數設為 {n}")
+        await self.status(f"Event vehicles set to {n}")
 
     async def _apply_config(self, v: dict) -> None:
         """一次套用前端暫存的設定（事件車數/背景車數/週期數/每週期分鐘）→ 只重新初始化一次。
@@ -276,7 +276,7 @@ class SimulationSession:
         """
         from .. import config
         if self.engine.running or self.engine.scheduler.cycle > 0:
-            await self.status("模擬進行中無法變更設定，請先重設。")
+            await self.status("Cannot change settings while running; reset first.")
             return
         changes: dict[str, Any] = {}
         if v.get("nb_agents") is not None:
@@ -305,14 +305,14 @@ class SimulationSession:
         dep = config.effective_departure()
         eg = config.effective_egress()
         await self.status(
-            f"已套用：{self.cfg.nb_agents} 事件車 · 背景 {config.effective_ambient_count()} · "
-            f"{self.cfg.max_steps} 週期 × {self.cfg.step_minutes} 分 · "
-            f"進場 {dep.profile}/{dep.window_minutes}分 · 散場 {eg.profile}/{eg.window_minutes}分→{eg.destination}")
+            f"Applied: {self.cfg.nb_agents} event vehicles · background {config.effective_ambient_count()} · "
+            f"{self.cfg.max_steps} cycles × {self.cfg.step_minutes} min · "
+            f"ingress {dep.profile}/{dep.window_minutes}min · egress {eg.profile}/{eg.window_minutes}min→{eg.destination}")
 
     async def _set_time(self, max_steps: int | None = None, step_minutes: int | None = None) -> None:
         """設定「跑幾個週期 / 每週期幾分鐘」（比照 set_agents：進行中先擋，改了重新初始化）。"""
         if self.engine.running or self.engine.scheduler.cycle > 0:
-            await self.status("模擬進行中無法變更時間設定，請先重設。")
+            await self.status("Cannot change timing while running; reset first.")
             return
         ms = self.cfg.max_steps if max_steps is None else max(UI_CONFIG.steps_min, min(max_steps, UI_CONFIG.steps_max))
         sm = self.cfg.step_minutes
@@ -323,20 +323,20 @@ class SimulationSession:
         self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
-        await self.status(f"已設定：{ms} 週期 × {sm} 分/週期")
+        await self.status(f"Set: {ms} cycles × {sm} min/cycle")
 
     async def _set_ambient(self, n: int) -> None:
         """設定背景常態車數（runtime 覆寫 [ambient].count），重新初始化。模擬進行中先擋。"""
         from .. import config
         if self.engine.running or self.engine.scheduler.cycle > 0:
-            await self.status("模擬進行中無法變更背景車數，請先重設。")
+            await self.status("Cannot change background count while running; reset first.")
             return
         config.set_runtime_ambient_count(max(0, min(n, config.AMBIENT_CONFIG.max_count)))
         await self._stop_run_task()
         self.engine = self._make_engine()
         await asyncio.to_thread(self.engine.initialize)
         await self.send(self.engine.init_payload())
-        await self.status(f"背景車數設為 {config.effective_ambient_count()}")
+        await self.status(f"Background count set to {config.effective_ambient_count()}")
 
     async def _regenerate_profiles(self) -> None:
         """『重新生成人物』：清掉 persona 池並重新初始化（下次 LLM init 會重生整批）。"""
@@ -345,18 +345,18 @@ class SimulationSession:
         profile_pool.clear_pool()
         await asyncio.to_thread(self.engine.reset)
         await self.send(self.engine.init_payload())
-        await self.status("已清除人物池，將於下次 LLM 初始化重新生成。")
+        await self.status("Persona pool cleared; will regenerate on the next LLM init.")
 
     async def _set_scenario(self, key: str) -> None:
         """切換場景（圖層）：設 active → 重新初始化引擎 → 重送 init。模擬進行中先停。"""
         from .. import scenarios
         if not scenarios.set_active(key):
-            await self.status(f"未知場景：{key}")
+            await self.status(f"Unknown scenario: {key}")
             return
         await self._stop_run_task()
         await asyncio.to_thread(self.engine.reset)
         await self.send(self.engine.init_payload())
-        await self.status(f"已切換場景：{scenarios.active().name}")
+        await self.status(f"Switched scenario: {scenarios.active().name}")
 
     async def _ask(self, question: str) -> None:
         """暫停對話查詢（唯讀）：用當前模擬狀態 + LLM 回答；LLM 不可用則回附狀態文字。"""
@@ -368,7 +368,7 @@ class SimulationSession:
             answer = await asyncio.to_thread(run_sim_chat, ctx, question)
         except Exception as e:  # noqa: BLE001  LLM 不可用 → fallback 附狀態
             logger.warning("sim_chat 失敗：%s", e)
-            answer = "（LLM 暫時不可用，附當前模擬狀態）\n" + ctx
+            answer = "(LLM temporarily unavailable; showing current simulation state)\n" + ctx
         await self.send({"type": "chat", "text": answer})
 
     async def _intervene(self, text: str) -> None:
@@ -379,10 +379,10 @@ class SimulationSession:
             from llm_server.sim_intervene import run_intervene
             act = await asyncio.to_thread(run_intervene, text, self.engine._available_towns)
         except Exception as e:  # noqa: BLE001
-            await self.send({"type": "chat", "text": f"（介入解析失敗：{e}）"})
+            await self.send({"type": "chat", "text": f"(Intervention parse failed: {e})"})
             return
         if act["action"] == "none":
-            await self.send({"type": "chat", "text": "未能對應到可執行的介入（可試：避開某區 / 從某區湧入 N 台）。"})
+            await self.send({"type": "chat", "text": "No actionable intervention matched (try: avoid a district / send N vehicles in from a district)."})
             return
         summary = await asyncio.to_thread(
             self.engine.apply_intervention, act["action"], act["town"], act["count"])
@@ -401,19 +401,19 @@ class SimulationSession:
         """匯出 GIS 主題圖層 Shapefile（zip）→ 回下載連結。需先初始化（有路網）才能匯出。"""
         from .. import config
         if not self.engine.is_initialized:
-            await self.status("請先初始化模擬再匯出圖層。")
+            await self.status("Initialize the simulation before exporting layers.")
             return
         try:
             path = await asyncio.to_thread(self.engine.export_gis_layer, layer, config.OUTPUT_DIR)
         except ValueError as e:
-            await self.status(f"匯出失敗：{e}")
+            await self.status(f"Export failed: {e}")
             return
         except Exception as e:  # noqa: BLE001
             logger.error("GIS 匯出錯誤：%s", e, exc_info=True)
-            await self.status("匯出失敗（伺服器錯誤）。")
+            await self.status("Export failed (server error).")
             return
         await self.send({"type": "download", "url": f"/api/gis/{path.name}", "name": path.name,
-                         "label": f"GIS 圖層（{layer}）"})
+                         "label": f"GIS layer ({layer})"})
 
     async def _export_validation(self, case: str) -> None:
         """匯出組員 validation 腳本可直接吃的 CSV（gameday 事件車 + nogameday 全0 + 參數檔，打包 zip）。
@@ -423,22 +423,22 @@ class SimulationSession:
         from .. import config
         case = case.strip().lower()
         if case not in ("weekend", "weekday"):
-            await self.status("請選擇 weekend 或 weekday 再匯出。")
+            await self.status("Select weekend or weekday before exporting.")
             return
         if not self.engine.is_initialized or self.engine.scheduler.cycle <= 0:
-            await self.status("請先跑模擬（至少一步）再匯出驗證 CSV。")
+            await self.status("Run the simulation (at least one step) before exporting the validation CSV.")
             return
         try:
             path = await asyncio.to_thread(self.engine.export_validation_csv, case, config.OUTPUT_DIR)
         except ValueError as e:
-            await self.status(f"匯出失敗：{e}")
+            await self.status(f"Export failed: {e}")
             return
         except Exception as e:  # noqa: BLE001
             logger.error("驗證 CSV 匯出錯誤：%s", e, exc_info=True)
-            await self.status("匯出失敗（伺服器錯誤）。")
+            await self.status("Export failed (server error).")
             return
         await self.send({"type": "download", "url": f"/api/validation/{path.name}", "name": path.name,
-                         "label": f"驗證 CSV（{case}）"})
+                         "label": f"Validation CSV ({case})"})
 
     async def _set_llm(self, value: dict) -> None:
         """前端選 vLLM 模型：套用 runtime 模型名 + 連動 max_model_len（整套 LLM 共用）。
@@ -454,7 +454,7 @@ class SimulationSession:
         llm_config.set_runtime_llm(model)
         config.set_runtime_max_model_len(max_len)
         await self.status(
-            f"LLM 模型已設為：{model or '(未指定，請於 .env 設 VLLM_MODEL)'}（max_model_len={max_len}）")
+            f"LLM model set to: {model or '(unset; set VLLM_MODEL in .env)'} (max_model_len={max_len})")
 
     def _set_mode(self, mode: str) -> None:
         # 動態切換 mock/llm；engine 內部 cfg 與本 session cfg 同步

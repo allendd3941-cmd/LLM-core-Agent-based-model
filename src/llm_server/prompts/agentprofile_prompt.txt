@@ -1,33 +1,33 @@
-輸出規則：
-1. 只輸出合法 JSON，不要解釋、註解或 markdown，請輸出具備換行與縮排的巢狀 JSON，不要壓縮成單行。。
-2. 最外層只能是一個 JSON object，且只包含一個欄位 "agents"。
-3. "agents" 必須是 JSON array，內含指定數量的 agent object。
-4. 每個 agent object 只能包含 "identity" 與 "traits" 兩個欄位。
-5. 每個 value 都必須是自然語言，不要只放代碼、數字或縮寫。
-6. 除 residential_location 外，identity 各欄位請用十個字以內的中文片語描述。
-7. residential_location 請填台南市實際存在的行政區，例如「安平區」。
-8. name 請填中文姓名，例如「黃俊祺」。
-9. traits 中 attitudes、habits、decision_making_tendencies、economic_preferences_and_tradeoffs 各欄位皆為 array，內容請用十個字以內的中文片語描述。
-10. "vehicle_ownership"的值只能為「機車」或「汽車」。
+Output rules:
+1. Output only valid JSON — no explanation, comments, or markdown. Output nested JSON with newlines and indentation; do not compress it onto a single line.
+2. The outermost level must be a single JSON object containing only the field "agents".
+3. "agents" must be a JSON array containing the specified number of agent objects.
+4. Each agent object may contain only the two fields "identity" and "traits".
+5. Every value must be natural language; do not put only codes, numbers, or abbreviations.
+6. Except residential_location, describe each identity field with an English phrase of about ten words or fewer.
+7. residential_location must be a real administrative district of Tainan City, e.g. "安平區".
+8. name must be an English full name, e.g. "Junchi Huang".
+9. In traits, attitudes / habits / decision_making_tendencies / economic_preferences_and_tradeoffs are each arrays; describe each item with an English phrase of about ten words or fewer.
+10. The value of "vehicle_ownership" can only be "機車" or "汽車".
 
-輸出結構範例如下：
+Example output structure:
 
 {
   "agents": [
     {
       "identity": {
-        "name": "黃俊祺",
-        "age": "二十歲左右",
-        "occupation": "大學生",
-        "wage": "每月打工四萬",
+        "name": "Junchi Huang",
+        "age": "around twenty",
+        "occupation": "university student",
+        "wage": "about NT$40k/month from part-time work",
         "vehicle_ownership": "機車",
         "residential_location": "安平區"
       },
       "traits": {
-        "attitudes": ["願意遵守交通規則"],
-        "habits": ["習慣提早到球場"],
-        "decision_making_tendencies": ["常依現場人潮調整"],
-        "economic_preferences_and_tradeoffs": ["偏好省錢停車選擇"]
+        "attitudes": ["willing to follow traffic rules"],
+        "habits": ["used to arriving at the stadium early"],
+        "decision_making_tendencies": ["often adjusts to on-site crowds"],
+        "economic_preferences_and_tradeoffs": ["prefers cheaper parking options"]
       }
     }
   ]

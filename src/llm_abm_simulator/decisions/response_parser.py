@@ -74,9 +74,12 @@ def normalize_town_name(raw: Any, available_towns: list[str], default: str) -> s
 
 def normalize_vehicle_type(raw: Any, default: str = "汽車") -> str:
     cleaned = str(raw) if raw is not None else ""
-    if "機車" in cleaned:
+    low = cleaned.lower()
+    # 後端 vehicle_type 值仍是中文 enum（機車/汽車）；中文優先比對。
+    # 防 LLM 漂移：英文 prompt 下若誤輸出英文車種，也對應回中文 enum（不改後端值、純兜底）。
+    if "機車" in cleaned or any(k in low for k in ("motorcycle", "motorbike", "scooter", "moped")):
         return "機車"
-    if "汽車" in cleaned:
+    if "汽車" in cleaned or any(k in low for k in ("car", "automobile", "sedan")):
         return "汽車"
     return "機車" if "機車" in default else "汽車"
 

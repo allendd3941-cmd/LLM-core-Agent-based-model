@@ -1,29 +1,29 @@
-請根據"環境資訊"與"agent旅行記憶"整理資料，與"agent profile資料"去生成各個 agent 的 decision-making 結果，且需要考量每個agents的個性、環境感受與旅行記憶去做決策。
+Based on the "environment information" and "agent travel memory", together with the "agent profile data", produce a decision-making result for each agent. Consider each agent's personality, environmental perception, and travel memory when deciding.
 
-action mode包含三種如下，請依據各個agent不同的性質、旅行記憶與環境資訊，將這三種mode去填入action mode值:
-"fast"                 // 想要快一點
-"tolerate_congestion"  // 繼續塞車也沒關係、不改道
-"avoid_congestion"     // 避開壅塞、改道繞行
+There are three action modes below. Based on each agent's nature, travel memory, and the environment information, fill in the action mode value with one of:
+"fast"                 // wants to go faster
+"tolerate_congestion"  // fine to stay in congestion, no detour
+"avoid_congestion"     // avoid congestion, reroute around it
 
-選擇 action mode 時，請特別參考環境資訊中的下列線索（結合該 agent 的性格傾向）：
-- `road_ahead`：若顯示前方有壅塞，傾向 "avoid_congestion"（除非該 agent 個性是塞車也無所謂，可選 "tolerate_congestion"）。
-- `traffic_here` / `speed_status`：腳下已壅塞或正在緩行，且前方仍塞，傾向避塞或（個性不愛繞路者）忍受。
-- `congestion_hotspots` / `congestion_trend`：若該 agent 目前所在或將經過的行政區是熱點、或全市壅塞惡化中，較適合 "avoid_congestion"。
-- 若前方順暢且整體壅塞輕微，依 agent 性格可選 "fast"（趕時間）或 "tolerate_congestion"（順順走）。
+When choosing the action mode, pay special attention to the following cues in the environment information (combined with the agent's personality):
+- `road_ahead`: if it shows congestion ahead, lean toward "avoid_congestion" (unless the agent's personality is fine with congestion, in which case "tolerate_congestion").
+- `traffic_here` / `speed_status`: already congested underfoot or crawling, and still jammed ahead → lean toward avoiding, or (for those who dislike detours) tolerating.
+- `congestion_hotspots` / `congestion_trend`: if the agent's current or upcoming district is a hotspot, or city-wide congestion is worsening, "avoid_congestion" fits better.
+- if the road ahead is clear and overall congestion is light, by personality choose "fast" (in a hurry) or "tolerate_congestion" (cruising).
 
-agent name為每個agent的名字，請根據"agent profile資料"的name值去對應生成，不許有漏掉。
-vehicle_type根據"agent profile資料"的"vehicle_ownership"值去對應生成，不許有漏掉，且只能有"機車"或"汽車"兩種值。
-reason為該agent選擇此action mode的原因，請用繁體中文10~20字精簡說明（結合其性格、旅行記憶與環境資訊，例如:「前方壅塞且趕時間，改走避塞路線」，或是「個性重視安全，所以壅塞也不改道」等等，不限於此）。
-decision-making 結果輸出必須完全符合以下結構，除此結構內容外，禁止產生其餘文字內容：
+agent name is each agent's name; generate it from the "name" value in the "agent profile data", do not omit any.
+vehicle_type is generated from the "vehicle_ownership" value in the "agent profile data"; do not omit any, and it can only be one of two values: "機車" or "汽車".
+reason is why the agent chose this action mode; explain concisely in English (about 10–20 words), combining personality, travel memory, and environment (e.g. "Congested ahead and in a hurry, so taking a detour", or "Safety-minded, so no rerouting even when congested" — not limited to these).
+The decision-making output must match the structure below exactly; do not produce any text other than this structure:
 {
   "agents": [
     {
-      "agent name": "王大偉",
+      "agent name": "David Wang",
       "action mode": "fast",
       "vehicle_type":"機車",
-      "reason": "路況順暢且趕時間，想快點抵達"
+      "reason": "Roads are clear and in a hurry, wants to arrive quickly"
     }
   ]
 }
 
-環境資訊如下:
+Environment information:

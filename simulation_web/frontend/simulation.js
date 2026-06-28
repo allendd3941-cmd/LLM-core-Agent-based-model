@@ -443,7 +443,7 @@ const TrafficUI = (() => {
     const rows = [
       ["ID", a.agent_id],
       [T("姓名"), a.profile_name || "—"],
-      [T("車種"), a.vehicle_type],
+      [T("車種"), T(a.vehicle_type)],
       [T("行為模式"), a.action_mode],
       [T("狀態"), actionLabel(a)],
       [T("起點區"), a.origin_town],
@@ -478,7 +478,7 @@ const TrafficUI = (() => {
     const tr = p.traits || {};
     const idRows = [
       [T("年齡"), id.age], [T("職業"), id.occupation], [T("個人收入"), id.wage],
-      [T("家戶收入"), id.household_income], [T("交通工具"), id.vehicle_ownership],
+      [T("家戶收入"), id.household_income], [T("交通工具"), T(id.vehicle_ownership)],
       [T("居住地"), id.residential_location],
     ].filter(([, v]) => v);
     const first = (x) => Array.isArray(x) ? (x[0] || "") : (x || "");
@@ -521,7 +521,7 @@ const TrafficUI = (() => {
         + rag.map((r, i) =>
             `<div class="rag-chip" data-i="${i}" title="Click to view the full segment">`
             + (r.via || []).map((v) =>
-                `<span class="rag-tag rag-${RAG_TAG_CLASS[v] || "task"}">${escapeHtml(v)}</span>`).join("")
+                `<span class="rag-tag rag-${RAG_TAG_CLASS[v] || "task"}">${escapeHtml(T(v))}</span>`).join("")
             + `<span class="rag-src">${escapeHtml(r.source || "?")} #${r.idx}</span>`
             + `<span class="rag-preview">${escapeHtml(String(r.chunk || "").slice(0, 40))}…</span>`
             + `</div>`).join("")

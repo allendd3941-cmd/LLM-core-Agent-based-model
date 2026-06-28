@@ -54,16 +54,16 @@
   function handleStatus(message) {
     const m = String(message || "");
     let level = "info";
-    if (/失敗|錯誤/.test(m)) level = "error";
-    else if (/無法|逾時/.test(m)) level = "warn";
-    else if (/完成|已套用|已切換|已重設|已設定|初始化完成|設為/.test(m)) level = "success";
+    if (/fail|error/i.test(m)) level = "error";
+    else if (/cannot|unable|timeout/i.test(m)) level = "warn";
+    else if (/complete|applied|switched|\bset\b/i.test(m)) level = "success";
     TrafficUI.log(level, m);
 
-    if (/暫停/.test(m)) { TrafficUI.setRunState("paused"); endBusy(); }
-    else if (/完成/.test(m)) { TrafficUI.setRunState("done"); endBusy(); }
-    else if (/重設/.test(m)) { TrafficUI.setRunState("idle"); endBusy(); }
-    else if (/開始執行/.test(m)) { TrafficUI.setRunState("running", 0); }
-    else if (/無法/.test(m)) { endBusy(); }
+    if (/paused/i.test(m)) { TrafficUI.setRunState("paused"); endBusy(); }
+    else if (/\bcomplete/i.test(m)) { TrafficUI.setRunState("done"); endBusy(); }
+    else if (/reset/i.test(m)) { TrafficUI.setRunState("idle"); endBusy(); }
+    else if (/started|running/i.test(m)) { TrafficUI.setRunState("running", 0); }
+    else if (/cannot|unable/i.test(m)) { endBusy(); }
   }
 
   function connect() {

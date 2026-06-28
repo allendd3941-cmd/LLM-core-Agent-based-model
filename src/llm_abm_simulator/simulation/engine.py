@@ -640,11 +640,11 @@ class SimulationEngine:
     def declare_egress(self) -> str:
         """宣告散場開始（操作者驅動）：已抵達/停留的事件車將在視窗內依 profile 陸續離場回家。"""
         if self._egress_declared_cycle is not None:
-            return "散場已宣告，車輛陸續離場中。"
+            return "Egress already declared; vehicles are leaving."
         self._egress_declared_cycle = self.scheduler.cycle
         dwell = sum(1 for a in self._event_agents() if a.phase == "dwell")
         logger.info("宣告散場 @ cycle %d：%d 台停留中車輛將陸續離場", self.scheduler.cycle, dwell)
-        return f"已宣告散場（第 {self.scheduler.cycle} 步）：{dwell} 台已抵達車將陸續離場返家。"
+        return f"Egress declared (step {self.scheduler.cycle}): {dwell} arrived vehicles will head home."
 
     def _handle_egress(self, cycle: int) -> None:
         """散場排程 + 啟動：宣告後，停留中的事件車在視窗內依 profile 錯開離場、改往家、重算路徑。"""
@@ -707,7 +707,7 @@ class SimulationEngine:
         for i, (origin, dest) in enumerate(pairs):
             a = VehicleAgent.from_config(f"ambient_{i + 1:04d}", self.cfg)
             a.role = "ambient"
-            a.profile_name = f"背景車{i + 1:04d}"
+            a.profile_name = f"Background {i + 1:04d}"
             a.origin_town = origin
             a.destination_town = dest
             a.apply_vehicle_type(self.rng.choice(config.VEHICLE_TYPES))
@@ -1384,13 +1384,13 @@ class SimulationEngine:
         """全市平均壅塞 vs 上一步 → 改善中 / 持平 / 惡化中。"""
         prev = self._prev_avg_congestion
         if prev is None:
-            return "持平"
+            return "steady"
         delta = current_avg - prev
         if delta > 0.02:
-            return "惡化中"
+            return "worsening"
         if delta < -0.02:
-            return "改善中"
-        return "持平"
+            return "improving"
+        return "steady"
 
     def _congestion_hotspots(self) -> list[dict[str, Any]]:
         """行政區級壅塞熱點（top-K）。
@@ -2020,7 +2020,7 @@ class SimulationEngine:
         if action == "avoid_area":
             t = self._town_by_name(town)
             if t is None or t.centroid_metric is None:
-                return f"找不到區域「{town}」，未套用。"
+                return f"District \"{town}\" not found; not applied."
             self._avoid_circles.append((t.centroid_metric.x, t.centroid_metric.y, 2500.0))
             rerouted = 0
             for a in self.agents:
@@ -2030,7 +2030,7 @@ class SimulationEngine:
                         a.current_path, a.path_index, a.edge_progress = p, 0, 0.0
                         rerouted += 1
             logger.info("介入：避開 %s，%d 台重算路徑", town, rerouted)
-            return f"已設定避開「{town}」一帶，{rerouted} 台車重新規劃路線。"
+            return f"Now avoiding \"{town}\"; {rerouted} vehicles rerouted."
         if action == "demand_surge":
             n = max(1, min(int(count or 0), 1000))
             base = len(self.agents)
@@ -2043,20 +2043,20 @@ class SimulationEngine:
                 new.append(ag)
             self.agents.extend(new)
             logger.info("介入：新增 %d 台車（來自 %s）", n, town or "各區")
-            return f"已新增 {n} 台車{('（來自' + town + '）') if town else ''}，加入模擬。"
-        return f"未識別的介入動作：{action}"
+            return f"Added {n} vehicles{(' (from ' + town + ')') if town else ''} to the simulation."
+        return f"Unrecognized intervention: {action}"
 
     def clear_interventions(self) -> str:
         """清除所有避讓區並讓移動中的車重新規劃（新增的車不移除）。"""
         if not self._avoid_circles:
-            return "目前沒有作用中的避讓區。"
+            return "No active avoid-zones."
         self._avoid_circles = []
         for a in self.agents:
             if a.route_status == RouteStatus.MOVING and a.current_node and a.destination_node:
                 p = self._route(a.current_node, a.destination_node, a.routing_strategy())
                 if len(p) > 1:
                     a.current_path, a.path_index, a.edge_progress = p, 0, 0.0
-        return "已清除避讓區，車輛恢復正常規劃。"
+        return "Avoid-zones cleared; vehicles back to normal routing."
 
     def snapshot_now(self) -> SimulationState:
         """不前進、直接產生當前狀態快照（介入後即時更新前端用）。"""
@@ -2096,16 +2096,16 @@ class SimulationEngine:
         event = self._event_agents()
         _, status = metrics.distributions(event)
         hotspots = env.get("congestion_hotspots") or []
-        hs = "、".join(f"{h['town']}（{h['level']}，{h['crowded_roads']}條壅塞）" for h in hotspots) or "無"
+        hs = ", ".join(f"{h['town']} ({h['level']}, {h['crowded_roads']} congested)" for h in hotspots) or "none"
         waiting = sum(1 for a in event if a.waiting_at_signal)
         return "\n".join([
-            f"模擬時間：第 {cyc} 步（約 {cyc * self.cfg.step_minutes} 分）",
-            f"事件車 {len(event)}：已抵達 {status.get('arrived', 0)}，移動中 {status.get('moving', 0)}",
-            f"背景常態車流：{self._ambient_count} 台（規則式核心，造成路網基礎負載）",
-            f"整體交通（含背景車）：{env.get('overall_traffic') or '未知'}；壅塞趨勢：{env.get('congestion_trend')}",
-            f"壅塞熱點：{hs}",
-            f"目前事件車等紅燈：{waiting} 車",
-            f"事件目的地：{self._dest_town}（{scenarios.active().name}）",
+            f"Sim time: step {cyc} (~{cyc * self.cfg.step_minutes} min)",
+            f"Event vehicles {len(event)}: arrived {status.get('arrived', 0)}, moving {status.get('moving', 0)}",
+            f"Background traffic: {self._ambient_count} (rule-based core; base network load)",
+            f"Overall traffic (incl. background): {env.get('overall_traffic') or 'unknown'}; congestion trend: {env.get('congestion_trend')}",
+            f"Congestion hotspots: {hs}",
+            f"Event vehicles at red lights: {waiting}",
+            f"Event destination: {self._dest_town} ({scenarios.active().name})",
         ])
 
     def build_analysis(self) -> dict[str, Any]:

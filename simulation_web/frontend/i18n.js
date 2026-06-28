@@ -162,6 +162,9 @@
     "總車流量": "Total volume",
     "汽車": "Car",
     "機車": "Motorcycle",
+    "路況": "Traffic",
+    "任務": "Task",
+    "人格": "Persona",
     "事件車": "Event",
     "監測器流量隨時間（每步通過數）": "Detector Volume over Time (passes per step)",
     "⑤ 匯出 GIS 圖層（給交通局 QGIS/ArcGIS 分析）":

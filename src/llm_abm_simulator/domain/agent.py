@@ -20,9 +20,9 @@ from .events import RouteStatus
 # 旅次記憶的「質性標籤」設計常數（與 prompt 語意綁定，不從 TOML 調整；
 # 調整的是 MemoryConfig 的數值門檻）。詳見 docs/MEMORY_zh-TW.md。
 # ---------------------------------------------------------------------------
-FEEL_SMOOTH = "順暢"
-FEEL_NORMAL = "普通"
-FEEL_CONGESTED = "壅塞"
+FEEL_SMOOTH = "smooth"
+FEEL_NORMAL = "normal"
+FEEL_CONGESTED = "congested"
 
 MOVED_FORWARD = "前進中"
 MOVED_SLOW = "緩慢"
@@ -34,9 +34,9 @@ SMOOTH_ROUGH = "不順"
 
 # trip_summary 句型：整趟順暢度 → 一句敘述
 _SMOOTHNESS_PHRASE = {
-    SMOOTH_GOOD: "一路大致順暢",
-    SMOOTH_MID: "整趟走走停停",
-    SMOOTH_ROUGH: "整趟偏壅塞",
+    SMOOTH_GOOD: "mostly smooth",
+    SMOOTH_MID: "stop-and-go throughout",
+    SMOOTH_ROUGH: "congested for most of the trip",
 }
 
 # 環境感知標籤（送 LLM 的當下環境；與 prompt 語意綁定，門檻在 PerceptionContextConfig）
@@ -480,15 +480,15 @@ class VehicleAgent:
         closer: bool, arrived: bool, cfg: MemoryConfig,
     ) -> str:
         """以累積器確定性拼出一段繁體中文旅次摘要（方式 A：模板生成）。"""
-        parts = [f"從{self.origin_town or '出發地'}出發前往{self.destination_town or '目的地'}"]
+        parts = [f"From {self.origin_town or 'origin'} to {self.destination_town or 'destination'}"]
         parts.append(_SMOOTHNESS_PHRASE[_smoothness_label(avg_proxy, cfg)])
         if self._congested_spots:
-            parts.append("曾在" + "、".join(self._congested_spots) + "一帶遇到壅塞")
+            parts.append("hit congestion around " + ", ".join(self._congested_spots))
         if self._mode_switch_count > 0:
-            parts.append(f"中途換了 {self._mode_switch_count} 次策略，目前採「{self.action_mode}」")
+            parts.append(f"switched strategy {self._mode_switch_count} time(s), now using \"{self.action_mode}\"")
         if arrived:
-            parts.append("目前已抵達目的地")
+            parts.append("now arrived at the destination")
         else:
-            parts.append("正在接近目的地" if closer else "目前進度較緩")
-        parts.append(f"已行進約 {elapsed_steps * step_minutes} 分鐘")
-        return "；".join(parts) + "。"
+            parts.append("approaching the destination" if closer else "progress is slow")
+        parts.append(f"traveled ~{elapsed_steps * step_minutes} min")
+        return "; ".join(parts) + "."

@@ -24,35 +24,66 @@ SRC = ROOT / "output" / "agent_profile_output_1.txt"
 OUT_PDF = ROOT / "output" / "agent_profile_stats.pdf"
 OUT_PNG = ROOT / "output" / "agent_profile_stats.png"
 
-# --- 年齡排序（中文歲數 → 數值）---
-AGE_ORDER = {"十八歲左右": 18, "二十歲左右": 20, "二十五歲左右": 25, "三十歲左右": 30,
-             "三十五歲左右": 35, "四十歲左右": 40, "五十歲左右": 50, "六十歲左右": 60}
+import re
 
+# vehicle_ownership 仍是中文 enum（後端刻意保留），故維持中→英顯示。
 VEHICLE_EN = {"汽車": "Car", "機車": "Motorcycle"}
 
-# --- 30 職業 → 6 sector ---
-OCC_SECTOR = {
-    "國中生": "Student", "高中生": "Student", "研究生": "Student", "大學生": "Student",
-    "票務員": "Service", "球場工讀": "Service", "保全": "Service", "餐飲員": "Service",
-    "便利店員": "Service", "店長": "Service", "停車引導員": "Service", "清潔員": "Service", "攤商": "Service",
-    "護理師": "Professional", "公司主管": "Professional", "教師": "Professional", "業務員": "Professional",
-    "工程師": "Professional", "上班族": "Professional", "公務員": "Professional",
-    "自由業": "Gig/Freelance", "外送員": "Gig/Freelance", "司機": "Gig/Freelance",
-    "親友接送者": "Other/Resident", "退休族": "Other/Resident", "家長": "Other/Resident",
-    "通勤族": "Other/Resident", "附近居民": "Other/Resident",
-    "球迷會長": "Other/Resident", "賽事志工": "Other/Resident",   # 球迷·志工 併入 Other/Resident
-}
+# ⚠ persona 改英文後,職業/收入/年齡是自由英文片語(LLM 產);改用「關鍵字/數字擷取」分類,
+#   並對未命中軟回退(不再 sys.exit 崩潰)。重跑後請對照實際 persona 微調關鍵字。
 SECTOR_ORDER = ["Student", "Service", "Professional", "Gig/Freelance", "Other/Resident"]
-
-# --- 13 收入 → 5 帶（萬 = ×10k TWD/月）---
-WAGE_BAND = {
-    "月薪三萬": "Low (≤3)", "打工三萬": "Low (≤3)", "打工兩萬": "Low (≤3)",
-    "家用五萬": "Mid (4–5)", "月薪四萬": "Mid (4–5)", "月薪五萬": "Mid (4–5)",
-    "月薪七萬": "High (6–8)", "月薪八萬": "High (6–8)", "月薪六萬": "High (6–8)",
-    "收入不穩": "Unstable", "獎金較多": "Unstable", "無固定收入": "Unstable",
-    "退休金三萬": "Retired",
-}
 BAND_ORDER = ["Low (≤3)", "Mid (4–5)", "High (6–8)", "Unstable", "Retired"]
+_WORD_NUM = {"eighteen": 18, "nineteen": 19, "twenty": 20, "twenty-five": 25, "thirty": 30,
+             "thirty-five": 35, "forty": 40, "forty-five": 45, "fifty": 50, "sixty": 60,
+             "teens": 18, "twenties": 25, "thirties": 35, "forties": 45, "fifties": 55, "sixties": 60}
+
+
+def _first_int(s) -> int | None:
+    m = re.search(r"\d+", str(s))
+    return int(m.group()) if m else None
+
+
+def age_num(s) -> int:
+    n = _first_int(s)
+    if n is not None:
+        return n
+    ls = str(s).lower()
+    for w, v in _WORD_NUM.items():
+        if w in ls:
+            return v
+    return 30
+
+
+def occ_sector(s) -> str:
+    ls = str(s).lower()
+    if any(k in ls for k in ("student", "pupil", "schoolchild", "undergrad", "graduate")):
+        return "Student"
+    if any(k in ls for k in ("freelanc", "driver", "delivery", "courier", "gig", "rideshare")):
+        return "Gig/Freelance"
+    if any(k in ls for k in ("engineer", "manager", "teacher", "nurse", "officer", "office worker",
+                             "civil servant", "professional", "sales", "executive", "doctor", "accountant", "clerk")):
+        return "Professional"
+    if any(k in ls for k in ("cashier", "server", "waiter", "waitress", "security", "guard", "cleaner",
+                             "vendor", "retail", "barista", "attendant", "ticket", "staff", "shop", "service")):
+        return "Service"
+    return "Other/Resident"
+
+
+def wage_band(s) -> str:
+    ls = str(s).lower()
+    if "retir" in ls or "pension" in ls:
+        return "Retired"
+    if any(k in ls for k in ("unstable", "irregular", "no fixed", "variable", "bonus")):
+        return "Unstable"
+    n = _first_int(ls)
+    if n is not None:
+        wan = n / 10000.0 if n >= 1000 else (n / 10.0 if n >= 10 else float(n))  # 40000→4 / 40k→4 / 4→4
+        if wan <= 3:
+            return "Low (≤3)"
+        if wan <= 5:
+            return "Mid (4–5)"
+        return "High (6–8)"
+    return "Mid (4–5)"
 
 TRAIT_DIMS = ["attitudes", "habits", "decision_making_tendencies", "economic_preferences_and_tradeoffs"]
 
@@ -68,20 +99,15 @@ def main() -> None:
     def ident(f):
         return [a["identity"].get(f, "") for a in ags]
 
-    # 套用對照表（並驗證無漏項）
-    unmapped_occ = {o for o in ident("occupation") if o not in OCC_SECTOR}
-    unmapped_wage = {w for w in ident("wage") if w not in WAGE_BAND}
-    if unmapped_occ or unmapped_wage:
-        sys.exit(f"⚠ 未對照: occ={unmapped_occ} wage={unmapped_wage}（請補進 mapping）")
-
+    # 關鍵字/數字分類（軟回退；未命中歸 Other/Resident 或 fallback band，不崩潰）
     age_c = Counter(ident("age"))
     veh_c = Counter(VEHICLE_EN.get(v, v) for v in ident("vehicle_ownership"))
-    sec_c = Counter(OCC_SECTOR[o] for o in ident("occupation"))
-    band_c = Counter(WAGE_BAND[w] for w in ident("wage"))
+    sec_c = Counter(occ_sector(o) for o in ident("occupation"))
+    band_c = Counter(wage_band(w) for w in ident("wage"))
 
-    age_labels = sorted(age_c, key=lambda k: AGE_ORDER.get(k, 999))
+    age_labels = sorted(age_c, key=age_num)
     age_vals = [age_c[k] for k in age_labels]
-    age_ticks = [str(AGE_ORDER[k]) for k in age_labels]
+    age_ticks = [str(age_num(k)) for k in age_labels]
     veh_labels = ["Car", "Motorcycle"]
     veh_vals = [veh_c.get(k, 0) for k in veh_labels]
     sec_vals = [sec_c.get(k, 0) for k in SECTOR_ORDER]
