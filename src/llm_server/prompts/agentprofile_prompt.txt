@@ -8,7 +8,7 @@ Output rules:
 7. residential_location must be a real administrative district of Tainan City, e.g. "安平區".
 8. name must be an English full name, e.g. "Junchi Huang".
 9. In traits, attitudes / habits / decision_making_tendencies / economic_preferences_and_tradeoffs are each arrays; describe each item with an English phrase of about ten words or fewer.
-10. The value of "vehicle_ownership" can only be "機車" or "汽車".
+10. The value of "vehicle_ownership" can only be "motorcycle" or "car".
 
 Example output structure:
 
@@ -20,7 +20,7 @@ Example output structure:
         "age": "around twenty",
         "occupation": "university student",
         "wage": "about NT$40k/month from part-time work",
-        "vehicle_ownership": "機車",
+        "vehicle_ownership": "motorcycle",
         "residential_location": "安平區"
       },
       "traits": {

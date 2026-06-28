@@ -51,7 +51,7 @@ CRS_WGS84 = "EPSG:4326"
 #     任何路型篩選都會使替代邊 route_pref=0、車輛亂繞到不了（實測 prefer 幹道 1/60、avoid 小路 2/60），
 #     與 short_distance 同一道牆（UXsim 無路型/距離成本）。故移除，保留三個純參數可實現的模式。
 ACTION_MODES = ("fast", "tolerate_congestion", "avoid_congestion")
-VEHICLE_TYPES = ("汽車", "機車")
+VEHICLE_TYPES = ("car", "motorcycle")
 
 # 台南市 37 個行政區（mock profile 生成用；以 TOWN_MOI 實際載入為準，此處為 fallback）
 TAINAN_DISTRICTS = (
@@ -98,7 +98,7 @@ class SimulationConfig:
     town_mode: str = "node"                      # current_town 估法："node"（所在節點所屬區、O(1)）|"exact"（精確位置、O(車數×區數)）
 
     # === 預設移動偏好（GAML default_* action_mode）===
-    default_vehicle_type: str = "汽車"
+    default_vehicle_type: str = "car"
     default_desired_speed_kmh: float = 40.0
     default_speed_car_kmh: float = 45.0
     default_speed_moto_kmh: float = 35.0

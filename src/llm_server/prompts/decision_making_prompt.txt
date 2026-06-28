@@ -12,7 +12,7 @@ When choosing the action mode, pay special attention to the following cues in th
 - if the road ahead is clear and overall congestion is light, by personality choose "fast" (in a hurry) or "tolerate_congestion" (cruising).
 
 agent name is each agent's name; generate it from the "name" value in the "agent profile data", do not omit any.
-vehicle_type is generated from the "vehicle_ownership" value in the "agent profile data"; do not omit any, and it can only be one of two values: "機車" or "汽車".
+vehicle_type is generated from the "vehicle_ownership" value in the "agent profile data"; do not omit any, and it can only be one of two values: "motorcycle" or "car".
 reason is why the agent chose this action mode; explain concisely in English (about 10–20 words), combining personality, travel memory, and environment (e.g. "Congested ahead and in a hurry, so taking a detour", or "Safety-minded, so no rerouting even when congested" — not limited to these).
 The decision-making output must match the structure below exactly; do not produce any text other than this structure:
 {
@@ -20,7 +20,7 @@ The decision-making output must match the structure below exactly; do not produc
     {
       "agent name": "David Wang",
       "action mode": "fast",
-      "vehicle_type":"機車",
+      "vehicle_type":"motorcycle",
       "reason": "Roads are clear and in a hurry, wants to arrive quickly"
     }
   ]

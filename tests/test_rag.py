@@ -206,8 +206,8 @@ def test_profile_rag_context_injects_and_prompt_contains():
     rag_store.add_text("人口調查.csv", "台南市居民汽機車持有率高，通勤多以機車為主；族群以大學生與上班族居多。")
     ctx, prov = agent_profile.build_profile_rag_context()
     assert prov                                       # 有檢索到（共用同一 rag_store）
-    assert "參考人口/行為知識" in ctx and "持有率" in ctx   # rag_ctx 含 RAG 標頭 + 檢索到的內容
+    assert "Reference population/behavior knowledge" in ctx and "持有率" in ctx   # rag_ctx 含 RAG 標頭 + 檢索到的內容
     p = agent_profile.build_user_prompt(10, ctx)
-    assert "參考人口/行為知識" in p and "生成 10 個" in p   # prompt 注入了 RAG 段
+    assert "Reference population/behavior knowledge" in p and "Generate 10" in p   # prompt 注入了 RAG 段
     # 不傳 rag_ctx（降級/未檢索）時，prompt 不含 RAG 標頭（用標頭判據，不受 base prompt 內容影響）
-    assert "參考人口/行為知識" not in agent_profile.build_user_prompt(10)
+    assert "Reference population/behavior knowledge" not in agent_profile.build_user_prompt(10)

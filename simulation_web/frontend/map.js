@@ -468,9 +468,9 @@ const TrafficMap = (() => {
     if (lastAgents.length) updateAgents(lastAgents);
   }
 
-  // 事件車：乾淨彩色圓點。車種用大小區分（汽車大、機車小），狀態用顏色，細暗描邊提升對比。
+  // 事件車：乾淨彩色圓點。車種用大小區分（car 大、motorcycle 小），狀態用顏色，細暗描邊提升對比。
   function upsertAgentDot(a, ll, state) {
-    const radius = (a.vehicle_type === "機車" ? 4 : 6) + zoomBump();
+    const radius = (a.vehicle_type === "motorcycle" ? 4 : 6) + zoomBump();
     let m = agentMarkers[a.agent_id];
     if (!m) {
       m = L.circleMarker(ll, {

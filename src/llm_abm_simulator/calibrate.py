@@ -74,7 +74,7 @@ def measure(n_sample: int = 40, model: str | None = None) -> dict:
     else:
         logging.warning("persona 池不存在，persona 大小用預設估計（建議先生成池再校準）")
         personas_all = [{"identity": {"name": "範例", "age": "三十歲", "occupation": "上班族",
-                                      "vehicle_ownership": "汽車", "residential_location": "東區"},
+                                      "vehicle_ownership": "car", "residential_location": "東區"},
                          "traits": {"attitudes": ["願意遵守交通規則"], "habits": ["習慣提早出發"],
                                     "decision_making_tendencies": ["遇塞會找替代道路"],
                                     "economic_preferences_and_tradeoffs": ["願為省時付費"]}}] * len(agents)

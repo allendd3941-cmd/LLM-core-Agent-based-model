@@ -5,7 +5,7 @@ extract_vehicle_type_from_body / apply_*_response），並對齊既有 LLM pipel
 （見 output/decision_making_output_1.txt 與 prompts/decision_making_prompt.txt）：
 
     {"agents": [{"agent name": "...", "action mode": "fast",
-                 "residential_location": "東區", "vehicle_type": "機車"}]}
+                 "residential_location": "東區", "vehicle_type": "motorcycle"}]}
 
 注意：既有 simulation_web/backend/llm_bridge.py 找的是 ``action_mode`` / ``agent_id``，
 與真實輸出的 ``"action mode"`` / ``"agent name"`` 不符，因此解析不到 — 本檔修正此問題，
@@ -72,16 +72,16 @@ def normalize_town_name(raw: Any, available_towns: list[str], default: str) -> s
     return default
 
 
-def normalize_vehicle_type(raw: Any, default: str = "汽車") -> str:
+def normalize_vehicle_type(raw: Any, default: str = "car") -> str:
     cleaned = str(raw) if raw is not None else ""
     low = cleaned.lower()
-    # 後端 vehicle_type 值仍是中文 enum（機車/汽車）；中文優先比對。
-    # 防 LLM 漂移：英文 prompt 下若誤輸出英文車種，也對應回中文 enum（不改後端值、純兜底）。
+    # 後端 vehicle_type 值為英文 enum（car/motorcycle）。同時相容舊中文值（機車/汽車）與英文別名。
     if "機車" in cleaned or any(k in low for k in ("motorcycle", "motorbike", "scooter", "moped")):
-        return "機車"
+        return "motorcycle"
     if "汽車" in cleaned or any(k in low for k in ("car", "automobile", "sedan")):
-        return "汽車"
-    return "機車" if "機車" in default else "汽車"
+        return "car"
+    dlow = str(default).lower()
+    return "motorcycle" if ("機車" in str(default) or "motorcycle" in dlow) else "car"
 
 
 def _first_key(row: dict, keys: tuple[str, ...]) -> Any:

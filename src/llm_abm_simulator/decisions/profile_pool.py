@@ -196,10 +196,9 @@ def assign_to_agents(agents, pool_size: int,
         name = str(ident.get("name") or "").strip()
         a.profile_name = name or a.agent_id
         vt = str(ident.get("vehicle_ownership", ""))
-        if "機車" in vt:
-            a.vehicle_type = "機車"
-        elif "汽車" in vt:
-            a.vehicle_type = "汽車"
+        if vt.strip():
+            # 正規化為 car/motorcycle（相容英文 persona 與舊中文 機車/汽車）。
+            a.vehicle_type = response_parser.normalize_vehicle_type(vt, default=a.vehicle_type)
         # 由 persona 的 residential_location 指定出生點（不分事件觸發與否）。
         res = ident.get("residential_location")
         if towns and res is not None and str(res).strip():

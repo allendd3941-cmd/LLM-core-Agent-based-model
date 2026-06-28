@@ -41,7 +41,7 @@ DECISION_SCHEMA = {
                         "type": "string",
                         "enum": ["fast", "tolerate_congestion", "avoid_congestion"],
                     },
-                    "vehicle_type": {"type": "string", "enum": ["機車", "汽車"]},
+                    "vehicle_type": {"type": "string", "enum": ["motorcycle", "car"]},
                     "reason": {"type": "string"},
                 },
                 "required": ["agent name", "action mode", "vehicle_type", "reason"],
@@ -77,7 +77,7 @@ def run_decision_making(agent_profile_data, perception_data, output: bool= False
             provenance = rag_store.retrieve_multi(subqueries)
             chunks = [h["chunk"] for h in provenance]
         if chunks:
-            rag_ctx = "【參考知識（RAG，請在合理時納入考量）】\n" + "\n---\n".join(chunks) + "\n\n"
+            rag_ctx = "[Reference knowledge (RAG; take into account where reasonable)]\n" + "\n---\n".join(chunks) + "\n\n"
 
     # Option A 前綴快取：把「每步都相同」的全域路況放到最前面（system＋template＋全域路況＝共用前綴，
     # 整步所有批 byte 相同 → vLLM prefix cache 命中）；每批不同的 RAG 與各車狀況放後面。
@@ -87,7 +87,7 @@ def run_decision_making(agent_profile_data, perception_data, output: bool= False
     user_prompt = f'''{prompt_store.get("decision_making")} \n
     {global_block}\n
     {rag_ctx}{agents_block}\n
-    "agent profile資料"如下:\n
+    "agent profile data" is as follows:\n
     {agent_profile_data}
     '''
 

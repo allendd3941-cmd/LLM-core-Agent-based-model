@@ -26,10 +26,12 @@ def test_apply_action_mode_string():
 
 def test_apply_vehicle_type():
     a = VehicleAgent.from_config("v1", DEFAULT_CONFIG)
-    a.apply_vehicle_type("一輛機車")
-    assert a.vehicle_type == "機車"
-    a.apply_vehicle_type("")          # 空字串不變更
-    assert a.vehicle_type == "機車"
+    a.apply_vehicle_type("一輛機車")          # 中文輸入也正規化為英文 canonical
+    assert a.vehicle_type == "motorcycle"
+    a.apply_vehicle_type("")                   # 空字串不變更
+    assert a.vehicle_type == "motorcycle"
+    a.apply_vehicle_type("a family car")
+    assert a.vehicle_type == "car"
 
 
 def test_road_update_flow_congestion_and_weight():
@@ -38,7 +40,7 @@ def test_road_update_flow_congestion_and_weight():
     r.update_flow(10, capacity_fallback=10.0, flow_multiplier=2.0)
     assert r.congestion_proxy == 1.0                  # 10/10 截斷於 1
     assert r.weight == 200 * (1 + 10 * 2.0)           # 鏡像 GAML
-    assert r.speed_limit_for("機車") == 40
+    assert r.speed_limit_for("motorcycle") == 40
 
 
 def test_route_status_serializes_to_value():

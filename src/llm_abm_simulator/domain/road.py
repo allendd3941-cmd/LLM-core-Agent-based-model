@@ -74,7 +74,7 @@ class Road:
 
     def speed_limit_for(self, vehicle_type: str) -> float:
         """回傳該車種在此路段的速限（km/h）。對齊 GAML perceive_environment。"""
-        return self.speed_moto if vehicle_type == "機車" else self.speed_car
+        return self.speed_moto if vehicle_type == "motorcycle" else self.speed_car
 
     def to_payload(self) -> dict:
         """對齊 GAML build_road_payload，供 LLM / 除錯使用。"""

@@ -255,6 +255,8 @@ class SimulationEngine:
             agent.apply_vehicle_type(a.vehicle_type)
             if a.action_mode:
                 agent.apply_action_mode(a.action_mode)   # 套用 mode 的數值 + 路徑策略
+            if getattr(a, "reason", ""):
+                agent.decision_reason = a.reason         # 初始決策理由(前端 inspector 一開始就有)
             agent.api_status = "init_response_applied" if self.last_decision_source == "llm" else "rule"
 
         # LLM 模式（不分事件觸發）：persona 池為「出生地 / name / 車種」的單一真實來源，
@@ -1678,8 +1680,8 @@ class SimulationEngine:
 
     @staticmethod
     def _vehicle_leaf(agent: VehicleAgent) -> str:
-        """車輛分類葉節點鍵：c/m（汽車/機車）× e/a（事件/背景）。"""
-        return ("m" if agent.vehicle_type == "機車" else "c") + ("a" if agent.role == "ambient" else "e")
+        """車輛分類葉節點鍵：c/m（car/motorcycle）× e/a（事件/背景）。"""
+        return ("m" if agent.vehicle_type == "motorcycle" else "c") + ("a" if agent.role == "ambient" else "e")
 
     def _update_detectors(self, cycle: int) -> None:
         """每步：回放每台車本步「實際走過的邊」累積全路網流量 + 監測器計數。

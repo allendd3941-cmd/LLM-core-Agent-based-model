@@ -23,6 +23,13 @@ _NAME_POOL = (
     "廖宗瑋", "趙美珍", "周志豪", "高淑惠", "沈彥廷", "邱雅琳",
 )
 
+# 初始 action_mode 的說明(出場時尚無路況→以「初始計畫」陳述);之後每步/壅塞重決會覆寫成實際理由。
+_INIT_REASON = {
+    "fast": "Starting out: aiming to reach the destination quickly.",
+    "avoid_congestion": "Starting out: planning to route around congestion.",
+    "tolerate_congestion": "Starting out: will keep the route and tolerate some congestion.",
+}
+
 
 class MockDecisionPolicy:
     """規則式（rule-based）決策來源。"""
@@ -42,12 +49,18 @@ class MockDecisionPolicy:
         towns = available_towns or [self.cfg.default_origin_town]
         result: dict[str, InitAssignment] = {}
         for agent in agents:
+            # 維持原 RNG 抽取順序(name→town→vehicle→mode),確保 seed 可重現/golden 指紋不變;reason 不耗 RNG。
+            profile_name = _NAME_POOL[self.rng.randrange(len(_NAME_POOL))]
+            origin_town = towns[self.rng.randrange(len(towns))]
+            vehicle_type = self.rng.choice(VEHICLE_TYPES)
+            mode = self.rng.choice(ACTION_MODES)
             result[agent.agent_id] = InitAssignment(
                 agent_id=agent.agent_id,
-                profile_name=_NAME_POOL[self.rng.randrange(len(_NAME_POOL))],
-                origin_town=towns[self.rng.randrange(len(towns))],
-                vehicle_type=self.rng.choice(VEHICLE_TYPES),
-                action_mode=self.rng.choice(ACTION_MODES),
+                profile_name=profile_name,
+                origin_town=origin_town,
+                vehicle_type=vehicle_type,
+                action_mode=mode,
+                reason=_INIT_REASON.get(mode, ""),
             )
         return result
 
@@ -69,7 +82,7 @@ class MockDecisionPolicy:
                 mode, reason = "tolerate_congestion", "Moderate traffic; staying the course"
             elif distance < 2000:
                 mode, reason = "fast", "Close to destination; heading straight there"
-            elif agent.vehicle_type == "汽車":
+            elif agent.vehicle_type == "car":
                 mode, reason = "fast", "Clear roads; want to arrive quickly"
             else:
                 mode, reason = "tolerate_congestion", "Riding straight through, no detour"

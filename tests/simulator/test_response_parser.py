@@ -18,7 +18,7 @@ def test_real_llm_decision_output():
     assert r["profile_name"] == "林志安"
     assert r["action_mode"] == "short_distance"   # 空格 key 也要解析到
     assert r["origin_town"] == "佳里區"
-    assert r["vehicle_type"] == "機車"
+    assert r["vehicle_type"] == "motorcycle"   # 中文輸入也正規化為英文 canonical
 
 
 def test_underscore_and_chinese_keys_with_fence():
@@ -31,7 +31,7 @@ def test_underscore_and_chinese_keys_with_fence():
     assert rows[0]["agent_id"] == "v1"
     assert rows[0]["action_mode"] == "avoid_congestion"
     assert rows[0]["origin_town"] == "安南區"
-    assert rows[0]["vehicle_type"] == "汽車"
+    assert rows[0]["vehicle_type"] == "car"
 
 
 def test_action_mode_as_map():
@@ -53,9 +53,12 @@ def test_decisions_list_key():
 
 
 def test_vehicle_type_normalization():
-    assert rp.normalize_vehicle_type("一輛機車") == "機車"
-    assert rp.normalize_vehicle_type("家用汽車") == "汽車"
-    assert rp.normalize_vehicle_type("unknown", default="汽車") == "汽車"
+    # canonical 為英文 car/motorcycle；同時相容舊中文輸入與英文別名
+    assert rp.normalize_vehicle_type("一輛機車") == "motorcycle"
+    assert rp.normalize_vehicle_type("家用汽車") == "car"
+    assert rp.normalize_vehicle_type("a scooter") == "motorcycle"
+    assert rp.normalize_vehicle_type("sedan") == "car"
+    assert rp.normalize_vehicle_type("unknown", default="car") == "car"
 
 
 def test_unparseable_returns_empty():

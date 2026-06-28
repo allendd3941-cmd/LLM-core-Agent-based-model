@@ -477,7 +477,7 @@ const TrafficUI = (() => {
 
     const reason = a.decision_reason
       ? `<div class="inspect-block"><span>${T("決策理由（選此行為模式的原因）")}</span><p>${escapeHtml(a.decision_reason)}</p></div>`
-      : "";
+      : `<div class="inspect-block"><span>${T("決策理由（選此行為模式的原因）")}</span><p class="muted">${T("尚無決策理由。")}</p></div>`;
 
     const summary = a.trip_summary
       ? `<div class="inspect-block"><span>${T("旅次摘要")}</span><p>${escapeHtml(a.trip_summary)}</p></div>`

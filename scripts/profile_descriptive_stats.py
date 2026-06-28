@@ -26,8 +26,8 @@ OUT_PNG = ROOT / "output" / "agent_profile_stats.png"
 
 import re
 
-# vehicle_ownership 仍是中文 enum（後端刻意保留），故維持中→英顯示。
-VEHICLE_EN = {"汽車": "Car", "機車": "Motorcycle"}
+# vehicle_ownership canonical 為英文 car/motorcycle；同時相容舊中文池（汽車/機車）。
+VEHICLE_EN = {"car": "Car", "motorcycle": "Motorcycle", "汽車": "Car", "機車": "Motorcycle"}
 
 # ⚠ persona 改英文後,職業/收入/年齡是自由英文片語(LLM 產);改用「關鍵字/數字擷取」分類,
 #   並對未命中軟回退(不再 sys.exit 崩潰)。重跑後請對照實際 persona 微調關鍵字。

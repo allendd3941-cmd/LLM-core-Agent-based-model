@@ -134,7 +134,7 @@ class VehicleAgent:
     # === 旅程起訖（GAML: origin_town / destination_town / vehicle_type）===
     origin_town: str = ""
     destination_town: str = ""
-    vehicle_type: str = "汽車"
+    vehicle_type: str = "car"
 
     # === action_mode（GAML: mode_name + 一組移動偏好權重）===
     action_mode: str = "fast"
@@ -311,13 +311,14 @@ class VehicleAgent:
         self.route_randomness = prof.route_randomness
 
     def apply_vehicle_type(self, requested: str) -> None:
-        """套用車種；只允許「汽車」/「機車」（鏡像 GAML normalize_vehicle_type）。"""
+        """套用車種；正規化為 "car"/"motorcycle"。相容英文輸入與舊中文值（機車/汽車）。"""
         if not requested:
             return
-        if "機車" in requested:
-            self.vehicle_type = "機車"
-        elif "汽車" in requested:
-            self.vehicle_type = "汽車"
+        low = requested.lower()
+        if "機車" in requested or any(k in low for k in ("motorcycle", "motorbike", "scooter", "moped")):
+            self.vehicle_type = "motorcycle"
+        elif "汽車" in requested or any(k in low for k in ("car", "automobile", "sedan")):
+            self.vehicle_type = "car"
 
     # ------------------------------------------------------------------
     # 權重輸出（給 routing 用）

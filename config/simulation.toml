@@ -40,7 +40,7 @@ town_mode = "node"                      # current_town 估法：node（所在節
 # ----- 預設移動偏好（每個 agent 的初始 action_mode 權重）-----
 # 註：time/distance/comfort/capacity 為路徑規劃權重，數值相對大小決定取向。
 [movement]
-default_vehicle_type = "汽車"            # "汽車" 或 "機車"
+default_vehicle_type = "car"            # "car" or "motorcycle"
 default_desired_speed_kmh = 40.0        # agent 期望速度
 default_speed_car_kmh = 45.0            # 汽車偏好速度
 default_speed_moto_kmh = 35.0           # 機車偏好速度

@@ -24,6 +24,7 @@ class InitAssignment:
     origin_town: str = ""
     vehicle_type: str = ""
     action_mode: str = ""
+    reason: str = ""        # 選此初始 action_mode 的原因（前端 inspector 顯示）
 
 
 @dataclass

@@ -21,7 +21,8 @@ prompt_store.register_default("agent_profile", USER_PROMPT)
 
 def build_user_prompt(agent_count: int, rag_ctx: str = "") -> str:
     return (
-        f"請生成 {agent_count} 個用於「台南市亞太棒球場球賽進出場尖峰人潮短期交通衝擊評估」的交通模擬 agents。\n\n"
+        f"Generate {agent_count} traffic-simulation agents for assessing the short-term traffic impact "
+        f"of peak arrival/departure crowds at baseball games at Tainan Asia-Pacific Baseball Stadium.\n\n"
         + rag_ctx   # RAG 參考知識（有上傳語料且啟用時才有；見 build_profile_rag_context）
         + prompt_store.get("agent_profile")   # 前端可即時覆寫；未覆寫＝預設
     )
@@ -49,7 +50,7 @@ def build_profile_rag_context() -> tuple[str, list]:
         chunks = [h["chunk"] for h in provenance]
     rag_ctx = ""
     if chunks:
-        rag_ctx = "【參考人口/行為知識（RAG，請據此生成貼近真實的人物）】\n" + "\n---\n".join(chunks) + "\n\n"
+        rag_ctx = "[Reference population/behavior knowledge (RAG; use it to make the personas realistic)]\n" + "\n---\n".join(chunks) + "\n\n"
     return rag_ctx, provenance
 
 
