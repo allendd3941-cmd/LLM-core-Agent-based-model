@@ -211,7 +211,8 @@ const TrafficUI = (() => {
     $("util-body").innerHTML =
       `<p class="hint">${T("上傳純文字 / markdown / csv，decision 時會檢索相關內容注入。")}</p>`
       + `<label class="lg-toggle"><input type="checkbox" id="rag-enabled"> ${T("啟用 RAG")}</label>`
-      + `<div style="margin:8px 0"><input type="file" id="rag-file" accept=".txt,.md,.csv,.json" /> `
+      + `<div style="margin:8px 0"><label class="file-pick"><span class="seg-btn"><i class="ti ti-upload" aria-hidden="true"></i> Choose file</span>`
+      + `<input type="file" id="rag-file" accept=".txt,.md,.csv,.json" hidden /><span class="file-name hint">No file chosen</span></label> `
       + `<button class="seg-btn" id="rag-add">${T("加入")}</button></div>`
       + `<div id="rag-stat" class="hint"></div>`
       + `<button class="seg-btn" id="rag-clear" style="margin-top:6px">${T("清空知識庫")}</button>`;
@@ -223,6 +224,8 @@ const TrafficUI = (() => {
         + (s.sources.map((x) => `${x.name}(${x.chunks})`).join(", ") || "none");
     };
     await refresh();
+    const rf = $("rag-file");
+    rf.onchange = () => { rf.closest(".file-pick").querySelector(".file-name").textContent = rf.files[0] ? rf.files[0].name : "No file chosen"; };
     $("rag-enabled").onchange = async () => { await postJson("/api/rag/toggle", { enabled: $("rag-enabled").checked }); refresh(); };
     $("rag-add").onclick = async () => {
       const f = $("rag-file").files[0]; if (!f) return;
@@ -241,10 +244,11 @@ const TrafficUI = (() => {
       + `<div class="prompt-field"><label>${T("縣市篩選（如 高雄）")}</label><input id="up-county" type="text" placeholder="optional · OSM county name(s)" /></div>`
       + `<div class="prompt-field"><label>${T("目的地 lat / lng / 區名")}</label>`
       + `<input id="up-lat" type="text" placeholder="lat" /> <input id="up-lng" type="text" placeholder="lng" /> <input id="up-town" type="text" placeholder="${T("區名")}" /></div>`
-      + `<div class="prompt-field"><label>${T("路網 graphml")}</label><input id="up-graphml" type="file" accept=".graphml,.xml" /></div>`
-      + `<div class="prompt-field"><label>${T("人口 CSV（選填）")}</label><input id="up-pop" type="file" accept=".csv" /></div>`
+      + `<div class="prompt-field"><label>${T("路網 graphml")}</label><label class="file-pick"><span class="seg-btn"><i class="ti ti-upload" aria-hidden="true"></i> Choose file</span><input id="up-graphml" type="file" accept=".graphml,.xml" hidden /><span class="file-name hint">No file chosen</span></label></div>`
+      + `<div class="prompt-field"><label>${T("人口 CSV（選填）")}</label><label class="file-pick"><span class="seg-btn"><i class="ti ti-upload" aria-hidden="true"></i> Choose file</span><input id="up-pop" type="file" accept=".csv" hidden /><span class="file-name hint">No file chosen</span></label></div>`
       + `<button class="seg-btn" id="up-go">${T("上傳並註冊")}</button> <span id="up-stat" class="hint"></span>`;
     $("util-modal").style.display = "flex";
+    ["up-graphml", "up-pop"].forEach((id) => { const el = $(id); el.onchange = () => { el.closest(".file-pick").querySelector(".file-name").textContent = el.files[0] ? el.files[0].name : "No file chosen"; }; });
     $("up-go").onclick = doUpload;
   }
 

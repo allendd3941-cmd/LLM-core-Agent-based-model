@@ -55,17 +55,6 @@
   <main class="layout" id="layout">
     <!-- ── 左：控制面板 ── -->
     <aside class="panel panel-left">
-      <section class="card phase-card">
-        <h2><i class="ti ti-calendar-event" aria-hidden="true"></i> 活動階段</h2>
-        <div class="phase-flow">
-          <span class="phase-step active" id="phase-ingress"><i class="ti ti-building-stadium" aria-hidden="true"></i> 進場</span>
-          <i class="ti ti-arrow-right phase-arrow" aria-hidden="true"></i>
-          <span class="phase-step" id="phase-egress"><i class="ti ti-home" aria-hidden="true"></i> 散場</span>
-        </div>
-        <button id="btn-egress" class="btn btn-block btn-go"><i class="ti ti-door-exit" aria-hidden="true"></i> 宣告散場開始</button>
-        <p class="hint">比賽結束後宣告散場 → 車輛陸續離場返家。</p>
-      </section>
-
       <section class="card">
         <h2><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i> 模擬設定</h2>
 
@@ -75,29 +64,72 @@
         </label>
         <button id="btn-upload-scenario" class="btn btn-block"><i class="ti ti-upload" aria-hidden="true"></i> 上傳場景</button>
 
-        <label class="field">
-          <span class="field-head">事件車數量</span>
-          <input id="agents" type="number" inputmode="numeric" min="5" max="20000" step="5" value="10" />
-        </label>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-head">事件車數量</span>
+            <input id="agents" type="number" inputmode="numeric" min="5" max="20000" step="5" value="10" />
+          </label>
+          <label class="field">
+            <span class="field-head">背景常態車流</span>
+            <input id="ambient" type="number" inputmode="numeric" min="0" max="600" step="20" value="40" />
+          </label>
+        </div>
+        <p class="hint">常態背景車流（重力 OD）；0＝關閉。</p>
 
-        <label class="field">
-          <span class="field-head">背景常態車流</span>
-          <input id="ambient" type="number" inputmode="numeric" min="0" max="600" step="20" value="40" />
-          <p class="hint">常態背景車流（重力 OD）；0＝關閉。</p>
-        </label>
-
-        <label class="field">
-          <span class="field-head">週期數</span>
-          <input id="steps" type="number" inputmode="numeric" min="6" max="240" step="6" value="36" />
-        </label>
-
-        <label class="field">
-          <span>每週期分鐘</span>
-          <div class="select-wrap"><i class="ti ti-clock" aria-hidden="true"></i><select id="step-minutes"></select></div>
-        </label>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-head">週期數</span>
+            <input id="steps" type="number" inputmode="numeric" min="6" max="240" step="6" value="36" />
+          </label>
+          <label class="field">
+            <span>每週期分鐘</span>
+            <div class="select-wrap"><i class="ti ti-clock" aria-hidden="true"></i><select id="step-minutes"></select></div>
+          </label>
+        </div>
 
         <button id="btn-apply" class="btn btn-block"><i class="ti ti-check" aria-hidden="true"></i> 套用設定</button>
         <p class="hint">調整參數後套用（進行中需先重設）。</p>
+      </section>
+
+      <section class="card">
+        <h2><i class="ti ti-current-location" aria-hidden="true"></i> 車流監測器</h2>
+        <div class="det-dock">
+          <div id="det-pegman" class="det-pegman" draggable="true" title="按住拖曳到地圖的路上放開即放置">
+            <i class="ti ti-device-cctv" aria-hidden="true"></i>
+          </div>
+          <div class="det-dock-text">
+            <b id="detector-count">已放置 0 隻監測器</b>
+            <span class="hint">拖相機到地圖路上放開即放置（自動吸附最近道路）；放好後按「套用設定」生效。</span>
+          </div>
+        </div>
+        <button id="btn-detector-clear" class="btn btn-block"><i class="ti ti-trash" aria-hidden="true"></i> 清除全部監測器</button>
+      </section>
+
+      <section class="card">
+        <h2><i class="ti ti-brain" aria-hidden="true"></i> 決策核心</h2>
+        <div class="seg" role="group" aria-label="決策核心">
+          <button id="mode-mock" class="seg-btn" title="Rule-based core / paper baseline"><i class="ti ti-settings-2" aria-hidden="true"></i> 規則式</button>
+          <button id="mode-llm" class="seg-btn active"><i class="ti ti-sparkles" aria-hidden="true"></i> LLM</button>
+        </div>
+        <p class="hint" id="mode-hint">LLM：依人格與感知決策（預設）；規則式為 fallback／對照基線。</p>
+
+        <div class="llm-only">
+          <label class="field">
+            <span>LLM 模型 <em>（整套 LLM 共用）</em></span>
+            <div class="llm-pick">
+              <select id="llm-model"></select>
+            </div>
+            <p class="hint" id="llm-model-hint"></p>
+          </label>
+
+          <button id="btn-regen-profiles" class="btn btn-block"><i class="ti ti-users" aria-hidden="true"></i> 重新生成人物</button>
+          <p class="hint">重生 persona 原型池。</p>
+
+          <div class="btn-grid cols-2">
+            <button id="btn-edit-prompts" class="btn"><i class="ti ti-edit" aria-hidden="true"></i> Prompts</button>
+            <button id="btn-rag" class="btn"><i class="ti ti-file-upload" aria-hidden="true"></i> Upload Documents</button>
+          </div>
+        </div>
       </section>
 
       <section class="card">
@@ -152,53 +184,23 @@
       </section>
 
       <section class="card">
-        <h2><i class="ti ti-current-location" aria-hidden="true"></i> 車流監測器</h2>
-        <div class="det-dock">
-          <div id="det-pegman" class="det-pegman" draggable="true" title="按住拖曳到地圖的路上放開即放置">
-            <i class="ti ti-device-cctv" aria-hidden="true"></i>
-          </div>
-          <div class="det-dock-text">
-            <b id="detector-count">已放置 0 隻監測器</b>
-            <span class="hint">拖相機到地圖路上放開即放置（自動吸附最近道路）；放好後按「套用設定」生效。</span>
-          </div>
-        </div>
-        <button id="btn-detector-clear" class="btn btn-block"><i class="ti ti-trash" aria-hidden="true"></i> 清除全部監測器</button>
-      </section>
-
-      <section class="card">
-        <h2><i class="ti ti-brain" aria-hidden="true"></i> 決策核心</h2>
-        <div class="seg" role="group" aria-label="決策核心">
-          <button id="mode-mock" class="seg-btn" title="Rule-based core / paper baseline"><i class="ti ti-settings-2" aria-hidden="true"></i> 規則式</button>
-          <button id="mode-llm" class="seg-btn active"><i class="ti ti-sparkles" aria-hidden="true"></i> LLM</button>
-        </div>
-        <p class="hint" id="mode-hint">LLM：依人格與感知決策（預設）；規則式為 fallback／對照基線。</p>
-
-        <div class="llm-only">
-          <label class="field">
-            <span>LLM 模型 <em>（整套 LLM 共用）</em></span>
-            <div class="llm-pick">
-              <select id="llm-model"></select>
-            </div>
-            <p class="hint" id="llm-model-hint"></p>
-          </label>
-
-          <button id="btn-regen-profiles" class="btn btn-block"><i class="ti ti-users" aria-hidden="true"></i> 重新生成人物</button>
-          <p class="hint">重生 persona 原型池。</p>
-
-          <div class="btn-grid cols-2">
-            <button id="btn-edit-prompts" class="btn"><i class="ti ti-edit" aria-hidden="true"></i> Prompts</button>
-            <button id="btn-rag" class="btn"><i class="ti ti-books" aria-hidden="true"></i> RAG</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="card">
         <h2><i class="ti ti-stack-2" aria-hidden="true"></i> Layers</h2>
         <div class="layers-list">
           <label class="lg-toggle" title="放大到街區層級才會顯示號誌"><input id="toggle-signals" type="checkbox" checked /> <i class="ti ti-traffic-lights" aria-hidden="true"></i> 號誌</label>
           <label class="lg-toggle" title="顯示/隱藏背景常態車流"><input id="toggle-ambient" type="checkbox" checked /> <i class="ti ti-car-4wd" aria-hidden="true"></i> 背景車流</label>
           <label class="lg-toggle" title="顯示/隱藏球場抵達圈（事件車終點分散於此圈內的停車節點）"><input id="toggle-arrival-circle" type="checkbox" checked /> <span class="lg lg-arrival" aria-hidden="true"></span> 抵達圈</label>
         </div>
+      </section>
+
+      <section class="card phase-card">
+        <h2><i class="ti ti-calendar-event" aria-hidden="true"></i> 活動階段</h2>
+        <div class="phase-flow">
+          <span class="phase-step active" id="phase-ingress"><i class="ti ti-building-stadium" aria-hidden="true"></i> 進場</span>
+          <i class="ti ti-arrow-right phase-arrow" aria-hidden="true"></i>
+          <span class="phase-step" id="phase-egress"><i class="ti ti-home" aria-hidden="true"></i> 散場</span>
+        </div>
+        <button id="btn-egress" class="btn btn-block btn-go"><i class="ti ti-door-exit" aria-hidden="true"></i> 宣告散場開始</button>
+        <p class="hint">比賽結束後宣告散場 → 車輛陸續離場返家。</p>
       </section>
     </aside>
 

@@ -9,15 +9,15 @@ from __future__ import annotations
 
 VLLM_MODELS: list[dict] = [
     {"id": "Qwen/Qwen2.5-1.5B-Instruct", "label": "Qwen2.5-1.5B-Instruct",
-     "max_context": 32768, "params": "1.5B", "note": "最快、高並行"},
-    {"id": "Qwen/Qwen2.5-7B-Instruct", "label": "Qwen2.5-7B-Instruct（推薦）",
-     "max_context": 32768, "params": "7B", "note": "繁中+JSON 平衡最佳"},
+     "max_context": 32768, "params": "1.5B", "note": "fastest, high concurrency"},
+    {"id": "Qwen/Qwen2.5-7B-Instruct", "label": "Qwen2.5-7B-Instruct (recommended)",
+     "max_context": 32768, "params": "7B", "note": "best Chinese + JSON balance"},
     {"id": "Qwen/Qwen2.5-14B-Instruct", "label": "Qwen2.5-14B-Instruct",
-     "max_context": 32768, "params": "14B", "note": "品質更高，需較大 GPU"},
+     "max_context": 32768, "params": "14B", "note": "higher quality, needs a larger GPU"},
     {"id": "microsoft/Phi-3.5-mini-instruct", "label": "Phi-3.5-mini-instruct",
-     "max_context": 131072, "params": "3.8B", "note": "長 context、輕量"},
+     "max_context": 131072, "params": "3.8B", "note": "long context, lightweight"},
     {"id": "internlm/internlm2_5-7b-chat", "label": "internlm2.5-7b-chat",
-     "max_context": 32768, "params": "7B", "note": "中文強的 7B 替代"},
+     "max_context": 32768, "params": "7B", "note": "strong-Chinese 7B alternative"},
 ]
 
 # 專案夠用的 context 上限（不超過模型天花板）：避免 vLLM 開太大吃 VRAM、減少並行。

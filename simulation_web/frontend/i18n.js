@@ -311,7 +311,7 @@
       "no LLM decision log (deterministic; produces no LLM decisions).",
     "尚無決策（LLM 壅塞觸發時記錄，逐步累積）。":
       "No decisions yet (recorded when LLM congestion triggers; accumulates over time).",
-    "RAG 知識庫": "RAG Knowledge Base",
+    "RAG 知識庫": "Upload Documents",
     "上傳純文字 / markdown / csv，decision 時會檢索相關內容注入。":
       "Upload plain text / markdown / csv; relevant content is retrieved and injected at decision time.",
     "啟用 RAG": "Enable RAG",

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 _DEFAULTS: dict[str, str] = {}
 _OVERRIDES: dict[str, str] = {}
-_LABELS: dict[str, str] = {"agent_profile": "人物生成 Prompt", "decision_making": "決策 Prompt"}
+_LABELS: dict[str, str] = {"agent_profile": "Persona Generation Prompt", "decision_making": "Decision-making Prompt"}
 
 
 def register_default(name: str, text: str) -> None:
