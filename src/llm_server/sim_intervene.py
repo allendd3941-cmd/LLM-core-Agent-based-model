@@ -26,20 +26,25 @@ _SCHEMA = {
 }
 
 _SYSTEM = (
-    "你是交通模擬的『介入指令解析器』。把使用者的中文指令對應到受限動作集之一："
-    "avoid_area（避開某區）、demand_surge（某區湧入 count 台車）、none（無法對應）。"
-    "town 必須是提供的『可用行政區』之一；count 為整數。只輸出 JSON。"
+    "You are the intervention-command parser of a traffic simulation. Map the user's command "
+    "(English or Chinese) to one of the restricted actions: avoid_area (avoid a district), "
+    "demand_surge (send count vehicles into a district), or none (no match). "
+    "town must be one of the provided 'available districts' (return the exact district string from that list, "
+    "e.g. translate 'East District' to the matching '東區'); count is an integer. Output JSON only."
 )
 
 
 def _keyword_parse(text: str, towns: list[str]) -> dict:
     """LLM 不可用時的後備：關鍵字 + 區名比對。"""
     town = next((t for t in sorted(towns, key=len, reverse=True) if t and t in text), "")
+    low = text.lower()
     num = re.search(r"(\d+)", text)
     count = int(num.group(1)) if num else 0
-    if any(k in text for k in ("避", "封", "繞", "別走", "不要走")):
+    if any(k in text for k in ("避", "封", "繞", "別走", "不要走")) \
+            or any(k in low for k in ("avoid", "block", "stay away", "steer clear", "don't go", "do not go")):
         return {"action": "avoid_area", "town": town, "count": 0}
-    if any(k in text for k in ("湧入", "增加", "多", "湧進", "新增")) and (count or town):
+    if (any(k in text for k in ("湧入", "增加", "多", "湧進", "新增"))
+            or any(k in low for k in ("surge", "send", "add", "pour", "flood", "influx", "more vehicle"))) and (count or town):
         return {"action": "demand_surge", "town": town, "count": count or 100}
     return {"action": "none", "town": town, "count": count}
 
@@ -51,8 +56,8 @@ def run_intervene(text: str, available_towns: list[str]) -> dict:
     if parsed.get("action") == "none":
         try:
             from . import json_utils
-            prompt = (f"可用行政區：{available_towns}\n使用者指令：{text}\n"
-                      "請輸出對應動作 JSON（action/town/count）。")
+            prompt = (f"Available districts: {available_towns}\nUser command: {text}\n"
+                      "Output the corresponding action JSON (action/town/count).")
             raw = llm_client.generate(prompt, system=_SYSTEM, options={"seed": 42},
                                       think="low", fmt=_SCHEMA, label="intervene")
             llm_parsed = json_utils.loads_lenient(raw)

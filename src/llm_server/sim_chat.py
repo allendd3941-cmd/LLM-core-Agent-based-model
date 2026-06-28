@@ -9,16 +9,17 @@ from __future__ import annotations
 from . import llm_client
 
 SYSTEM_PROMPT = (
-    "你是交通模擬數位分身的助理。只根據使用者提供的『當前模擬狀態』，"
-    "用繁體中文簡潔回答問題，不杜撰未提供的數據；若狀態中沒有答案就明說。"
+    "You are the assistant of a traffic-simulation digital twin. Answer the user's question concisely "
+    "in English, based ONLY on the provided 'current simulation state'; do not invent data that was not "
+    "given; if the state does not contain the answer, say so plainly."
 )
 
 
 def run_sim_chat(state_text: str, question: str) -> str:
     prompt = (
-        f"【當前模擬狀態】\n{state_text}\n\n"
-        f"【使用者問題】\n{question}\n\n"
-        "請根據上述狀態回答："
+        f"[Current simulation state]\n{state_text}\n\n"
+        f"[User question]\n{question}\n\n"
+        "Answer based on the state above:"
     )
     return llm_client.generate(
         prompt, system=SYSTEM_PROMPT, options={"seed": 42}, think="low", label="sim_chat")

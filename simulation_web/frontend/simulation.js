@@ -738,10 +738,11 @@ const TrafficUI = (() => {
 
   // ===== 對話 / 介入 =====
   let chatMode = "ask";
-  // 注意：每組第 1 個元素是「送給後端/LLM 的問句」(保留中文,LLM 對中文較佳)、第 2 個是 UI 顯示的 chip 標籤(英文)。
+  // 每組:第 1 個=送給後端的問句/指令、第 2 個=UI 顯示 chip 標籤。
+  // ask 問句改英文(sim_chat 已改英文回覆);act 指令保留中文(介入解析靠中文區名+關鍵字,district 維持中文)。
   const CHIPS = {
-    ask: [["現在哪裡最塞？", "Where's most congested?"], ["目前抵達多少人？還有多少在路上？", "How many arrived?"],
-          ["整體交通狀況與趨勢如何？", "Overall status?"]],
+    ask: [["Where is it most congested right now?", "Where's most congested?"], ["How many have arrived, and how many are still on the road?", "How many arrived?"],
+          ["What's the overall traffic situation and trend?", "Overall status?"]],
     act: [["避開東區一帶", "Avoid East District"], ["從永康區湧入 300 台車", "300 from Yongkang"], ["避開北區", "Avoid North District"]],
   };
 
